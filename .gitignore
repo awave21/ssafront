@@ -8,3 +8,5 @@ dist
 .cursor/
 *.log
 .DS_Store
+coverage/
+.eslintcache
