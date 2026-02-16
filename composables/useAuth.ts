@@ -58,15 +58,52 @@ export type ApiError = {
   retry_after?: number
 }
 
-  // Функция для парсинга ошибок API
+const extractErrorPayload = (err: any): Record<string, unknown> => {
+  const data = err?.data || err?.response?._data || err?.response?.data
+  if (!data || typeof data !== 'object') {
+    return {}
+  }
+
+  const detail = (data as { detail?: unknown }).detail
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    return detail as Record<string, unknown>
+  }
+
+  return data as Record<string, unknown>
+}
+
+const extractRetryAfter = (payload: Record<string, unknown>, err: any): number | undefined => {
+  const retryAfterRaw = payload.retry_after
+
+  if (typeof retryAfterRaw === 'number' && Number.isFinite(retryAfterRaw)) {
+    return retryAfterRaw
+  }
+
+  if (typeof retryAfterRaw === 'string') {
+    const parsed = Number.parseInt(retryAfterRaw, 10)
+    if (Number.isFinite(parsed)) return parsed
+  }
+
+  const retryAfterHeader = err?.response?.headers?.get?.('retry-after')
+  if (typeof retryAfterHeader === 'string') {
+    const parsed = Number.parseInt(retryAfterHeader, 10)
+    if (Number.isFinite(parsed)) return parsed
+  }
+
+  return undefined
+}
+
+// Функция для парсинга ошибок API
 const parseApiError = (err: any): ApiError => {
   const status = err?.status || err?.statusCode || err?.response?.status || 0
-  const data = err?.data || err?.response?._data
+  const payload = extractErrorPayload(err)
 
   // Извлекаем код ошибки и детали из ответа
-  const errorCode = data?.error || ''
-  const details = data?.details
-  const retryAfter = data?.retry_after
+  const errorCode = typeof payload.error === 'string' ? payload.error : ''
+  const details = payload.details && typeof payload.details === 'object' && !Array.isArray(payload.details)
+    ? (payload.details as Record<string, string[]>)
+    : undefined
+  const retryAfter = extractRetryAfter(payload, err)
 
   // Определяем error code по статусу, если нет явного кода
   const resolvedCode = errorCode
@@ -422,7 +459,7 @@ export const useAuth = () => {
     _authInitPromise = null
     clearStoredAuthData()
     if (shouldRedirect && process.client) {
-      window.location.href = '/'
+      window.location.href = '/login'
     }
   }
 

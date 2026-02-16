@@ -13,7 +13,7 @@
           {{ tokenError }}
         </p>
         <NuxtLink
-          to="/"
+          to="/login"
           class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
         >
           Вернуться на главную
@@ -150,6 +150,10 @@ import { setStoredAccessToken } from '../../composables/authSessionManager'
 import { getReadableErrorMessage } from '~/utils/api-errors'
 
 // No auth middleware - this is a public page
+definePageMeta({
+  layout: false
+})
+
 const route = useRoute()
 const router = useRouter()
 const apiFetch = useApiFetch()

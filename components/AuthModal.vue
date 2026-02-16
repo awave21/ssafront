@@ -11,7 +11,7 @@
       <div
         v-if="isOpen"
         class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
-        @click="$emit('close')"
+        @click="handleOverlayClick"
       >
         <Transition
           enter-active-class="transition-all duration-300"
@@ -32,7 +32,8 @@
                   Вход в систему
                 </h2>
                 <button
-                  @click="$emit('close')"
+                  v-if="!props.disableClose"
+                  @click="requestClose"
                   class="p-2 text-slate-400 hover:text-slate-600 transition-colors"
                 >
                   <X class="h-5 w-5" />
@@ -258,9 +259,12 @@ import { useToast } from '../composables/useToast'
 
 interface Props {
   isOpen: boolean
+  disableClose?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  disableClose: false
+})
 const emit = defineEmits<{
   close: []
   authenticated: []
@@ -290,6 +294,17 @@ const registerForm = ref({
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 const showLoginPassword = ref(false)
+
+const requestClose = () => {
+  if (props.disableClose) {
+    return
+  }
+  emit('close')
+}
+
+const handleOverlayClick = () => {
+  requestClose()
+}
 
 
 // Обработчик регистрации
@@ -387,7 +402,7 @@ const handleUserLogin = async () => {
       } else {
         // Показываем toast с ошибкой
         if (apiError.error === 'invalid_credentials') {
-          showError('Ошибка входа', 'Неверный email или пароль')
+          showError('Ошибка входа', 'Неверный логин или пароль')
         } else if (apiError.error === 'account_inactive') {
           showError('Ошибка входа', 'Аккаунт неактивен')
         } else if (apiError.error === 'rate_limit_exceeded') {

@@ -34,7 +34,7 @@ const HTTP_STATUS_MESSAGES: Record<number, string> = {
 
 const API_ERROR_MESSAGES: Record<string, string> = {
   // Auth
-  invalid_credentials: 'Неверный email или пароль.',
+  invalid_credentials: 'Неверный логин или пароль.',
   account_inactive: 'Аккаунт деактивирован. Обратитесь к администратору.',
   tenant_inactive: 'Организация деактивирована. Обратитесь к администратору.',
   email_exists: 'Пользователь с таким email уже существует.',
@@ -81,6 +81,8 @@ const RAW_MESSAGE_OVERRIDES: Array<[RegExp, string]> = [
   [/fetch failed/i, 'Ошибка сети. Проверьте подключение к интернету.'],
   [/failed to fetch/i, 'Ошибка сети. Проверьте подключение к интернету.'],
   [/network\s*(error|request)/i, 'Ошибка сети. Проверьте подключение к интернету.'],
+  [/invalid credentials/i, 'Неверный логин или пароль.'],
+  [/invalid (email|username|login) or password/i, 'Неверный логин или пароль.'],
   [/timeout/i, 'Превышено время ожидания. Попробуйте позже.'],
   [/aborted/i, 'Запрос был отменён. Попробуйте снова.'],
   [/econnrefused/i, 'Сервер недоступен. Попробуйте позже.'],
@@ -160,15 +162,27 @@ const extractHttpStatus = (err: any): number | null => {
   return typeof status === 'number' && status >= 100 ? status : null
 }
 
+const extractResponsePayload = (err: any): Record<string, unknown> | null => {
+  const data = err?.data || err?.response?._data || err?.response?.data
+  if (!data || typeof data !== 'object') return null
+
+  const detail = (data as { detail?: unknown }).detail
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    return detail as Record<string, unknown>
+  }
+
+  return data as Record<string, unknown>
+}
+
 /**
  * Извлекает код ошибки и сообщение из данных ответа.
  */
 const extractApiErrorData = (err: any): { code: string | null; message: string | null } => {
-  const data = err?.data || err?.response?._data || err?.response?.data
-  if (!data || typeof data !== 'object') return { code: null, message: null }
+  const payload = extractResponsePayload(err)
+  if (!payload) return { code: null, message: null }
 
-  const code = typeof data.error === 'string' ? data.error : null
-  const message = data.detail || data.message || null
+  const code = typeof payload.error === 'string' ? payload.error : null
+  const message = payload.message ?? payload.detail ?? null
 
   return { code, message: typeof message === 'string' ? message : null }
 }
@@ -230,6 +244,7 @@ export const getErrorTitle = (err: any, defaultTitle = 'Ошибка'): string =
 
   if (code === 'rate_limit_exceeded' || httpStatus === 429) return 'Превышен лимит запросов'
   if (code === 'forbidden' || code === 'insufficient_permissions' || httpStatus === 403) return 'Доступ запрещён'
+  if (code === 'invalid_credentials') return 'Ошибка входа'
   if (httpStatus === 401) return 'Сессия истекла'
   if (httpStatus === 404) return 'Не найдено'
   if (httpStatus === 409) return 'Конфликт данных'

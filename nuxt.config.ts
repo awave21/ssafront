@@ -46,6 +46,7 @@ export default defineNuxtConfig({
 
   app: {
     head: {
+      title: "ChatMedBot",
       htmlAttrs: {
         lang: "ru",
       },
@@ -54,7 +55,7 @@ export default defineNuxtConfig({
         { name: "viewport", content: "width=device-width, initial-scale=1" },
         {
           name: "description",
-          content: "Agents App - AI Integration Platform",
+          content: "Умные ИИ-агенты для вашей клиники. Автоматизируйте рутинные задачи, улучшите качество диагностики и освободите врачей для работы с пациентами.",
         },
       ],
       link: [

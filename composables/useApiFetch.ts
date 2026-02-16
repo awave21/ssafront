@@ -30,17 +30,21 @@ const getResponseErrorCode = (response: any): string | null => {
   const responseData = response?._data
   if (!responseData || typeof responseData !== 'object') return null
 
-  const errorCode = (responseData as { error?: unknown }).error
+  const detail = (responseData as { detail?: unknown }).detail
+  const normalizedData = detail && typeof detail === 'object' && !Array.isArray(detail)
+    ? (detail as { error?: unknown })
+    : (responseData as { error?: unknown })
+  const errorCode = normalizedData.error
   return typeof errorCode === 'string' && errorCode.length > 0 ? errorCode : null
 }
 
 const redirectToLogin = () => {
   clearStoredAuthData()
   if (navigateTo) {
-    navigateTo('/', { replace: true })
+    navigateTo('/login', { replace: true })
     return
   }
-  window.location.href = '/'
+  window.location.href = '/login'
 }
 
 export const useApiFetch = () => {
@@ -52,9 +56,9 @@ export const useApiFetch = () => {
     initAuthActivityTracking()
     try {
       // @ts-ignore - Nuxt 3 auto-imports
-      navigateTo = useNuxtApp().$router?.push || (() => window.location.href = '/')
+      navigateTo = useNuxtApp().$router?.push || (() => window.location.href = '/login')
     } catch {
-      navigateTo = () => window.location.href = '/'
+      navigateTo = () => window.location.href = '/login'
     }
   }
 

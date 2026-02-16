@@ -164,6 +164,7 @@ import {
   Activity,
   Users,
   Key,
+  Shield,
   Settings,
   X,
   LogOut,
@@ -253,6 +254,11 @@ const menuItems = [
     name: 'Пациенты',
     path: '/patients',
     icon: Users
+  },
+  {
+    name: 'Учётные данные',
+    path: '/credentials',
+    icon: Shield
   },
   {
     name: 'API Ключи',

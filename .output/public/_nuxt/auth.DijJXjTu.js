@@ -1,0 +1,1 @@
+import{c2 as a,c3 as c,Z as n}from"./entry.HGKHoPJE.js";import{e as u,c as i,i as f,g as d}from"./authSessionManager.Ce_G8Hc5.js";const p=a(async o=>{let e,t;if(o.path!=="/"){const s=d();if(s&&!f(s))return;const r=([e,t]=c(()=>u({forceRefresh:!0})),e=await e,t(),e);if(r.token)return;if(r.shouldLogout)return i(),n("/")}});export{p as default};

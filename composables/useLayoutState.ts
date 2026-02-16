@@ -9,6 +9,16 @@ export const useLayoutState = () => {
   const breadcrumbTitle = useState<string>('breadcrumb-title', () => '')
   const breadcrumbAgentName = useState<string>('breadcrumb-agent-name', () => '')
 
+  // Functions page actions and state (for TopBar buttons)
+  const functionsRunAction = useState<(() => void) | null>('functions-run-action', () => null)
+  const functionsDeleteAction = useState<(() => void) | null>('functions-delete-action', () => null)
+  const functionsToggleStatusAction = useState<((isActive: boolean) => void) | null>('functions-toggle-status-action', () => null)
+  const functionsSaveAction = useState<(() => void) | null>('functions-save-action', () => null)
+  const functionsDuplicateAction = useState<(() => void) | null>('functions-duplicate-action', () => null)
+  const functionsSelectedFunction = useState<any | null>('functions-selected-function', () => null)
+  const functionsTesting = useState<boolean>('functions-testing', () => false)
+  const functionsCanSave = useState<boolean>('functions-can-save', () => false)
+
   const toggleSidebar = () => {
     isCollapsed.value = !isCollapsed.value
     if (import.meta.client) {
@@ -26,5 +36,20 @@ export const useLayoutState = () => {
     }
   }
 
-  return { isCollapsed, toggleSidebar, initSidebarState, pageTitle, breadcrumbTitle, breadcrumbAgentName }
+  return { 
+    isCollapsed, 
+    toggleSidebar, 
+    initSidebarState, 
+    pageTitle, 
+    breadcrumbTitle, 
+    breadcrumbAgentName, 
+    functionsRunAction,
+    functionsDeleteAction,
+    functionsToggleStatusAction,
+    functionsSaveAction,
+    functionsDuplicateAction,
+    functionsSelectedFunction,
+    functionsTesting,
+    functionsCanSave
+  }
 }

@@ -1,14 +1,27 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
-import { Menu, Check, Loader2 } from 'lucide-vue-next'
+import { Menu, Check, Loader2, Play, Trash2, Copy } from 'lucide-vue-next'
 import { navigateTo } from '#app'
 import DashboardSidebar from '~/components/DashboardSidebar.vue'
 import DashboardTopBar from '~/components/DashboardTopBar.vue'
+import Switch from '~/components/ui/switch/Switch.vue'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import { usePermissions } from '~/composables/usePermissions'
 
-const { initSidebarState, breadcrumbTitle, breadcrumbAgentName } = useLayoutState()
+const { 
+  initSidebarState, 
+  breadcrumbTitle, 
+  breadcrumbAgentName, 
+  functionsRunAction,
+  functionsDeleteAction,
+  functionsDuplicateAction,
+  functionsToggleStatusAction,
+  functionsSaveAction,
+  functionsSelectedFunction,
+  functionsTesting,
+  functionsCanSave
+} = useLayoutState()
 const store = useAgentEditorStore()
 const { isPromptFullscreen, isSaving } = storeToRefs(store)
 const { canEditAgents } = usePermissions()
@@ -85,7 +98,54 @@ onMounted(() => {
           </template>
         </template>
         <template #right>
-          <template v-if="canEditAgents && breadcrumbTitle">
+          <!-- Functions page: show Run, Save, Delete, Status toggle -->
+          <template v-if="functionsRunAction">
+            <button
+              @click="functionsRunAction"
+              :disabled="functionsTesting || !functionsSelectedFunction"
+              class="px-4 py-1.5 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+            >
+              <Play class="h-3.5 w-3.5" />
+              {{ functionsTesting ? 'Выполняется...' : 'Запустить' }}
+            </button>
+            <button
+              v-if="functionsSaveAction"
+              @click="functionsSaveAction"
+              :disabled="!functionsCanSave"
+              class="p-1.5 rounded-md transition-colors"
+              :class="functionsCanSave ? 'text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50' : 'text-slate-300 cursor-not-allowed'"
+              title="Сохранить"
+            >
+              <Check class="h-4 w-4" />
+            </button>
+            <button
+              v-if="functionsDuplicateAction && functionsSelectedFunction"
+              @click="functionsDuplicateAction"
+              class="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition-colors"
+              title="Дублировать функцию"
+            >
+              <Copy class="h-4 w-4" />
+            </button>
+            <button
+              v-if="functionsDeleteAction && functionsSelectedFunction"
+              @click="functionsDeleteAction"
+              class="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+              title="Удалить функцию"
+            >
+              <Trash2 class="h-4 w-4" />
+            </button>
+            <div v-if="functionsToggleStatusAction && functionsSelectedFunction" class="flex items-center gap-2 ml-2">
+              <span class="text-xs font-medium text-muted-foreground">
+                {{ functionsSelectedFunction.status === 'active' ? 'Активна' : 'Неактивна' }}
+              </span>
+              <Switch 
+                :model-value="functionsSelectedFunction.status === 'active'" 
+                @update:model-value="functionsToggleStatusAction" 
+              />
+            </div>
+          </template>
+          <!-- Other pages: show Save/Cancel -->
+          <template v-else-if="canEditAgents && breadcrumbTitle && !functionsRunAction">
             <button
               @click="handleCancel"
               class="px-4 py-1.5 text-sm text-muted-foreground font-medium hover:text-foreground transition-colors"

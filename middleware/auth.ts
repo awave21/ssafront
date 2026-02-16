@@ -6,8 +6,13 @@ import {
 } from '../composables/authSessionManager'
 
 export default defineNuxtRouteMiddleware(async (to) => {
-  // Пропускаем middleware для главной страницы
-  if (to.path === '/') {
+  const publicPaths = new Set(['/login', '/'])
+  const publicPrefixes = ['/invite/accept']
+  const isPublicRoute =
+    publicPaths.has(to.path) ||
+    publicPrefixes.some((prefix) => to.path.startsWith(prefix))
+
+  if (isPublicRoute) {
     return
   }
 
@@ -24,11 +29,9 @@ export default defineNuxtRouteMiddleware(async (to) => {
       return
     }
 
-    if (ensuredToken.shouldLogout) {
-      clearStoredAuthData()
-      return navigateTo('/')
-    }
-
-    // На временных ошибках refresh не роняем сессию мгновенно.
+    // Для защищенных страниц работаем в fail-closed режиме:
+    // если валидный токен не получен, показываем только /login.
+    clearStoredAuthData()
+    return navigateTo('/login')
   }
 })
