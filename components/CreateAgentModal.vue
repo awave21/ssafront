@@ -68,6 +68,37 @@
                   />
                 </div>
 
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    @click="creationMode = 'manual'"
+                    class="rounded-lg border px-3 py-2 text-left text-sm transition-colors"
+                    :class="creationMode === 'manual' ? 'border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-slate-300 bg-white text-slate-700'"
+                  >
+                    Сохранить как введено
+                  </button>
+                  <button
+                    type="button"
+                    @click="creationMode = 'enhanced'"
+                    class="rounded-lg border px-3 py-2 text-left text-sm transition-colors"
+                    :class="creationMode === 'enhanced' ? 'border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-slate-300 bg-white text-slate-700'"
+                  >
+                    Улучшить через обучение
+                  </button>
+                </div>
+
+                <div
+                  v-if="isSubmitting && creationMode === 'enhanced'"
+                  class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2"
+                >
+                  <p class="text-sm font-medium text-indigo-900">
+                    {{ progressStepLabel }}
+                  </p>
+                  <p class="text-xs text-indigo-700 mt-0.5">
+                    Обычно 10-20 секунд. Прошло: {{ elapsedSeconds }} сек.
+                  </p>
+                </div>
+
                 <!-- Модель -->
                 <div>
                   <label class="block text-sm font-medium text-slate-700 mb-2">
@@ -150,11 +181,11 @@
                   </button>
                   <button
                     type="submit"
-                    :disabled="isLoading"
+                    :disabled="isBusy"
                     class="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                   >
-                    <Loader2 v-if="isLoading" class="h-4 w-4 animate-spin" />
-                    {{ isLoading ? 'Создание...' : 'Создать агента' }}
+                    <Loader2 v-if="isBusy" class="h-4 w-4 animate-spin" />
+                    {{ submitButtonLabel }}
                   </button>
                 </div>
               </form>
@@ -167,10 +198,12 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { X, Loader2 } from 'lucide-vue-next'
 import { useAgents } from '../composables/useAgents'
 import { useActiveModels } from '../composables/useActiveModels'
+import { useToast } from '~/composables/useToast'
+import { useAgentPromptEnhancement, type PromptEnhancementStep } from '~/composables/useAgentPromptEnhancement'
 
 interface Props {
   isOpen: boolean
@@ -183,6 +216,7 @@ const emit = defineEmits<{
 }>()
 
 const { createAgent, isLoading } = useAgents()
+const { info: toastInfo, success: toastSuccess } = useToast()
 const {
   modelGroups,
   isLoading: isLoadingModels,
@@ -190,6 +224,50 @@ const {
   fetchActiveModels,
   getFirstModelValue
 } = useActiveModels()
+const { enhancePrompt } = useAgentPromptEnhancement()
+const creationMode = ref<'manual' | 'enhanced'>('manual')
+const isSubmitting = ref(false)
+const progressStepLabel = ref('Подготовка')
+const progressStepNumber = ref(1)
+const elapsedSeconds = ref(0)
+let elapsedTimer: ReturnType<typeof setInterval> | null = null
+
+const setProgressStep = (stepNumber: number, stepLabel: string) => {
+  progressStepNumber.value = stepNumber
+  progressStepLabel.value = stepLabel
+}
+
+const updateEnhancementStep = (step: PromptEnhancementStep) => {
+  const stepMap: Record<PromptEnhancementStep, { number: number; label: string }> = {
+    'create-session': { number: 2, label: 'Запускаем сессию обучения' },
+    'submit-feedback': { number: 3, label: 'Передаем исходный промпт' },
+    'generate-prompt': { number: 4, label: 'Генерируем улучшенный промпт' },
+    'apply-prompt': { number: 5, label: 'Применяем результат' },
+  }
+  const nextStep = stepMap[step]
+  setProgressStep(nextStep.number, nextStep.label)
+}
+
+const startElapsedTimer = () => {
+  elapsedSeconds.value = 0
+  if (elapsedTimer) clearInterval(elapsedTimer)
+  elapsedTimer = setInterval(() => {
+    elapsedSeconds.value += 1
+  }, 1000)
+}
+
+const stopElapsedTimer = () => {
+  if (!elapsedTimer) return
+  clearInterval(elapsedTimer)
+  elapsedTimer = null
+}
+
+const isBusy = computed(() => isLoading.value || isSubmitting.value)
+const submitButtonLabel = computed(() => {
+  if (!isBusy.value) return 'Создать агента'
+  if (creationMode.value !== 'enhanced') return 'Создание...'
+  return 'Создаем и улучшаем...'
+})
 
 // Форма создания агента
 const form = reactive({
@@ -202,23 +280,51 @@ const form = reactive({
   }
 })
 
+const resetForm = () => {
+  form.name = ''
+  form.system_prompt = ''
+  form.model = ''
+  form.llm_params.temperature = 0.7
+  form.llm_params.max_tokens = 1000
+  creationMode.value = 'manual'
+  setProgressStep(1, 'Подготовка')
+  elapsedSeconds.value = 0
+}
+
 // Обработчик отправки формы
 const handleSubmit = async () => {
   try {
+    isSubmitting.value = true
+    setProgressStep(1, 'Создаем агента')
+    if (creationMode.value === 'enhanced') {
+      startElapsedTimer()
+    }
+
     const newAgent = await createAgent({
       ...form,
       status: 'draft' as const,
       version: 1
     })
 
-    emit('agentCreated', newAgent)
+    if (creationMode.value === 'enhanced') {
+      const enhancementResult = await enhancePrompt({
+        agentId: newAgent.id,
+        sourcePrompt: form.system_prompt,
+        onStepChange: updateEnhancementStep,
+      })
 
-    // Сброс формы
-    form.name = ''
-    form.system_prompt = ''
-    form.model = ''
-    form.llm_params.temperature = 0.7
-    form.llm_params.max_tokens = 1000
+      if (enhancementResult.ok) {
+        toastSuccess('Промпт улучшен', 'Системный промпт автоматически обновлен и применен')
+      } else {
+        toastInfo(
+          'Агент создан с исходным промптом',
+          'Улучшение не выполнено, вы можете запустить обучение на странице агента'
+        )
+      }
+    }
+
+    emit('agentCreated', newAgent)
+    resetForm()
 
     emit('close')
 
@@ -226,6 +332,9 @@ const handleSubmit = async () => {
     await navigateTo(`/agents/${newAgent.id}`)
   } catch (err) {
     console.error('Ошибка создания агента:', err)
+  } finally {
+    stopElapsedTimer()
+    isSubmitting.value = false
   }
 }
 
@@ -239,10 +348,10 @@ watch(() => props.isOpen, async (isOpen) => {
     return
   }
 
-  form.name = ''
-  form.system_prompt = ''
-  form.model = ''
-  form.llm_params.temperature = 0.7
-  form.llm_params.max_tokens = 1000
+  resetForm()
+})
+
+onBeforeUnmount(() => {
+  stopElapsedTimer()
 })
 </script>

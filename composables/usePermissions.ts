@@ -11,7 +11,9 @@ const ROLE_PERMISSIONS = {
     'dialogs:write',
     'dialogs:delete',
     'analytics:view',
-    'organization:manage'
+    'organization:manage',
+    'settings:read',
+    'settings:write'
   ],
   admin: [
     'agents:read',
@@ -21,7 +23,9 @@ const ROLE_PERMISSIONS = {
     'dialogs:write',
     'dialogs:delete',
     'analytics:view',
-    'organization:manage'
+    'organization:manage',
+    'settings:read',
+    'settings:write'
   ],
   manager: [
     'agents:read',
@@ -79,6 +83,8 @@ export const usePermissions = () => {
   const canViewAnalytics = computed(() => hasScope('analytics:view'))
   const canDeleteDialogs = computed(() => hasScope('dialogs:delete'))
   const canManageOrganization = computed(() => hasScope('organization:manage'))
+  const canReadSettings = computed(() => hasScope('settings:read'))
+  const canManageApiKeys = computed(() => hasScope('settings:write'))
 
   return {
     // Роли
@@ -100,6 +106,8 @@ export const usePermissions = () => {
     canViewAnalytics,
     canDeleteDialogs,
     canManageOrganization,
+    canReadSettings,
+    canManageApiKeys,
     
     // Для отладки
     rolePermissions

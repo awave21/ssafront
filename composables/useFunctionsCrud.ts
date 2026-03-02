@@ -137,6 +137,7 @@ export const useFunctionsCrud = (agentId: Ref<string>) => {
     if (!selectedFunction.value || !canSave.value) return
 
     try {
+      let shouldShowSuccess = true
       const isNew = selectedFunction.value.id?.startsWith('new_')
       const credentialId = selectedBindingCredentialId.value || null
 
@@ -179,6 +180,8 @@ export const useFunctionsCrud = (agentId: Ref<string>) => {
         unsavedChanges.value.delete(oldId!)
       } else {
         const toolId = selectedFunction.value.id!
+        const previousCredentialId = bindingCredentials.value[toolId] ?? null
+        const credentialChanged = previousCredentialId !== credentialId
         const response = await apiFetch<Tool>(`/tools/${toolId}`, { method: 'PUT', body: payload })
         const index = functions.value.findIndex(f => f.id === toolId)
         if (index !== -1) {
@@ -186,44 +189,41 @@ export const useFunctionsCrud = (agentId: Ref<string>) => {
           selectedFunction.value = response
         }
 
-        // Rebind: DELETE old binding, then POST new one
-        // If POST fails after DELETE, try to restore the old binding
-        let rebindSuccess = true
-        try {
-          await apiFetch(`/agents/${agentId.value}/tools/${toolId}`, { method: 'DELETE' })
+        // Tool update is already persisted. Credential rebind is optional and only needed on change.
+        unsavedChanges.value.delete(toolId)
+
+        if (credentialChanged) {
+          // Rebind: DELETE old binding, then POST new one.
+          // If POST fails after DELETE, try to restore previous binding.
           try {
-            await apiFetch(`/agents/${agentId.value}/tools/${toolId}`, {
-              method: 'POST',
-              body: { permission_scope: 'write', credential_id: credentialId }
-            })
-            bindingCredentials.value[toolId] = credentialId
-          } catch (postErr: any) {
-            // POST failed — try to restore old binding without credential change
-            console.error('Rebind POST failed, attempting rollback:', postErr)
+            await apiFetch(`/agents/${agentId.value}/tools/${toolId}`, { method: 'DELETE' })
             try {
-              const oldCredentialId = bindingCredentials.value[toolId] ?? null
               await apiFetch(`/agents/${agentId.value}/tools/${toolId}`, {
                 method: 'POST',
-                body: { permission_scope: 'write', credential_id: oldCredentialId }
+                body: { permission_scope: 'write', credential_id: credentialId }
               })
-            } catch (rollbackErr: any) {
-              console.error('Rollback also failed, tool may be unbound:', rollbackErr)
+              bindingCredentials.value[toolId] = credentialId
+            } catch (postErr: any) {
+              console.error('Rebind POST failed, attempting rollback:', postErr)
+              try {
+                await apiFetch(`/agents/${agentId.value}/tools/${toolId}`, {
+                  method: 'POST',
+                  body: { permission_scope: 'write', credential_id: previousCredentialId }
+                })
+              } catch (rollbackErr: any) {
+                console.error('Rollback also failed, tool may be unbound:', rollbackErr)
+              }
+              shouldShowSuccess = false
+              showStatus('error', 'Функция сохранена, но не удалось обновить привязку credential')
             }
-            rebindSuccess = false
-            showStatus('error', 'Инструмент сохранён, но не удалось обновить привязку credential')
+          } catch (deleteErr: any) {
+            console.error('Rebind DELETE failed (binding unchanged):', deleteErr)
+            shouldShowSuccess = false
+            showStatus('error', 'Функция сохранена, но не удалось обновить привязку credential')
           }
-        } catch (deleteErr: any) {
-          // DELETE failed — binding unchanged, which is fine
-          console.error('Rebind DELETE failed (binding unchanged):', deleteErr)
-          rebindSuccess = false
-          showStatus('error', 'Инструмент сохранён, но не удалось обновить привязку credential')
-        }
-
-        if (rebindSuccess) {
-          unsavedChanges.value.delete(toolId)
         }
       }
-      showStatus('success', 'Функция сохранена')
+      if (shouldShowSuccess) showStatus('success', 'Функция сохранена')
     } catch (e: any) {
       console.error('Failed to save function', e)
       showStatus('error', `Ошибка сохранения: ${getReadableErrorMessage(e, 'не удалось сохранить функцию')}`)

@@ -51,15 +51,15 @@ functionsDuplicateAction.value = () => {
 }
 
 // Watch for changes in panel state and sync to layout
-watch(() => functionsPanelRef.value?.selectedFunction, (val) => {
+watch(() => functionsPanelRef.value?.selectedFunctionRef || null, (val) => {
   functionsSelectedFunction.value = val
 }, { deep: true, immediate: true })
 
-watch(() => functionsPanelRef.value?.testing, (val) => {
+watch(() => functionsPanelRef.value?.testingRef ?? false, (val) => {
   functionsTesting.value = val || false
 }, { immediate: true })
 
-watch(() => functionsPanelRef.value?.canSave, (val) => {
+watch(() => functionsPanelRef.value?.canSaveRef ?? false, (val) => {
   functionsCanSave.value = val || false
 }, { immediate: true })
 

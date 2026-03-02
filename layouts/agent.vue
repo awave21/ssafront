@@ -8,11 +8,15 @@ import DashboardTopBar from '~/components/DashboardTopBar.vue'
 import Switch from '~/components/ui/switch/Switch.vue'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import { usePermissions } from '~/composables/usePermissions'
+import { useLayoutState } from '~/composables/useLayoutState'
 
-const { 
-  initSidebarState, 
-  breadcrumbTitle, 
-  breadcrumbAgentName, 
+const {
+  initSidebarState,
+  isCollapsed,
+  toggleSidebar,
+  breadcrumbTitle,
+  breadcrumbAgentName,
+  hideTopBarActions,
   functionsRunAction,
   functionsDeleteAction,
   functionsDuplicateAction,
@@ -42,8 +46,11 @@ onMounted(() => {
 
 <template>
   <div class="h-screen flex overflow-hidden bg-muted">
-    <!-- Sidebar скрывается в fullscreen режиме -->
-    <DashboardSidebar :class="isPromptFullscreen ? 'hidden' : 'hidden lg:flex'" />
+    <!-- Sidebar управляется состоянием сворачивания -->
+    <DashboardSidebar
+      v-if="!isPromptFullscreen"
+      :class="isCollapsed ? 'hidden lg:flex lg:w-16' : 'hidden lg:flex lg:w-64'"
+    />
     
     <!-- Mobile Sidebar Overlay -->
     <Teleport to="body">
@@ -83,13 +90,6 @@ onMounted(() => {
       <!-- TopBar скрывается в fullscreen режиме -->
       <DashboardTopBar v-if="!isPromptFullscreen">
         <template #left>
-          <!-- Кнопка мобильного меню (только на мобиле) -->
-          <button
-            class="lg:hidden p-2 -ml-2 rounded-lg text-foreground hover:bg-muted"
-            @click="isMobileSidebarOpen = true"
-          >
-            <Menu class="w-5 h-5" />
-          </button>
           <!-- Хлебные крошки агента -->
           <template v-if="breadcrumbTitle">
             <span class="text-sm text-muted-foreground font-normal">{{ breadcrumbTitle }}</span>
@@ -98,6 +98,13 @@ onMounted(() => {
           </template>
         </template>
         <template #right>
+          <!-- Кнопка мобильного меню (только на планшете/мобиле) -->
+          <button
+            class="lg:hidden p-2 rounded-lg text-foreground hover:bg-muted"
+            @click="isMobileSidebarOpen = true"
+          >
+            <Menu class="w-5 h-5" />
+          </button>
           <!-- Functions page: show Run, Save, Delete, Status toggle -->
           <template v-if="functionsRunAction">
             <button
@@ -144,8 +151,8 @@ onMounted(() => {
               />
             </div>
           </template>
-          <!-- Other pages: show Save/Cancel -->
-          <template v-else-if="canEditAgents && breadcrumbTitle && !functionsRunAction">
+          <!-- Other pages: show Save/Cancel (hidden for auto-saving pages) -->
+          <template v-else-if="canEditAgents && breadcrumbTitle && !functionsRunAction && !hideTopBarActions">
             <button
               @click="handleCancel"
               class="px-4 py-1.5 text-sm text-muted-foreground font-medium hover:text-foreground transition-colors"

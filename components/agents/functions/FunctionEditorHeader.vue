@@ -3,7 +3,7 @@
     <Input
       :model-value="displayName"
       @update:model-value="$emit('update:displayName', $event)"
-      placeholder="Название функции (напр: Создать пациента, Get patients)"
+      placeholder="Название функции (наприем get_.../create...)"
       class="text-xl font-semibold border-none outline-none bg-transparent p-0 h-auto focus-visible:ring-0 focus-visible:ring-offset-0"
     />
     

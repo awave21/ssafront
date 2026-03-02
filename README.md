@@ -1,4 +1,4 @@
-# ChatMedBot Frontend
+# AI Agent Management Frontend
 
 Nuxt 3 frontend для платформы управления ИИ-агентами: создание агентов, настройка системных промптов, функции, интеграции, ключи API, обучение промпта, рабочие разделы команды и базовые бизнес-экраны (dashboard, billing, analytics).
 

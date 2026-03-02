@@ -1,5 +1,9 @@
 <template>
-  <div class="flex flex-col h-full bg-white overflow-hidden">
+  <div
+    ref="editorRootRef"
+    class="flex flex-col h-full bg-white overflow-hidden"
+    @focusout="onEditorFocusOut"
+  >
     <div class="flex flex-1 min-h-0 overflow-hidden">
       <!-- Sidebar -->
       <FunctionsList
@@ -258,7 +262,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, toRef } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, toRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Plus, Server, BrainCircuit, Code, X, Check, Terminal, ChevronLeft, ChevronRight
@@ -332,11 +336,38 @@ const {
 
 // ── Parameters composable ──
 let isSelecting = false
-const autoSave = () => {
+const isAutoSaving = ref(false)
+const pendingAutoSave = ref(false)
+
+const hasUnsavedForSelected = () => {
+  const id = selectedFunction.value?.id
+  if (!id) return false
+  return unsavedChanges.value.has(id)
+}
+
+const runAutoSave = async () => {
   if (isSelecting) return
-  if (!selectedFunction.value?.id) return
-  if (selectedFunction.value.id.startsWith('new_')) return
-  saveFunction()
+  if (!hasUnsavedForSelected()) return
+  if (!canSave.value) return
+  if (isAutoSaving.value) {
+    pendingAutoSave.value = true
+    return
+  }
+
+  isAutoSaving.value = true
+  try {
+    await saveFunction()
+  } finally {
+    isAutoSaving.value = false
+    if (pendingAutoSave.value) {
+      pendingAutoSave.value = false
+      await runAutoSave()
+    }
+  }
+}
+
+const autoSave = () => {
+  void runAutoSave()
 }
 
 const params = useFunctionParameters(
@@ -462,8 +493,27 @@ const onUpdateVariable = (index: number, field: 'name' | 'value' | 'description'
   onVariableInput()
 }
 
+const editorRootRef = ref<HTMLElement | null>(null)
+
+const onEditorFocusOut = (event: FocusEvent) => {
+  const root = editorRootRef.value
+  if (!root) return
+  const source = event.target as Node | null
+  if (!source || !root.contains(source)) return
+  void runAutoSave()
+}
+
+const onWindowBlur = () => { void runAutoSave() }
+const onVisibilityChange = () => {
+  if (document.visibilityState === 'hidden') void runAutoSave()
+}
+
 // ── Select function (orchestrator) ──
-const selectFunction = (func: Tool) => {
+const selectFunction = async (func: Tool) => {
+  if (selectedFunction.value?.id && selectedFunction.value.id !== func.id) {
+    await runAutoSave()
+  }
+
   isSelecting = true
   selectedFunction.value = func
 
@@ -669,24 +719,36 @@ watch(bodyViewMode, (newMode, oldMode) => {
 
 // ── Init ──
 onMounted(async () => {
+  window.addEventListener('blur', onWindowBlur)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+
   await Promise.all([loadFunctions(), fetchCredentials()])
   // Restore selection from URL or select first
   if (functions.value.length > 0) {
     const idFromUrl = route.query.functionId as string | undefined
     const target = (idFromUrl && functions.value.find(f => f.id === idFromUrl)) || functions.value[0]
-    selectFunction(target)
+    await selectFunction(target)
   }
+
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('blur', onWindowBlur)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 
 // ── Expose to parent ──
 defineExpose({
   testTool,
   testing,
+  testingRef: testing,
   selectedFunction,
+  selectedFunctionRef: selectedFunction,
   deleteFunction,
   duplicateFunction,
   toggleFunctionStatus,
   canSave,
+  canSaveRef: canSave,
   saveFunction,
 })
 </script>

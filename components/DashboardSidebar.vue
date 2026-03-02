@@ -17,7 +17,7 @@
           v-show="!isCollapsed"
           class="text-foreground font-bold text-lg whitespace-nowrap truncate"
         >
-          {{ tenant?.name || 'Организация' }}
+          {{ tenant?.name || '' }}
         </span>
         <!-- Mobile close button -->
         <button
@@ -61,7 +61,7 @@
                 @click="emit('close')"
                 class="flex items-center text-sm font-medium rounded-md transition-colors"
                 :class="[
-                  $route.path === item.path
+                  isMenuItemActive(item.path)
                     ? 'bg-sidebar-primary text-sidebar-primary-foreground'
                     : 'text-sidebar-foreground hover:bg-muted',
                   isCollapsed ? 'w-10 h-10 justify-center' : 'px-3 py-2 gap-3'
@@ -162,8 +162,7 @@ import {
   Bot,
   MessageSquare,
   Activity,
-  Users,
-  Key,
+  CreditCard,
   Shield,
   Settings,
   X,
@@ -175,6 +174,8 @@ import {
   Database,
   Cpu,
   Code,
+  KeyRound,
+  GraduationCap,
   ChevronsUpDown
 } from 'lucide-vue-next'
 import {
@@ -191,6 +192,8 @@ import {
   DropdownMenuSeparator,
 } from 'radix-vue'
 import { useAuth } from '../composables/useAuth'
+import { usePermissions } from '~/composables/usePermissions'
+import { useLayoutState } from '~/composables/useLayoutState'
 
 // Auth composable
 const { user, tenant, logout } = useAuth()
@@ -199,6 +202,7 @@ const router = useRouter()
 
 // Use shared layout state
 const { isCollapsed } = useLayoutState()
+const { hasScope } = usePermissions()
 
 const emit = defineEmits<{
   close: []
@@ -219,6 +223,12 @@ const getRoleDisplayName = (role: string): string => {
 const handleLogout = () => {
   logout()
   // Перенаправление происходит внутри logout()
+}
+
+const isMenuItemActive = (path: string) => {
+  if (route.path === path) return true
+  if (path !== '/' && route.path.startsWith(path + '/')) return true
+  return false
 }
 
 const isAgentDetail = computed(() => {
@@ -251,9 +261,9 @@ const menuItems = [
     icon: Activity
   },
   {
-    name: 'Пациенты',
-    path: '/patients',
-    icon: Users
+    name: 'Платежи',
+    path: '/billing',
+    icon: CreditCard
   },
   {
     name: 'Учётные данные',
@@ -261,32 +271,34 @@ const menuItems = [
     icon: Shield
   },
   {
-    name: 'API Ключи',
-    path: '/api-keys',
-    icon: Key
+    name: 'Настройки',
+    path: '/settings',
+    icon: Settings
   }
 ]
 
 const agentMenuItems = [
   { id: 'prompt', name: 'Системный промпт', icon: Sparkles, path: (id: string) => `/agents/${id}/prompt` },
+  { id: 'prompt-training', name: 'Обучение промпта', icon: GraduationCap, path: (id: string) => `/agents/${id}/prompt-training` },
   { id: 'channels', name: 'Каналы', icon: Radio, path: (id: string) => `/agents/${id}/channels` },
   { id: 'connections', name: 'Интеграции', icon: Link, path: (id: string) => `/agents/${id}/connections` },
   { id: 'knowledge', name: 'База знаний', icon: Database, path: (id: string) => `/agents/${id}/knowledge` },
   { id: 'functions', name: 'Функции', icon: Code, path: (id: string) => `/agents/${id}/functions` },
   { id: 'model', name: 'Модель', icon: Cpu, path: (id: string) => `/agents/${id}/model` },
   { id: 'chat', name: 'Чат', icon: MessageSquare, path: (id: string) => `/agents/${id}/chat` },
+  { id: 'api-keys', name: 'API-ключи', icon: KeyRound, path: (id: string) => `/agents/${id}/api-keys`, requiresScope: 'settings:write' },
   { id: 'settings', name: 'Настройки', icon: Settings, path: (id: string) => `/agents/${id}/settings` },
 ]
 
 const currentMenuItems = computed(() => {
   if (isAgentDetail.value) {
     const agentId = route.params.id as string
-    const items = agentMenuItems.map(item => ({
-      ...item,
-      path: item.path(agentId)
-    }))
-    
-    return items
+    return agentMenuItems
+      .filter(item => !item.requiresScope || hasScope(item.requiresScope))
+      .map(item => ({
+        ...item,
+        path: item.path(agentId)
+      }))
   }
   return menuItems
 })

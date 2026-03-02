@@ -61,12 +61,10 @@
                 Подключенные агенты
         </h2>
         <NuxtLink
-          to="/agents/new"
+          to="/agents"
           class="flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors text-sm sm:text-base"
         >
-          <PlusIcon class="h-4 w-4" />
-          <span class="hidden sm:inline">Добавить агента</span>
-          <span class="sm:hidden">Добавить</span>
+          Все агенты
         </NuxtLink>
       </div>
 
@@ -81,11 +79,10 @@
         <h3 class="text-lg font-medium text-foreground mb-2">Нет агентов</h3>
         <p class="text-muted-foreground text-sm mb-4">Создайте своего первого AI-агента</p>
         <NuxtLink
-          to="/agents/new"
+          to="/agents"
           class="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm"
         >
-          <PlusIcon class="h-4 w-4" />
-          Создать агента
+          Все агенты
         </NuxtLink>
       </div>
 
@@ -105,13 +102,33 @@
         Недавняя активность
       </h2>
       <div class="bg-background rounded-xl border border-border overflow-hidden">
-        <div class="divide-y divide-border">
+        <div v-if="isLoadingActivities" class="flex justify-center py-8">
+          <Loader2 class="h-6 w-6 text-primary animate-spin" />
+        </div>
+        <div v-else-if="recentActivities.length === 0" class="px-6 py-8 text-center text-sm text-muted-foreground">
+          Нет активности
+        </div>
+        <div v-else class="divide-y divide-border">
           <ActivityItem
-            v-for="activity in recentActivities"
+            v-for="activity in visibleActivities"
             :key="activity.id"
             :activity="activity"
           />
         </div>
+        <button
+          v-if="recentActivities.length > 3 && !isActivitiesExpanded"
+          @click="isActivitiesExpanded = true"
+          class="w-full px-4 py-3 text-sm font-medium text-primary hover:bg-muted/50 transition-colors border-t border-border"
+        >
+          Показать ещё {{ recentActivities.length - 3 }}
+        </button>
+        <button
+          v-else-if="isActivitiesExpanded && recentActivities.length > 3"
+          @click="isActivitiesExpanded = false"
+          class="w-full px-4 py-3 text-sm font-medium text-primary hover:bg-muted/50 transition-colors border-t border-border"
+        >
+          Свернуть
+        </button>
       </div>
     </div>
 
@@ -130,11 +147,13 @@ definePageMeta({
   middleware: 'auth'
 })
 
-import { ref, onMounted, watch } from 'vue'
-import { CalendarIcon, ChevronDownIcon, PlusIcon, AlertCircle, Bot, Loader2 } from 'lucide-vue-next'
+import { ref, computed, onMounted, watch } from 'vue'
+import { CalendarIcon, ChevronDownIcon, AlertCircle, Bot, Loader2 } from 'lucide-vue-next'
 import { useDashboardData } from '../composables/useDashboardData'
 import { useAuth } from '../composables/useAuth'
 import { useAgents } from '../composables/useAgents'
+import { useApiFetch } from '../composables/useApiFetch'
+import type { Dialog } from '../types/dialogs'
 
 // Layout state
 const { pageTitle } = useLayoutState()
@@ -171,28 +190,116 @@ watch(isAuthenticated, (val) => {
   if (val) loadAgents()
 })
 
-// Recent activities data
-const recentActivities = [
-  {
-    id: 1,
-    title: 'Агент Записи обработал запрос',
-    time: '2 минуты назад',
-    icon: 'UserCheck',
-    color: 'from-sky-500 to-cyan-500'
-  },
-  {
-    id: 2,
-    title: 'Агент Диагностики завершил анализ',
-    time: '15 минут назад',
-    icon: 'Activity',
-    color: 'from-purple-500 to-pink-500'
-  },
-  {
-    id: 3,
-    title: 'Агент Документации создал отчет',
-    time: '1 час назад',
-    icon: 'FileCheck',
-    color: 'from-emerald-500 to-cyan-500'
+// Recent activities — real data from agent dialogs
+const apiFetch = useApiFetch()
+const recentDialogs = ref<(Dialog & { agentName: string })[]>([])
+const isLoadingActivities = ref(false)
+const isActivitiesExpanded = ref(false)
+
+const formatRelativeTime = (dateStr: string): string => {
+  const now = Date.now()
+  const diff = now - new Date(dateStr).getTime()
+  if (diff < 0) return 'только что'
+
+  const seconds = Math.floor(diff / 1000)
+  if (seconds < 60) return 'только что'
+
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes} ${pluralize(minutes, 'минуту', 'минуты', 'минут')} назад`
+
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} ${pluralize(hours, 'час', 'часа', 'часов')} назад`
+
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days} ${pluralize(days, 'день', 'дня', 'дней')} назад`
+
+  return new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+}
+
+const pluralize = (n: number, one: string, few: string, many: string): string => {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod100 >= 11 && mod100 <= 19) return many
+  if (mod10 === 1) return one
+  if (mod10 >= 2 && mod10 <= 4) return few
+  return many
+}
+
+const fetchRecentActivities = async () => {
+  if (!agents.value.length) return
+  isLoadingActivities.value = true
+  try {
+    const results: (Dialog & { agentName: string })[] = []
+    await Promise.all(
+      agents.value.map(async (agent) => {
+        try {
+          const response = await apiFetch<{ dialogs: Dialog[] } | Dialog[]>(
+            `agents/${agent.id}/dialogs`
+          )
+          const dialogsList = Array.isArray(response)
+            ? response
+            : (response?.dialogs ?? [])
+          for (const d of dialogsList) {
+            results.push({ ...d, agentName: agent.name })
+          }
+        } catch {
+          // skip agents with no dialogs
+        }
+      })
+    )
+    recentDialogs.value = results
+      .filter(d => d.last_message_at)
+      .sort((a, b) => new Date(b.last_message_at!).getTime() - new Date(a.last_message_at!).getTime())
+      .slice(0, 10)
+  } finally {
+    isLoadingActivities.value = false
   }
+}
+
+const ACTIVITY_COLORS = [
+  'from-sky-500 to-cyan-500',
+  'from-purple-500 to-pink-500',
+  'from-emerald-500 to-cyan-500',
+  'from-amber-500 to-orange-500',
+  'from-indigo-500 to-blue-500'
 ]
+
+const recentActivities = computed(() => {
+  if (!recentDialogs.value.length) {
+    // Fallback: show agent update activity if no dialogs yet
+    if (!agents.value.length) return []
+    return [...agents.value]
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .slice(0, 5)
+      .map((agent, i) => ({
+        id: i,
+        title: `${agent.name} — ${agent.status === 'published' ? 'опубликован' : 'черновик'}`,
+        time: formatRelativeTime(agent.updated_at),
+        icon: agent.status === 'published' ? 'UserCheck' : 'FileCheck',
+        color: ACTIVITY_COLORS[i % ACTIVITY_COLORS.length]
+      }))
+  }
+
+  return recentDialogs.value.map((d, i) => {
+    const preview = d.last_message_preview
+      ? (d.last_message_preview.length > 60 ? d.last_message_preview.slice(0, 60) + '…' : d.last_message_preview)
+      : 'новый диалог'
+
+    return {
+      id: i,
+      title: `${d.agentName}: ${preview}`,
+      time: formatRelativeTime(d.last_message_at!),
+      icon: d.platform === 'telegram' ? 'UserCheck' : 'Activity',
+      color: ACTIVITY_COLORS[i % ACTIVITY_COLORS.length]
+    }
+  })
+})
+
+const visibleActivities = computed(() =>
+  isActivitiesExpanded.value ? recentActivities.value : recentActivities.value.slice(0, 3)
+)
+
+watch(agents, (val) => {
+  if (val.length) fetchRecentActivities()
+})
 </script>

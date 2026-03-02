@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { PanelLeftOpen } from 'lucide-vue-next'
+import { useLayoutState } from '~/composables/useLayoutState'
 
 const { toggleSidebar } = useLayoutState()
 </script>

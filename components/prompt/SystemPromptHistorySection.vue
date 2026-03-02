@@ -30,7 +30,7 @@
           <!-- Список версий -->
           <template v-else>
             <div
-              v-for="version in versions"
+              v-for="version in visibleVersions"
               :key="version.id"
               class="relative pl-4 pb-3 last:pb-0 cursor-pointer group"
               :class="version.is_active ? 'border-l-2 border-primary' : 'border-l-2 border-muted'"
@@ -52,8 +52,9 @@
                   :class="{
                     'bg-emerald-100 text-emerald-700': version.triggered_by === 'publish',
                     'bg-blue-100 text-blue-700': version.triggered_by === 'update',
-                    'bg-violet-100 text-violet-700': version.triggered_by === 'manual',
-                    'bg-slate-100 text-slate-600': version.triggered_by === 'create',
+                    'bg-slate-100 text-slate-600': version.triggered_by === 'manual',
+                    'bg-slate-100 text-slate-500': version.triggered_by === 'create',
+                    'bg-violet-100 text-violet-700': version.triggered_by === 'ai_training',
                   }"
                 >{{ getTriggeredByLabel(version.triggered_by) }}</span>
                 <span v-if="version.is_active" class="text-[9px] font-bold text-primary uppercase">Активна</span>
@@ -75,9 +76,18 @@
               </div>
             </div>
 
-            <!-- Кнопка «Загрузить ещё» -->
+            <!-- Кнопка «Показать ещё» (локально скрытые) -->
             <button
-              v-if="hasMore"
+              v-if="hiddenCount > 0"
+              @click="showAll = true"
+              class="w-full text-center text-[10px] font-medium text-muted-foreground hover:text-primary hover:underline py-2 transition-colors"
+            >
+              Показать ещё {{ hiddenCount }} {{ pluralVersions(hiddenCount) }}
+            </button>
+
+            <!-- Кнопка «Загрузить ещё» (с сервера) -->
+            <button
+              v-if="hasMore && hiddenCount === 0"
               @click="$emit('load-more')"
               :disabled="isLoadingMore"
               class="w-full text-center text-[10px] font-medium text-primary hover:underline disabled:opacity-50 py-2"
@@ -93,9 +103,12 @@
 </template>
 
 <script setup lang="ts">
+import { ref, computed, watch } from 'vue'
 import { Loader2, ChevronDown } from 'lucide-vue-next'
 import { TRIGGERED_BY_LABELS } from '../../types/systemPromptHistory'
 import type { SystemPromptVersionListItem } from '../../types/systemPromptHistory'
+
+const VISIBLE_LIMIT = 5
 
 const props = defineProps<{
   isOpen: boolean
@@ -112,6 +125,29 @@ const emit = defineEmits<{
   activate: [version: SystemPromptVersionListItem]
   'load-more': []
 }>()
+
+const showAll = ref(false)
+
+const visibleVersions = computed(() =>
+  showAll.value ? props.versions : props.versions.slice(0, VISIBLE_LIMIT)
+)
+
+const hiddenCount = computed(() =>
+  showAll.value ? 0 : Math.max(0, props.versions.length - VISIBLE_LIMIT)
+)
+
+const pluralVersions = (n: number) => {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return 'версию'
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'версии'
+  return 'версий'
+}
+
+// Reset showAll when accordion is closed
+watch(() => props.isOpen, (open) => {
+  if (!open) showAll.value = false
+})
 
 const handleToggle = () => {
   emit('toggle')

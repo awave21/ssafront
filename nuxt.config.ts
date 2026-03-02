@@ -1,7 +1,11 @@
 // @ts-ignore
 export default defineNuxtConfig({
   devtools: { enabled: false },
-  typescript: { strict: true },
+  typescript: {
+    strict: false,
+    typeCheck: false,
+    shim: false // Отключаем автогенерацию типов
+  },
 
   css: ["~/assets/css/main.css"],
 

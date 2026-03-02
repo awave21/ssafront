@@ -9,6 +9,7 @@ import { useSystemPromptHistory } from '~/composables/useSystemPromptHistory'
 import { useAgentSession } from '~/composables/useAgentSession'
 import { useToast } from '~/composables/useToast'
 import { getReadableErrorMessage } from '~/utils/api-errors'
+import type { Tool, ToolBinding } from '~/types/tool'
 
 type AgentForm = {
   name: string
@@ -22,17 +23,6 @@ type AgentForm = {
   }
 }
 
-type AvailableTool = {
-  id: string
-  name: string
-  description?: string
-  execution_type?: string
-}
-
-type BoundTool = {
-  tool_id: string
-}
-
 type TelegramChannel = {
   id?: string
   bot_token?: string
@@ -43,6 +33,7 @@ type TelegramChannel = {
 type ChatMessage = {
   role: 'user' | 'agent'
   content: string
+  run_id?: string | null
   tokens?: {
     prompt?: number | null
     completion?: number | null
@@ -111,8 +102,8 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
   const lastAutoSavedAt = ref<Date | null>(null)
   const isPromptFocused = ref(false)
 
-  const availableTools = ref<AvailableTool[]>([])
-  const boundTools = ref<BoundTool[]>([])
+  const availableTools = ref<Tool[]>([])
+  const boundTools = ref<ToolBinding[]>([])
   const isLoadingTools = ref(false)
   const toolsLoaded = ref(false)
 
@@ -312,8 +303,8 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     try {
       isLoadingTools.value = true
       const [allTools, currentBindings] = await Promise.all([
-        apiFetch<AvailableTool[]>('/tools', { headers: { Authorization: `Bearer ${token.value}` } }),
-        apiFetch<BoundTool[]>(`/agents/${agent.value.id}/tools`, { headers: { Authorization: `Bearer ${token.value}` } })
+        apiFetch<Tool[]>('/tools', { headers: { Authorization: `Bearer ${token.value}` } }),
+        apiFetch<ToolBinding[]>(`/agents/${agent.value.id}/tools`, { headers: { Authorization: `Bearer ${token.value}` } })
       ])
       availableTools.value = allTools
       boundTools.value = currentBindings
@@ -330,7 +321,7 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     await fetchToolsData()
   }
 
-  const toggleTool = async (tool: AvailableTool) => {
+  const toggleTool = async (tool: Tool) => {
     if (!agent.value) return
     const isBound = boundTools.value.some(bt => bt.tool_id === tool.id)
 
@@ -555,11 +546,12 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
           if (match && match[1]) {
             content = match[1]
           }
-          messages.value.push({ role: 'agent', content, tokens, tools_called: toolsCalled })
+          messages.value.push({ role: 'agent', content, run_id: response.run_id ?? null, tokens, tools_called: toolsCalled })
         } else if (response.status === 'failed' && response.error_message) {
           messages.value.push({
             role: 'agent',
             content: `Ошибка: ${response.error_message}`,
+            run_id: response.run_id ?? null,
             tokens,
             tools_called: toolsCalled
           })

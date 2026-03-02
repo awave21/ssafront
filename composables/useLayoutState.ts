@@ -9,6 +9,9 @@ export const useLayoutState = () => {
   const breadcrumbTitle = useState<string>('breadcrumb-title', () => '')
   const breadcrumbAgentName = useState<string>('breadcrumb-agent-name', () => '')
 
+  // Hide Save/Cancel buttons in TopBar (e.g. for auto-saving pages)
+  const hideTopBarActions = useState<boolean>('hide-topbar-actions', () => false)
+
   // Functions page actions and state (for TopBar buttons)
   const functionsRunAction = useState<(() => void) | null>('functions-run-action', () => null)
   const functionsDeleteAction = useState<(() => void) | null>('functions-delete-action', () => null)
@@ -42,7 +45,8 @@ export const useLayoutState = () => {
     initSidebarState, 
     pageTitle, 
     breadcrumbTitle, 
-    breadcrumbAgentName, 
+    breadcrumbAgentName,
+    hideTopBarActions,
     functionsRunAction,
     functionsDeleteAction,
     functionsToggleStatusAction,

@@ -3,7 +3,6 @@
  * Handles: CRUD for parameters, sync fields ↔ JSON, schema generation, test payload
  */
 import { ref, type Ref } from 'vue'
-import { useDebounceFn } from '@vueuse/core'
 import type { Tool } from '~/types/tool'
 import type { BodyParameter, ParameterType } from '~/utils/function-schema'
 import {
@@ -62,13 +61,12 @@ export const useFunctionParameters = (
     onBodyParameterInput()
   }
 
-  // Debounced input handler
-  const onBodyParameterInputInternal = () => {
+  // Immediate input handler: keeps unsaved state in sync with blur autosave.
+  const onBodyParameterInput = () => {
     markAsChanged()
     generateInputSchema()
     generateTestPayload()
   }
-  const onBodyParameterInput = useDebounceFn(onBodyParameterInputInternal, 300)
 
   // Build params object for test payloads
   const buildParamsObject = (params: BodyParameter[], skipPlaceholders = false): Record<string, any> => {

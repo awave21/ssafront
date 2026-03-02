@@ -4,7 +4,7 @@ export type SystemPromptVersionListItem = {
   agent_id: string
   version_number: number
   change_summary: string | null
-  triggered_by: 'create' | 'update' | 'publish' | 'manual'
+  triggered_by: 'create' | 'update' | 'publish' | 'manual' | 'ai_training'
   is_active: boolean
   created_by: string | null
   created_at: string
@@ -19,7 +19,7 @@ export type SystemPromptVersionRead = {
   version_number: number
   system_prompt: string
   change_summary: string | null
-  triggered_by: 'create' | 'update' | 'publish' | 'manual'
+  triggered_by: 'create' | 'update' | 'publish' | 'manual' | 'ai_training'
   is_active: boolean
   created_by: string | null
   created_at: string
@@ -45,4 +45,5 @@ export const TRIGGERED_BY_LABELS: Record<string, string> = {
   update: 'Обновление',
   publish: 'Публикация',
   manual: 'Ручное изменение',
+  ai_training: 'AI обучение',
 }

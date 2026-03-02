@@ -1,6 +1,6 @@
 <template>
-  <div class="h-full px-5 py-5">
-    <div class="h-full flex flex-col">
+  <div class="px-5 py-5 lg:h-full">
+    <div class="flex flex-col lg:h-full">
       <!-- Auth Status Banner -->
     <div v-if="!isAuthenticated" class="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
       <div class="flex items-center justify-between">
@@ -68,8 +68,10 @@ const { isAuthenticated } = useAuth()
 const { canEditAgents } = usePermissions()
 
 // Sync breadcrumb data to layout via shared state
-const { breadcrumbTitle, breadcrumbAgentName } = useLayoutState()
+import { useLayoutState } from '~/composables/useLayoutState'
+const { breadcrumbTitle, breadcrumbAgentName, hideTopBarActions } = useLayoutState()
 breadcrumbTitle.value = props.title
+hideTopBarActions.value = !!props.hideActions
 
 watch(() => agent.value?.name, (name) => {
   breadcrumbAgentName.value = name || ''
@@ -78,6 +80,7 @@ watch(() => agent.value?.name, (name) => {
 onUnmounted(() => {
   breadcrumbTitle.value = ''
   breadcrumbAgentName.value = ''
+  hideTopBarActions.value = false
 })
 
 const resolveAgentId = (value: string | string[] | undefined) =>

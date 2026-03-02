@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { Menu } from 'lucide-vue-next'
 import DashboardSidebar from '~/components/DashboardSidebar.vue'
 import DashboardTopBar from '~/components/DashboardTopBar.vue'
+import { useLayoutState } from '~/composables/useLayoutState'
 
 const { initSidebarState, pageTitle } = useLayoutState()
 const isMobileSidebarOpen = ref(false)
@@ -55,17 +56,20 @@ onMounted(() => {
       <!-- Верхний хедер (закреплен, не скроллится) -->
       <DashboardTopBar>
         <template #left>
-          <!-- Кнопка мобильного меню (только на мобиле) -->
+          <!-- Заголовок страницы -->
+          <h1 v-if="pageTitle" class="text-xl font-bold text-foreground">
+            {{ pageTitle }}
+          </h1>
+        </template>
+        <template #right>
+          <div id="topbar-actions" class="contents" />
+          <!-- Кнопка мобильного меню (только на планшете/мобиле) -->
           <button
-            class="lg:hidden p-2 -ml-2 rounded-lg text-foreground hover:bg-muted"
+            class="lg:hidden p-2 rounded-lg text-foreground hover:bg-muted"
             @click="isMobileSidebarOpen = true"
           >
             <Menu class="w-5 h-5" />
           </button>
-          <!-- Заголовок страницы -->
-          <h1 v-if="pageTitle" class="text-xl font-bold text-foreground ml-3 lg:ml-0">
-            {{ pageTitle }}
-          </h1>
         </template>
       </DashboardTopBar>
 

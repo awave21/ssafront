@@ -1,129 +1,49 @@
 <template>
-  <div class="min-h-screen bg-slate-50">
-    <!-- Mobile Header -->
-    <div class="lg:hidden bg-white border-b border-slate-200 px-4 py-3">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
-            <span class="text-white font-bold text-xs">{{ tenant?.name ? tenant.name.charAt(0).toUpperCase() : 'О' }}</span>
-          </div>
-          <span class="text-slate-900 font-bold">{{ tenant?.name || 'Организация' }}</span>
-        </div>
-        <button
-          @click="isSidebarOpen = !isSidebarOpen"
-          class="p-2 rounded-lg text-slate-600 hover:bg-slate-100"
-        >
-          <MenuIcon class="h-5 w-5" />
-        </button>
-      </div>
-    </div>
-
-    <div class="flex">
-      <!-- Desktop Sidebar -->
-      <DashboardSidebar class="hidden lg:flex" />
-
-      <!-- Mobile Sidebar Overlay -->
-      <div
-        v-if="isSidebarOpen"
-        class="lg:hidden fixed inset-0 z-40 bg-black bg-opacity-50"
-        @click="isSidebarOpen = false"
-      ></div>
-
-      <!-- Mobile Sidebar -->
-      <transition
-        enter-active-class="transition-all duration-500 cubic-bezier(0.34, 1.56, 0.64, 1)"
-        enter-from-class="-translate-x-full opacity-0 scale-95"
-        enter-to-class="translate-x-0 opacity-100 scale-100"
-        leave-active-class="transition-all duration-400 ease-in"
-        leave-from-class="translate-x-0 opacity-100 scale-100"
-        leave-to-class="-translate-x-full opacity-0 scale-95"
-      >
-        <div v-if="isSidebarOpen" class="lg:hidden fixed inset-0 z-50 w-full">
-          <DashboardSidebar @close="isSidebarOpen = false" />
-        </div>
-      </transition>
-
-      <!-- Main Content -->
-      <main class="flex-1 bg-slate-50 p-4 sm:p-6 lg:p-10">
-        <div class="max-w-4xl mx-auto">
-          <!-- Auth Status Banner -->
-          <div v-if="!isAuthenticated" class="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center">
-                <AlertCircle class="h-5 w-5 text-yellow-400 mr-3" />
-                <div>
-                  <h3 class="text-sm font-medium text-yellow-800">
-                    Требуется аутентификация
-                  </h3>
-                  <p class="text-sm text-yellow-700 mt-1">
-                    Войдите в систему для создания агента
-                  </p>
-                </div>
-              </div>
-              <button
-                @click="showAuthModal = true"
-                class="px-4 py-2 bg-yellow-600 text-white text-sm font-medium rounded-lg hover:bg-yellow-700 transition-colors"
-              >
-                Войти
-              </button>
-            </div>
-          </div>
-
-          <!-- Header -->
-          <div class="flex items-center justify-between mb-8">
+  <div class="w-full px-5 py-5 flex flex-col gap-5">
+      <!-- Auth Status Banner -->
+      <div v-if="!isAuthenticated" class="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center">
+            <AlertCircle class="h-5 w-5 text-yellow-400 mr-3" />
             <div>
-              <h1 class="text-3xl font-bold text-slate-900">Создать нового агента</h1>
-              <p class="text-slate-500 mt-1">Настройте базовые параметры вашего будущего AI-помощника</p>
-            </div>
-            <div class="flex items-center gap-3">
-              <button
-                @click="handleCancel"
-                class="px-6 py-2.5 text-slate-600 font-medium hover:text-slate-900 transition-colors"
-              >
-                Отменить
-              </button>
-              <button
-                @click="handleCreate"
-                :disabled="creating || !isValid"
-                class="px-8 py-2.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm shadow-indigo-200"
-              >
-                <Loader2 v-if="creating" class="h-4 w-4 animate-spin" />
-                <Plus v-else class="h-4 w-4" />
-                Создать
-              </button>
+              <h3 class="text-sm font-medium text-yellow-800">
+                Требуется аутентификация
+              </h3>
+              <p class="text-sm text-yellow-700 mt-1">
+                Войдите в систему для создания агента
+              </p>
             </div>
           </div>
+          <button
+            @click="showAuthModal = true"
+            class="px-4 py-2 bg-yellow-600 text-white text-sm font-medium rounded-lg hover:bg-yellow-700 transition-colors"
+          >
+            Войти
+          </button>
+        </div>
+      </div>
 
-          <!-- Tabs Navigation (Styled like the edit page) -->
-          <div class="flex items-center gap-1 border-b border-slate-200 mb-8 overflow-x-auto no-scrollbar">
-            <button
-              class="px-5 py-3 text-sm font-medium transition-all relative whitespace-nowrap text-indigo-600 bg-indigo-50 rounded-t-lg"
-            >
-              Основная настройка
-              <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-600"></div>
-            </button>
-            <button
-              disabled
-              class="px-5 py-3 text-sm font-medium text-slate-300 cursor-not-allowed whitespace-nowrap"
-            >
-              Подключения
-            </button>
-            <button
-              disabled
-              class="px-5 py-3 text-sm font-medium text-slate-300 cursor-not-allowed whitespace-nowrap"
-            >
-              База знаний
-            </button>
-            <button
-              disabled
-              class="px-5 py-3 text-sm font-medium text-slate-300 cursor-not-allowed whitespace-nowrap"
-            >
-              Модель
-            </button>
-          </div>
+      <!-- TopBar Actions (teleported into layout header) -->
+      <Teleport v-if="isMounted" to="#topbar-actions">
+        <button
+          @click="handleCancel"
+          class="px-4 py-1.5 text-sm text-muted-foreground font-medium hover:text-foreground transition-colors"
+        >
+          Отменить
+        </button>
+        <button
+          @click="handleCreate"
+          :disabled="creating || !isValid"
+          class="px-4 py-1.5 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+        >
+          <Loader2 v-if="creating" class="h-3.5 w-3.5 animate-spin" />
+          <Check v-else class="h-3.5 w-3.5" />
+          {{ createButtonLabel }}
+        </button>
+      </Teleport>
 
-          <!-- Content Card -->
-          <div class="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm">
+      <!-- Content Card -->
+          <div class="bg-background rounded-xl border border-border p-6">
             <form @submit.prevent="handleCreate" class="space-y-8">
               <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div>
@@ -218,55 +138,60 @@
               <div>
                 <div class="mb-4">
                   <h3 class="text-sm font-bold text-slate-900">Системный промпт *</h3>
-                  <p class="text-xs text-slate-500 mt-1">Выберите готовый шаблон или создайте свой вариант</p>
+                  <p class="text-xs text-slate-500 mt-1">
+                    Опишите роль и правила агента. Можно сохранить как есть или улучшить через обучение.
+                  </p>
                 </div>
 
-                <!-- Template Selector Cards -->
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                   <button
-                    v-for="template in promptTemplates"
-                    :key="template.id"
                     type="button"
-                    @click="selectedTemplate = template.id; handleTemplateChange(template.id)"
+                    @click="creationMode = 'manual'"
                     class="text-left p-4 rounded-xl border-2 transition-all hover:shadow-sm"
                     :class="[
-                      selectedTemplate === template.id
+                      creationMode === 'manual'
                         ? 'border-indigo-500 bg-indigo-50'
                         : 'border-slate-200 bg-white hover:border-slate-300'
                     ]"
                   >
                     <div class="flex items-start gap-3">
-                      <div
-                        class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
-                        :class="[
-                          selectedTemplate === template.id
-                            ? 'bg-indigo-600'
-                            : 'bg-slate-100'
-                        ]"
-                      >
-                        <component
-                          :is="getTemplateIcon(template.id)"
-                          class="h-5 w-5"
-                          :class="[
-                            selectedTemplate === template.id
-                              ? 'text-white'
-                              : 'text-slate-400'
-                          ]"
-                        />
+                      <div class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+                        :class="[creationMode === 'manual' ? 'bg-indigo-600' : 'bg-slate-100']">
+                        <Check class="h-5 w-5" :class="[creationMode === 'manual' ? 'text-white' : 'text-slate-400']" />
                       </div>
                       <div class="flex-1 min-w-0">
-                        <h4
-                          class="text-sm font-semibold mb-1"
-                          :class="[
-                            selectedTemplate === template.id
-                              ? 'text-indigo-900'
-                              : 'text-slate-900'
-                          ]"
-                        >
-                          {{ template.name }}
+                        <h4 class="text-sm font-semibold mb-1"
+                          :class="[creationMode === 'manual' ? 'text-indigo-900' : 'text-slate-900']">
+                          Сохранить как введено
                         </h4>
-                        <p class="text-xs text-slate-500 line-clamp-2">
-                          {{ template.description }}
+                        <p class="text-xs text-slate-500">
+                          Быстрое создание. Ваш текст сохраняется без изменений.
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    @click="creationMode = 'enhanced'"
+                    class="text-left p-4 rounded-xl border-2 transition-all hover:shadow-sm"
+                    :class="[
+                      creationMode === 'enhanced'
+                        ? 'border-indigo-500 bg-indigo-50'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    ]"
+                  >
+                    <div class="flex items-start gap-3">
+                      <div class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+                        :class="[creationMode === 'enhanced' ? 'bg-indigo-600' : 'bg-slate-100']">
+                        <Sparkles class="h-5 w-5" :class="[creationMode === 'enhanced' ? 'text-white' : 'text-slate-400']" />
+                      </div>
+                      <div class="flex-1 min-w-0">
+                        <h4 class="text-sm font-semibold mb-1"
+                          :class="[creationMode === 'enhanced' ? 'text-indigo-900' : 'text-slate-900']">
+                          Улучшить через обучение
+                        </h4>
+                        <p class="text-xs text-slate-500">
+                          Дольше (обычно 10-20 сек), но итоговый промпт оптимизируется автоматически.
                         </p>
                       </div>
                     </div>
@@ -279,28 +204,30 @@
                     v-model="form.system_prompt"
                     required
                     rows="12"
-                    :placeholder="selectedTemplate === 'custom' ? 'Опишите роль и поведение агента. Например:\n\nВы — профессиональный помощник медицинской клиники...' : 'Шаблон загружен. Вы можете отредактировать его под свои нужды.'"
+                    placeholder="Опишите роль, задачи, ограничения и стиль ответов агента..."
                     class="w-full px-5 py-4 text-slate-700 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:bg-white transition-all resize-none leading-relaxed"
                   ></textarea>
-                  <div class="absolute top-3 right-3">
-                    <span
-                      v-if="selectedTemplate !== 'custom'"
-                      class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-indigo-100 text-indigo-700"
-                    >
-                      Шаблон: {{ promptTemplates.find(t => t.id === selectedTemplate)?.name }}
-                    </span>
+                </div>
+
+                <div
+                  v-if="creating && creationMode === 'enhanced'"
+                  class="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4"
+                >
+                  <div class="flex items-center gap-2 text-indigo-900 text-sm font-medium">
+                    <Loader2 class="h-4 w-4 animate-spin" />
+                    {{ progressStepLabel }}
                   </div>
+                  <p class="text-xs text-indigo-700 mt-1">
+                    Обычно занимает 10-20 секунд. Прошло: {{ elapsedSeconds }} сек.
+                  </p>
                 </div>
               </div>
 
-              <div class="pt-4 flex items-center justify-end border-t border-slate-100">
-                <p class="text-xs text-slate-400">* Обязательные поля для заполнения</p>
+              <div class="pt-4 flex items-center justify-end border-t border-border">
+                <p class="text-xs text-muted-foreground">* Обязательные поля для заполнения</p>
               </div>
             </form>
           </div>
-        </div>
-      </main>
-    </div>
 
     <!-- Auth Modal -->
     <AuthModal
@@ -312,19 +239,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+definePageMeta({
+  middleware: 'auth'
+})
+
+import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  MenuIcon,
   AlertCircle,
   Loader2,
-  Plus,
   Sparkles,
-  Calendar,
-  ClipboardList,
-  FileText,
-  BellRing,
-  MessageCircle,
   Check,
   ChevronsUpDown
 } from 'lucide-vue-next'
@@ -333,11 +257,14 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { useAgents } from '../../composables/useAgents'
 import { useAuth } from '../../composables/useAuth'
 import { useActiveModels } from '~/composables/useActiveModels'
+import { useToast } from '~/composables/useToast'
+import { useAgentPromptEnhancement, type PromptEnhancementStep } from '~/composables/useAgentPromptEnhancement'
 
 // Auth and Router
-const { isAuthenticated, tenant } = useAuth()
+const { isAuthenticated } = useAuth()
 const router = useRouter()
 const { createAgent } = useAgents()
+const { info: toastInfo, success: toastSuccess } = useToast()
 const {
   modelGroups,
   isLoading: isLoadingModels,
@@ -345,138 +272,47 @@ const {
   fetchActiveModels,
   getFirstModelValue
 } = useActiveModels()
+const { enhancePrompt } = useAgentPromptEnhancement()
 
 // State
-const isSidebarOpen = ref(false)
 const showAuthModal = ref(false)
 const creating = ref(false)
+const isMounted = ref(false)
+const creationMode = ref<'manual' | 'enhanced'>('manual')
+const progressStepLabel = ref('Подготовка')
+const progressStepNumber = ref(1)
+const elapsedSeconds = ref(0)
+let elapsedTimer: ReturnType<typeof setInterval> | null = null
 
-// Prompt templates
-const promptTemplates = [
-  {
-    id: 'custom',
-    name: 'Свой вариант',
-    description: 'Создайте собственный системный промпт',
-    prompt: ''
-  },
-  {
-    id: 'appointment',
-    name: 'Агент записи на прием',
-    description: 'Помощник для записи пациентов к врачам',
-    prompt: `Вы — профессиональный помощник медицинской клиники, специализирующийся на записи пациентов на прием к врачам.
+const setProgressStep = (stepNumber: number, stepLabel: string) => {
+  progressStepNumber.value = stepNumber
+  progressStepLabel.value = stepLabel
+}
 
-Ваши основные задачи:
-- Помогать пациентам выбрать подходящего специалиста
-- Уточнять симптомы и направлять к нужному врачу
-- Предлагать доступное время для записи
-- Подтверждать записи и отправлять напоминания
-- Отвечать на вопросы о подготовке к приему
-
-Стиль общения:
-- Вежливый и участливый тон
-- Ясные и понятные формулировки
-- Эмпатия к состоянию пациента
-- Профессионализм без медицинского жаргона
-
-Важно: Вы не ставите диагнозы и не даете медицинских советов, только помогаете с организационными вопросами.`
-  },
-  {
-    id: 'consultation',
-    name: 'Агент первичной консультации',
-    description: 'Первичный сбор информации о симптомах',
-    prompt: `Вы — интеллектуальный помощник для первичной консультации пациентов в медицинской клинике.
-
-Ваши функции:
-- Собирать информацию о симптомах и жалобах пациента
-- Задавать уточняющие вопросы о длительности, характере симптомов
-- Выяснять наличие хронических заболеваний и аллергий
-- Рекомендовать подходящего специалиста для обращения
-- Определять срочность обращения (плановое/срочное/экстренное)
-
-Принципы работы:
-- Задавайте вопросы последовательно, не перегружая пациента
-- Используйте простой язык без медицинской терминологии
-- Проявляйте внимание и заботу
-- При тревожных симптомах рекомендуйте срочное обращение
-
-ВАЖНО: Вы НЕ врач и НЕ ставите диагнозы. Ваша задача — собрать информацию и направить к нужному специалисту.`
-  },
-  {
-    id: 'documentation',
-    name: 'Агент документации',
-    description: 'Помощь с медицинскими документами и справками',
-    prompt: `Вы — помощник по работе с медицинской документацией в клинике.
-
-Ваши задачи:
-- Консультировать пациентов по получению справок и выписок
-- Объяснять процедуру оформления документов
-- Информировать о сроках готовности документов
-- Помогать заполнять формы и заявления
-- Отвечать на вопросы о медицинских картах
-
-Области помощи:
-- Справки для работы/учебы
-- Выписки из медицинских карт
-- Направления на обследования
-- Копии результатов анализов
-- Документы для страховых компаний
-
-Стиль общения:
-- Четкий и структурированный
-- Понятные пошаговые инструкции
-- Терпеливое объяснение бюрократических процедур
-- Указание точных сроков и требований`
-  },
-  {
-    id: 'results',
-    name: 'Агент информирования о результатах',
-    description: 'Уведомление пациентов о готовых результатах',
-    prompt: `Вы — помощник для информирования пациентов о результатах анализов и обследований.
-
-Ваши функции:
-- Уведомлять пациентов о готовности результатов
-- Объяснять способы получения результатов (лично, онлайн, по почте)
-- Помогать интерпретировать референсные значения
-- Рекомендовать обратиться к врачу для расшифровки
-- Отвечать на вопросы о сроках готовности анализов
-
-Важные правила:
-- Сообщайте факты о готовности, но НЕ интерпретируйте результаты
-- Всегда рекомендуйте консультацию с врачом для расшифровки
-- Объясняйте, что такое референсные значения
-- При отклонениях от нормы мягко рекомендуйте записаться к врачу
-- Не пугайте и не успокаивайте преждевременно
-
-Тон: информативный, спокойный, поддерживающий.`
-  },
-  {
-    id: 'support',
-    name: 'Агент общей поддержки',
-    description: 'Универсальный помощник клиники',
-    prompt: `Вы — универсальный помощник медицинской клиники.
-
-Вы помогаете пациентам с широким спектром вопросов:
-- Расписание работы клиники и специалистов
-- Стоимость услуг и процедур
-- Правила подготовки к анализам и обследованиям
-- Местоположение и схема проезда
-- Страховые программы и скидки
-- Общие вопросы о работе клиники
-
-Ваш стиль:
-- Дружелюбный и отзывчивый
-- Быстрые и точные ответы
-- Готовность помочь с любым вопросом
-- Перенаправление к профильным специалистам при необходимости
-
-Помните: 
-- Вы представляете клинику, будьте вежливы и профессиональны
-- Если не знаете ответа, предложите связаться с администратором
-- Не давайте медицинских советов, направляйте к врачам`
+const updateEnhancementStep = (step: PromptEnhancementStep) => {
+  const stepMap: Record<PromptEnhancementStep, { number: number; label: string }> = {
+    'create-session': { number: 2, label: 'Запускаем сессию обучения' },
+    'submit-feedback': { number: 3, label: 'Передаем исходный промпт' },
+    'generate-prompt': { number: 4, label: 'Генерируем улучшенный промпт' },
+    'apply-prompt': { number: 5, label: 'Применяем результат' },
   }
-]
+  const nextStep = stepMap[step]
+  setProgressStep(nextStep.number, nextStep.label)
+}
 
-const selectedTemplate = ref('custom')
+const startElapsedTimer = () => {
+  elapsedSeconds.value = 0
+  if (elapsedTimer) clearInterval(elapsedTimer)
+  elapsedTimer = setInterval(() => {
+    elapsedSeconds.value += 1
+  }, 1000)
+}
+
+const stopElapsedTimer = () => {
+  if (!elapsedTimer) return
+  clearInterval(elapsedTimer)
+  elapsedTimer = null
+}
 
 const timezoneOptions = [
   { value: 'Europe/Moscow', label: 'Москва (UTC+3)' },
@@ -516,39 +352,28 @@ const selectedTimezoneLabel = computed(() =>
   timezoneOptions.find(tz => tz.value === form.value.timezone)?.label ?? 'Выберите часовой пояс'
 )
 
-const handleTemplateChange = (templateId: string) => {
-  const template = promptTemplates.find(t => t.id === templateId)
-  if (template && template.id !== 'custom') {
-    form.value.system_prompt = template.prompt
-  } else if (template?.id === 'custom') {
-    // Keep current value or clear for custom
-    form.value.system_prompt = form.value.system_prompt || ''
-  }
-}
-
-const getTemplateIcon = (templateId: string) => {
-  const iconMap: Record<string, any> = {
-    custom: Sparkles,
-    appointment: Calendar,
-    consultation: ClipboardList,
-    documentation: FileText,
-    results: BellRing,
-    support: MessageCircle
-  }
-  return iconMap[templateId] || Sparkles
-}
-
 const isValid = computed(() => {
-  return form.value.name.trim() !== '' && 
-         form.value.model !== '' && 
+  return form.value.name.trim() !== '' &&
+         form.value.model !== '' &&
          form.value.system_prompt.trim() !== ''
+})
+
+const createButtonLabel = computed(() => {
+  if (!creating.value) return 'Создать'
+  if (creationMode.value !== 'enhanced') return 'Создаем...'
+  return 'Создаем и улучшаем...'
 })
 
 const handleCreate = async () => {
   if (!isValid.value) return
-  
+
   try {
     creating.value = true
+    setProgressStep(1, 'Создаем агента')
+    if (creationMode.value === 'enhanced') {
+      startElapsedTimer()
+    }
+
     const newAgent = await createAgent({
       ...form.value,
       timezone: form.value.timezone || 'Europe/Moscow',
@@ -559,12 +384,29 @@ const handleCreate = async () => {
         max_tokens: 1000
       }
     })
-    
-    // Redirect to the newly created agent's edit page
+
+    if (creationMode.value === 'enhanced') {
+      const enhancementResult = await enhancePrompt({
+        agentId: newAgent.id,
+        sourcePrompt: form.value.system_prompt,
+        onStepChange: updateEnhancementStep,
+      })
+
+      if (enhancementResult.ok) {
+        toastSuccess('Промпт улучшен', 'Системный промпт автоматически обновлен и применен')
+      } else {
+        toastInfo(
+          'Агент создан с исходным промптом',
+          'Улучшение не выполнено, вы можете запустить обучение на странице агента'
+        )
+      }
+    }
+
     router.push(`/agents/${newAgent.id}`)
   } catch (error) {
     console.error('Error creating agent:', error)
   } finally {
+    stopElapsedTimer()
     creating.value = false
   }
 }
@@ -577,29 +419,22 @@ const handleAuthenticated = () => {
   showAuthModal.value = false
 }
 
+const { pageTitle } = useLayoutState()
+
 onMounted(async () => {
+  isMounted.value = true
+  pageTitle.value = 'Создание агента'
   await fetchActiveModels()
 
   if (!form.value.model) {
     form.value.model = getFirstModelValue()
   }
 })
+
+onBeforeUnmount(() => {
+  stopElapsedTimer()
+})
 </script>
 
 <style scoped>
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
 </style>
