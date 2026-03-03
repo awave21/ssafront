@@ -93,7 +93,7 @@ export const useTenantLlmConfig = () => {
         last4: null,
         is_active: false,
       }
-      toastSuccess('Ключ удалён', 'API-ключ удалён. Платформа использует системный ключ')
+      toastSuccess('Ключ удалён', 'API-ключ удалён. Запросы к OpenAI будут недоступны до установки нового ключа')
     } catch (err: any) {
       if (err?.statusCode === 404) {
         keyStatus.value = { has_key: false, provider, last4: null, is_active: false }

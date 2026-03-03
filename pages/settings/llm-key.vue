@@ -82,7 +82,7 @@
               </div>
               <div>
                 <p class="text-sm font-medium text-foreground">Ключ не установлен</p>
-                <p class="text-xs text-muted-foreground">Используется системный ключ платформы</p>
+                <p class="text-xs text-muted-foreground">Без ключа запросы к OpenAI недоступны</p>
               </div>
             </div>
           </div>
@@ -132,7 +132,7 @@
           <h3 class="text-sm font-semibold text-foreground mb-2">Как это работает</h3>
           <ul class="text-sm text-muted-foreground space-y-1.5">
             <li>Если установлен собственный ключ, он используется для всех запросов к OpenAI</li>
-            <li>При удалении ключа платформа переключается на системный ключ</li>
+            <li>При удалении ключа запросы к OpenAI будут недоступны до повторной установки ключа</li>
             <li>Ключ шифруется Fernet и никогда не возвращается в API-ответах</li>
           </ul>
         </div>
@@ -145,7 +145,7 @@
         <DialogHeader>
           <DialogTitle>Удалить API-ключ</DialogTitle>
           <DialogDescription>
-            После удаления платформа будет использовать системный ключ.
+            После удаления запросы к OpenAI будут недоступны до установки нового ключа.
             Это действие нельзя отменить.
           </DialogDescription>
         </DialogHeader>

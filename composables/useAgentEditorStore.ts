@@ -23,11 +23,32 @@ type AgentForm = {
   }
 }
 
+type ChannelTypePath = 'telegram' | 'telegram_phone' | 'whatsapp' | 'max'
+type ChannelTypePublic = 'Telegram_Bot' | 'Telegram_Phone' | 'Whatsapp_Phone' | 'Max_Phone'
+type PhoneChannelTypePath = 'telegram_phone' | 'whatsapp' | 'max'
+
+type AgentChannelRecord = {
+  id: string
+  type: ChannelTypePath
+  telegram_bot_token?: string | null
+  telegram_webhook_enabled?: boolean | null
+  telegram_webhook_endpoint?: string | null
+  is_authorized?: boolean | null
+}
+
+type ChannelAuthQrResponse = {
+  status: string
+  qr_code: string
+  uuid?: string | null
+  time?: string | null
+  timestamp?: number | null
+}
+
 type TelegramChannel = {
   id?: string
-  bot_token?: string
+  bot_token?: string | null
   webhook_enabled?: boolean
-  webhook_endpoint?: string
+  webhook_endpoint?: string | null
 } | null
 
 type ChatMessage = {
@@ -107,7 +128,11 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
   const isLoadingTools = ref(false)
   const toolsLoaded = ref(false)
 
+  const channels = ref<AgentChannelRecord[]>([])
   const telegramChannel = ref<TelegramChannel>(null)
+  const telegramPhoneChannel = computed(() => channels.value.find((ch) => ch.type === 'telegram_phone') ?? null)
+  const whatsappPhoneChannel = computed(() => channels.value.find((ch) => ch.type === 'whatsapp') ?? null)
+  const maxPhoneChannel = computed(() => channels.value.find((ch) => ch.type === 'max') ?? null)
   const isLoadingChannels = ref(false)
   const channelsLoaded = ref(false)
 
@@ -151,6 +176,7 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     isLoadingTools.value = false
     toolsLoaded.value = false
 
+    channels.value = []
     telegramChannel.value = null
     isLoadingChannels.value = false
     channelsLoaded.value = false
@@ -354,20 +380,22 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     if (!agent.value) return
     isLoadingChannels.value = true
     try {
-      const channels = await apiFetch<any[]>(`/agents/${agent.value.id}/channels/active`, {
+      const fetchedChannels = await apiFetch<AgentChannelRecord[]>(`/agents/${agent.value.id}/channels/active`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${token.value}` }
       })
-      const tg = channels.find((ch: any) => ch.type === 'telegram')
+      channels.value = fetchedChannels
+      const tg = fetchedChannels.find((ch) => ch.type === 'telegram')
       telegramChannel.value = tg ? {
         id: tg.id,
-        bot_token: tg.telegram_bot_token,
-        webhook_enabled: tg.telegram_webhook_enabled,
-        webhook_endpoint: tg.telegram_webhook_endpoint
+        bot_token: tg.telegram_bot_token ?? null,
+        webhook_enabled: Boolean(tg.telegram_webhook_enabled),
+        webhook_endpoint: tg.telegram_webhook_endpoint ?? null
       } : null
       channelsLoaded.value = true
     } catch (err: any) {
       console.error('Failed to fetch channels:', err)
+      channels.value = []
       telegramChannel.value = null
     } finally {
       isLoadingChannels.value = false
@@ -377,6 +405,44 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
   const ensureChannelsLoaded = async () => {
     if (channelsLoaded.value || isLoadingChannels.value) return
     await fetchChannels()
+  }
+
+  const connectChannel = async (payload: {
+    type: ChannelTypePublic
+    telegram_bot_token?: string | null
+    whatsapp_phone?: string | null
+  }) => {
+    if (!agent.value) return false
+    await apiFetch(`/agents/${agent.value.id}/channels`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token.value}`,
+        'Content-Type': 'application/json'
+      },
+      body: payload
+    })
+    await fetchChannels()
+    return true
+  }
+
+  const disconnectChannel = async (channelType: ChannelTypePath) => {
+    if (!agent.value) return false
+    await apiFetch(`/agents/${agent.value.id}/channels/${channelType}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token.value}` }
+    })
+    await fetchChannels()
+    return true
+  }
+
+  const fetchChannelAuthQr = async (channelType: PhoneChannelTypePath): Promise<ChannelAuthQrResponse> => {
+    if (!agent.value) {
+      throw new Error('Агент не выбран')
+    }
+    return await apiFetch<ChannelAuthQrResponse>(`/agents/${agent.value.id}/channels/${channelType}/auth/qr`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token.value}` }
+    })
   }
 
   const ensureDirectoriesLoaded = async () => {
@@ -775,7 +841,11 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     boundTools,
     isLoadingTools,
     toolsLoaded,
+    channels,
     telegramChannel,
+    telegramPhoneChannel,
+    whatsappPhoneChannel,
+    maxPhoneChannel,
     isLoadingChannels,
     channelsLoaded,
     directoriesComposable,
@@ -814,6 +884,9 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     toggleTool,
     fetchChannels,
     ensureChannelsLoaded,
+    connectChannel,
+    disconnectChannel,
+    fetchChannelAuthQr,
     ensureDirectoriesLoaded,
     loadSqnsStatusForAgent,
     ensureSqnsStatusLoaded,
