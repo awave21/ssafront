@@ -34,7 +34,7 @@
               <TableHead class="w-[25%]">Ключ</TableHead>
               <TableHead class="w-[15%]">Расположение</TableHead>
               <TableHead class="w-[15%]">Тип</TableHead>
-              <TableHead>Значение</TableHead>
+              <TableHead>Переменная</TableHead>
               <TableHead class="w-[36px]"></TableHead>
             </TableRow>
           </TableHeader>
@@ -85,40 +85,13 @@
               </TableCell>
               <TableCell>
                 <div class="flex items-start gap-1.5">
-                  <!-- AI/Static Toggle -->
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    @click="$emit('update-parameter', index, 'fromAI', !param.fromAI)"
-                    :class="[
-                      'shrink-0 h-6 w-8 px-1.5 text-[10px] font-bold',
-                      param.fromAI
-                        ? 'bg-violet-100 text-violet-700 hover:bg-violet-200'
-                        : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
-                    ]"
-                    :title="param.fromAI ? 'AI заполняет из контекста диалога' : 'Статическое значение'"
-                  >
-                    {{ param.fromAI ? 'AI' : '=' }}
-                  </Button>
-
                   <!-- Static value input -->
                   <div v-if="!param.fromAI" class="relative flex-1">
-                    <div
-                      v-if="hasVariables(param.value)"
-                      class="absolute inset-0 px-2 py-1 text-[13px] font-mono font-medium pointer-events-none whitespace-pre overflow-hidden flex items-center"
-                      aria-hidden="true"
-                    >
-                      <template v-for="(seg, si) in splitByVars(param.value)" :key="si">
-                        <span v-if="seg.isVar" class="text-amber-700 bg-amber-100/70 rounded-sm px-px">{{ seg.text }}</span>
-                        <span v-else class="text-indigo-600">{{ seg.text }}</span>
-                      </template>
-                    </div>
                     <Input
                       :model-value="param.value"
                       @update:model-value="$emit('update-parameter', index, 'value', $event)"
-                      placeholder="{{variable}}"
+                      placeholder="значение или {{from_context}}"
                       class="h-8 text-[13px] font-mono pr-8 text-indigo-600"
-                      :style="hasVariables(param.value) ? 'color: transparent; -webkit-text-fill-color: transparent; caret-color: #4338ca' : ''"
                     />
                     
                     <!-- Variable Picker -->
@@ -153,16 +126,18 @@
 
                   <!-- AI configuration -->
                   <div v-else class="flex-1 space-y-1.5">
+                    <div class="text-[10px] font-medium text-violet-700">Описание для модели</div>
                     <Input
                       :model-value="param.aiDescription"
                       @update:model-value="$emit('update-parameter', index, 'aiDescription', $event)"
-                      placeholder="Описание для AI (напр: Имя пользователя)"
+                      placeholder="Что модель должна передать в этот параметр (напр: Имя пользователя)"
                       class="h-8 text-[13px] text-violet-700 border-violet-200 bg-violet-50/50"
                     />
+                    <div class="text-[10px] font-medium text-slate-500">Fallback-значение</div>
                     <Input
                       :model-value="param.aiDefaultValue"
                       @update:model-value="$emit('update-parameter', index, 'aiDefaultValue', $event)"
-                      placeholder="По умолчанию (опционально)"
+                      placeholder="Используется, если модель не передала значение"
                       class="h-7 text-[11px] font-mono text-slate-500"
                     />
                   </div>
@@ -215,7 +190,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover'
 import { ScrollArea } from '~/components/ui/scroll-area'
 import type { BodyParameter } from '~/utils/function-schema'
-import { hasVariables, splitByVars } from '~/utils/function-schema'
 
 defineProps<{
   parameters: BodyParameter[]

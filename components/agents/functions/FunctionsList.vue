@@ -3,9 +3,10 @@
     <!-- Header -->
     <div class="p-4 border-b border-slate-200">
       <div class="flex justify-between items-center mb-3">
-        <span class="font-semibold text-sm text-slate-900">Функции</span>
+        <span class="font-semibold text-sm text-slate-900">{{ title }}</span>
         <div class="flex items-center gap-0.5">
           <Button
+            v-if="showImport"
             variant="ghost"
             size="icon"
             class="h-8 w-8 text-slate-500 hover:text-indigo-600"
@@ -45,14 +46,15 @@
           :class="{ 'bg-slate-100 border-slate-200': selectedId === func.id }"
           @click="$emit('select', func)"
         >
-          <Badge 
+          <Badge
+            v-if="showMethod"
             variant="secondary"
             class="text-[9px] font-bold min-w-[38px] text-center uppercase"
             :class="getMethodClass(func.http_method)"
           >
             {{ func.http_method }}
           </Badge>
-          <div class="flex-1 min-w-0">
+          <div class="flex-1 min-w-0" :class="!showMethod ? 'pl-0.5' : ''">
             <div class="text-[13px] font-medium text-slate-900 truncate flex items-center gap-1">
               {{ func.input_schema?._displayName || func.name || 'Новая функция' }}
               <span v-if="hasUnsavedChanges(func.id)" class="text-orange-500">●</span>
@@ -82,6 +84,9 @@ const props = defineProps<{
   functions: Tool[]
   selectedId?: string | null
   unsavedChanges: Set<string>
+  title?: string
+  showImport?: boolean
+  showMethod?: boolean
 }>()
 
 defineEmits<{
@@ -106,6 +111,10 @@ const filteredFunctions = computed(() => {
 const hasUnsavedChanges = (id: string | undefined) => {
   return id ? props.unsavedChanges.has(id) : false
 }
+
+const title = computed(() => props.title || 'Функции')
+const showImport = computed(() => props.showImport !== false)
+const showMethod = computed(() => props.showMethod !== false)
 
 const getMethodClass = (method: string) => {
   switch (method) {

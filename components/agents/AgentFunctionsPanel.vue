@@ -7,6 +7,7 @@
     <div class="flex flex-1 min-h-0 overflow-hidden">
       <!-- Sidebar -->
       <FunctionsList
+        v-if="!props.hideList"
         :functions="functions"
         :selected-id="selectedFunction?.id || null"
         :unsaved-changes="unsavedChanges"
@@ -22,14 +23,15 @@
           :display-name="displayName"
           :function-name="selectedFunction.name"
           :function-id="selectedFunction.id || ''"
-          :description="selectedFunction.description || ''"
+          :function-type="selectedFunction.execution_type || 'internal'"
+          :function-scope="normalizedFunctionScope"
           @update:display-name="onDisplayNameUpdate"
-          @update:description="onDescriptionUpdate"
+          @update:function-scope="onFunctionScopeUpdate"
         />
 
         <!-- Scrollable Content -->
         <div class="flex-1 overflow-y-auto p-6">
-          <div class="bg-white rounded-lg p-3 mb-6">
+          <div class="bg-white rounded-lg p-3 mb-6" v-if="selectedFunction.execution_type === 'http_webhook'">
             <div class="text-sm font-semibold mb-4 text-slate-900 flex items-center gap-2">
               <Server class="w-4 h-4 text-indigo-600" />
               Настройка Endpoint
@@ -97,6 +99,12 @@
                 @add-parameter="addBodyParameter"
                 @remove-parameter="removeBodyParameter"
               />
+              <div class="mt-4 rounded-md border border-slate-200">
+                <div class="px-3 py-2 text-xs font-semibold text-slate-600 border-b border-slate-200 bg-slate-50">
+                  Тело тестового запуска («Запустить»)
+                </div>
+                <pre class="m-0 p-3 text-xs font-mono text-slate-700 overflow-auto max-h-56">{{ testPayloadPreview }}</pre>
+              </div>
             </div>
 
             <!-- Variables Tab -->
@@ -127,21 +135,28 @@
               </FunctionResponseFilter>
             </div>
           </div>
+
+          <div v-else class="bg-white border border-slate-200 rounded-lg p-4 mb-6">
+            <div class="text-sm font-semibold text-slate-900 mb-1">Вызов API скрыт</div>
+            <p class="text-xs text-slate-500">
+              Для внутренней функции (`internal`) блок HTTP API не отображается.
+            </p>
+          </div>
           
           <!-- AI Instructions -->
-          <div class="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
+          <div v-if="shouldShowModelInstructions" class="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
             <div class="text-sm font-semibold mb-4 text-slate-900 flex items-center gap-2">
               <BrainCircuit class="w-4 h-4 text-indigo-600" />
-              Инструкции для AI
+              Инструкции для модели
             </div>
             <div class="text-[13px] text-slate-500 mb-3">
-              Укажите, когда и как AI должен использовать эту функцию.
+              Это описание видит модель. По нему она решает, когда вызывать webhook и какие аргументы передавать.
             </div>
             <textarea
               :value="selectedFunction.description"
               @input="onDescriptionUpdate(($event.target as HTMLTextAreaElement).value)"
               class="w-full border border-slate-200 rounded-md p-3 text-[13px] min-h-[80px] focus:border-indigo-500 outline-none resize-y"
-              placeholder="Используй эту функцию когда пользователь хочет..."
+              placeholder="Пример: Вызывай webhook, когда пользователь просит проверить заказ по номеру. Если номер не указан, уточни его."
             ></textarea>
           </div>
         </div>
@@ -175,14 +190,14 @@
       <button 
         v-if="selectedFunction && !showResponsePanel"
         @click="showResponsePanel = true"
-        class="w-8 bg-slate-50 border-l border-slate-200 hover:bg-slate-100 transition-colors flex items-center justify-center text-slate-400 hover:text-slate-600"
+        class="hidden xl:flex w-8 bg-slate-50 border-l border-slate-200 hover:bg-slate-100 transition-colors items-center justify-center text-slate-400 hover:text-slate-600"
         title="Показать ответ"
       >
         <ChevronLeft class="w-4 h-4" />
       </button>
 
       <!-- Right Panel: Response Output -->
-      <div class="w-[420px] bg-white border-l border-slate-200 flex flex-col" v-if="selectedFunction && showResponsePanel">
+      <div class="hidden xl:flex w-[360px] 2xl:w-[420px] bg-white border-l border-slate-200 flex-col" v-if="selectedFunction && showResponsePanel">
         <div 
           class="h-10 flex items-center justify-between px-4 text-[11px] shrink-0 border-b border-slate-200"
           :class="testResult 
@@ -270,6 +285,7 @@ import {
 import type { Tool } from '~/types/tool'
 import FieldNode from './FieldNode.vue'
 import { parseCurl } from '~/utils/parse-curl'
+import { resolveVariablesDeep } from '~/utils/function-schema'
 import type { BodyParameter, ParameterType } from '~/utils/function-schema'
 
 // Sub-components
@@ -289,7 +305,16 @@ import { useVariables } from '~/composables/useVariables'
 import { useResponseFilter } from '~/composables/useResponseFilter'
 
 // Props
-const props = defineProps<{ agentId: string }>()
+const props = withDefaults(defineProps<{
+  agentId: string
+  hideList?: boolean
+  initialFunctionId?: string | null
+  autoCreate?: boolean
+}>(), {
+  hideList: false,
+  initialFunctionId: null,
+  autoCreate: false,
+})
 const route = useRoute()
 const router = useRouter()
 
@@ -312,6 +337,7 @@ const {
   showStatus,
   markAsChanged,
   loadFunctions,
+  fetchToolById,
   toggleFunctionStatus,
 } = crud
 
@@ -381,6 +407,7 @@ const {
   bodyParameters,
   bodyJson,
   bodyViewMode,
+  buildParamsObject,
   addBodyParameter,
   removeBodyParameter,
   updateBodyParameter,
@@ -445,6 +472,20 @@ const onDescriptionUpdate = (value: string) => {
   markAsChanged()
 }
 
+const normalizedFunctionScope = computed<'tool' | 'function_only'>(() => {
+  const rawScope = selectedFunction.value?.webhook_scope
+  return rawScope === 'function_only' ? 'function_only' : 'tool'
+})
+
+const shouldShowModelInstructions = computed(() => normalizedFunctionScope.value === 'tool')
+
+const onFunctionScopeUpdate = (value: string) => {
+  if (!selectedFunction.value) return
+  if (value !== 'tool' && value !== 'function_only') return
+  selectedFunction.value.webhook_scope = value
+  markAsChanged()
+}
+
 const onEndpointUpdate = (value: string) => {
   if (!selectedFunction.value) return
   selectedFunction.value.endpoint = value
@@ -471,7 +512,34 @@ const onBodyViewModeUpdate = (mode: 'fields' | 'json') => {
 
 const onBodyJsonUpdate = (value: string) => {
   bodyJson.value = value
+  // Keep test payload in sync with JSON editor content so "Run" always sends latest edits.
+  testPayload.value = value
   markAsChanged()
+}
+
+const buildCurrentTestPayload = () => {
+  const variableMap = buildVariableMap()
+  if (bodyViewMode.value === 'json') {
+    try {
+      const parsed = JSON.parse(bodyJson.value)
+      return JSON.stringify(resolveVariablesDeep(parsed, variableMap), null, 2)
+    } catch {
+      return bodyJson.value
+    }
+  }
+  const raw = buildParamsObject(bodyParameters.value, false)
+  return JSON.stringify(resolveVariablesDeep(raw, variableMap), null, 2)
+}
+
+const testPayloadPreview = computed(() => buildCurrentTestPayload())
+
+const buildCurrentTestArgs = (): Record<string, any> | null => {
+  try {
+    const parsed = JSON.parse(buildCurrentTestPayload())
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 const onCurlDialogToggle = (open: boolean) => {
@@ -518,7 +586,9 @@ const selectFunction = async (func: Tool) => {
   selectedFunction.value = func
 
   if (func.id && !func.id.startsWith('new_')) {
-    router.replace({ query: { ...route.query, functionId: func.id } })
+    if (!props.hideList) {
+      router.replace({ query: { ...route.query, functionId: func.id } })
+    }
   }
 
   displayName.value = func.input_schema?._displayName || func.name || ''
@@ -549,6 +619,7 @@ const selectFunction = async (func: Tool) => {
 // ── Create function ──
 const createFunction = () => {
   const newTool = crud.createFunction()
+  displayName.value = String(newTool.input_schema?._displayName || newTool.name || 'Новый webhook')
   bodyParameters.value = []
   bodyJson.value = '{}'
   variables.value = []
@@ -578,7 +649,16 @@ const deleteFunction = async () => {
 
 // ── Test tool ──
 const testTool = async () => {
-  await crud.testTool(headers, bodyParameters, buildVariableMap, onTestComplete)
+  // Ensure "Run" always uses the exact payload visible in editor.
+  const payload = buildCurrentTestPayload()
+  testPayload.value = payload
+  await crud.testTool(
+    headers,
+    bodyParameters,
+    buildVariableMap,
+    onTestComplete,
+    buildCurrentTestArgs() || undefined,
+  )
 }
 
 // ── Import from cURL ──
@@ -679,7 +759,9 @@ const duplicateFunction = () => {
     parameter_mapping: src.parameter_mapping ? JSON.parse(JSON.stringify(src.parameter_mapping)) : null,
     response_transform: src.response_transform ? JSON.parse(JSON.stringify(src.response_transform)) : null,
     headers: Object.keys(customHeadersObj).length > 0 ? customHeadersObj : null,
-    status: 'active', version: 1
+    status: 'active',
+    webhook_scope: src.webhook_scope || 'tool',
+    version: 1
   }
   if (Object.keys(customHeadersObj).length > 0) (cloned as any).custom_headers = customHeadersObj
 
@@ -723,9 +805,29 @@ onMounted(async () => {
   document.addEventListener('visibilitychange', onVisibilityChange)
 
   await Promise.all([loadFunctions(), fetchCredentials()])
-  // Restore selection from URL or select first
+  const idFromUrl = props.initialFunctionId || (route.query.functionId as string | undefined)
+
+  // When functionId is provided (even on /webhook/new), open that webhook instead of creating a new one.
+  if (idFromUrl) {
+    let targetFromUrl = functions.value.find(f => f.id === idFromUrl)
+    if (!targetFromUrl) {
+      const fetched = await fetchToolById(idFromUrl)
+      if (fetched && (fetched.execution_type || 'http_webhook') === 'http_webhook') {
+        targetFromUrl = fetched
+      }
+    }
+    if (targetFromUrl) {
+      await selectFunction(targetFromUrl)
+      return
+    }
+  }
+
+  if (props.autoCreate) {
+    createFunction()
+    return
+  }
+  // Restore selection from explicit prop / URL / first.
   if (functions.value.length > 0) {
-    const idFromUrl = route.query.functionId as string | undefined
     const target = (idFromUrl && functions.value.find(f => f.id === idFromUrl)) || functions.value[0]
     await selectFunction(target)
   }
@@ -739,6 +841,7 @@ onBeforeUnmount(() => {
 
 // ── Expose to parent ──
 defineExpose({
+  createFunction,
   testTool,
   testing,
   testingRef: testing,

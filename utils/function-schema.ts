@@ -4,6 +4,7 @@
 
 // Regular expressions for variable tokens
 export const VARIABLE_REGEX = /\{\{[a-zA-Z0-9_]+\}\}/g
+const VARIABLE_TEST_REGEX = /\{\{[a-zA-Z0-9_]+\}\}/
 export const VARIABLE_TOKEN_REGEX = /^\{\{[a-zA-Z0-9_]+\}\}$/
 
 /**
@@ -80,7 +81,7 @@ export const coerceValue = (value: string, type: ParameterType): any => {
  * Check if string contains variable tokens
  */
 export const hasVariables = (text: string): boolean => 
-  VARIABLE_REGEX.test(text || '')
+  VARIABLE_TEST_REGEX.test(text || '')
 
 /**
  * Split text into segments: plain text vs {{variable}} tokens
@@ -101,8 +102,10 @@ export const resolveVariableTokens = (
   input: string,
   varMap: Record<string, string>
 ): string =>
-  (input || '').replace(VARIABLE_REGEX, (_match, varName: string) =>
-    Object.prototype.hasOwnProperty.call(varMap, varName) ? varMap[varName] : _match
+  (input || '').replace(VARIABLE_REGEX, (match) => {
+    const varName = match.slice(2, -2)
+    return Object.prototype.hasOwnProperty.call(varMap, varName) ? varMap[varName] : match
+  }
   )
 
 /**

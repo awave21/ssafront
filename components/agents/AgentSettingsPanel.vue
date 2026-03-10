@@ -100,6 +100,30 @@
         </div>
       </div>
 
+      <div class="rounded-md border border-slate-200 bg-slate-50/60 p-4">
+        <div class="flex items-start justify-between gap-4">
+          <div class="space-y-1">
+            <label class="block text-sm font-bold text-slate-900">Отключить агента</label>
+            <p class="text-xs text-slate-500">
+              При отключении агент временно не инициирует новые ответы. Входящие сообщения продолжают поступать.
+            </p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span
+              class="inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium"
+              :class="form.is_disabled ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'"
+            >
+              {{ form.is_disabled ? 'Выключен' : 'Включен' }}
+            </span>
+            <Switch
+              :model-value="!form.is_disabled"
+              :disabled="!canEditAgents"
+              @update:model-value="(enabled: boolean) => { form.is_disabled = !enabled }"
+            />
+          </div>
+        </div>
+      </div>
+
       <div v-if="canEditAgents" class="pt-8 border-t border-red-50">
         <h4 class="text-sm font-bold text-red-600 mb-2">Опасная зона</h4>
         <p class="text-xs text-slate-500 mb-4">Удаление агента приведет к безвозвратной потере всех его настроек и истории.</p>
@@ -122,6 +146,7 @@ import { navigateTo } from '#app'
 import { Check, ChevronsUpDown, Loader2 } from 'lucide-vue-next'
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '~/components/ui/command'
+import { Switch } from '~/components/ui/switch'
 import { usePermissions } from '~/composables/usePermissions'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 

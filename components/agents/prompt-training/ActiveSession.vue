@@ -75,27 +75,6 @@
       </div>
 
       <div class="flex items-center gap-2">
-        <!-- Model override select -->
-        <Select v-if="modelGroups.length > 0 && canGenerate" v-model="overrideMetaModel">
-          <SelectTrigger class="w-48 h-9 text-xs">
-            <SelectValue placeholder="Модель из сессии" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup v-for="group in modelGroups" :key="group.group">
-              <SelectLabel class="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-                {{ group.group }}
-              </SelectLabel>
-              <SelectItem
-                v-for="option in group.options"
-                :key="option.value"
-                :value="option.value"
-              >
-                {{ option.label }}
-              </SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-
         <Tooltip v-if="!canGenerate && feedbackCount === 0">
           <TooltipTrigger as-child>
             <span>
@@ -137,19 +116,10 @@ import { ArrowLeft, Sparkles, Loader2 } from 'lucide-vue-next'
 import { Button } from '~/components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '~/components/ui/tabs'
 import { Tooltip, TooltipTrigger, TooltipContent } from '~/components/ui/tooltip'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '~/components/ui/select'
-import { SelectGroup, SelectLabel } from 'radix-vue'
 import TrainingChat from './TrainingChat.vue'
 import CorrectionsPanel from './CorrectionsPanel.vue'
 import PromptDiffDialog from './PromptDiffDialog.vue'
 import type { TrainingFeedbackRead, TrainingSessionRead, GeneratedPromptPreview, CreateFeedbackPayload } from '~/types/promptTraining'
-import type { ActiveModelGroup } from '~/composables/useActiveModels'
 
 defineProps<{
   session: TrainingSessionRead
@@ -160,22 +130,20 @@ defineProps<{
   isApplying: boolean
   isSubmittingFeedback: boolean
   generatedPreview: GeneratedPromptPreview | null
-  modelGroups: ActiveModelGroup[]
 }>()
 
 const emit = defineEmits<{
   'submit-feedback': [payload: CreateFeedbackPayload]
-  generate: [metaModel?: string]
+  generate: []
   apply: [prompt?: string]
   back: []
   'dismiss-preview': []
 }>()
 
 const mobileTab = ref('chat')
-const overrideMetaModel = ref('')
 
 const handleGenerate = () => {
-  emit('generate', overrideMetaModel.value || undefined)
+  emit('generate')
 }
 
 const handleDiffDialogClose = (open: boolean) => {

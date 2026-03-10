@@ -6,7 +6,7 @@ import { ref, computed, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApiFetch } from '~/composables/useApiFetch'
 import { useCredentials } from '~/composables/useCredentials'
-import type { Tool, ToolTestResponse } from '~/types/tool'
+import type { Tool, ToolBinding, ToolTestResponse } from '~/types/tool'
 import type { BodyParameter } from '~/utils/function-schema'
 import { resolveVariableTokens, resolveVariablesDeep } from '~/utils/function-schema'
 import { getReadableErrorMessage } from '~/utils/api-errors'
@@ -71,8 +71,28 @@ export const useFunctionsCrud = (agentId: Ref<string>) => {
     if (!selectedFunction.value?.id) return false
     const func = selectedFunction.value
     const funcId = func.id!
-    return unsavedChanges.value.has(funcId) && func.name.trim() !== '' && func.endpoint.trim() !== ''
+    const hasRequiredCoreFields = func.name.trim() !== ''
+    const needsHttpFields = (func.execution_type || 'internal') === 'http_webhook'
+    const hasRequiredHttpFields = !needsHttpFields || func.endpoint.trim() !== ''
+    return unsavedChanges.value.has(funcId) && hasRequiredCoreFields && hasRequiredHttpFields
   })
+
+  const ensureUniqueName = (baseName: string) => {
+    const normalizedBase = (baseName || '').trim() || `webhook_${Date.now()}`
+    const existing = new Set(
+      functions.value
+        .map((item) => String(item.name || '').trim().toLowerCase())
+        .filter(Boolean),
+    )
+    if (!existing.has(normalizedBase.toLowerCase())) return normalizedBase
+    let counter = 2
+    let candidate = `${normalizedBase}_${counter}`
+    while (existing.has(candidate.toLowerCase())) {
+      counter += 1
+      candidate = `${normalizedBase}_${counter}`
+    }
+    return candidate
+  }
 
   // Utility
   const showStatus = (type: 'success' | 'error', text: string) => {
@@ -89,7 +109,7 @@ export const useFunctionsCrud = (agentId: Ref<string>) => {
   // Load
   const loadFunctions = async () => {
     try {
-      const bindings = await apiFetch<any[]>(`/agents/${agentId.value}/tools/details`)
+      const bindings = await apiFetch<ToolBinding[]>(`/agents/${agentId.value}/tools/details`)
       functions.value = bindings
         .map(binding => binding.tool)
         .filter((tool): tool is Tool => tool !== null && tool !== undefined)
@@ -100,26 +120,68 @@ export const useFunctionsCrud = (agentId: Ref<string>) => {
       })
       bindingCredentials.value = credMap
     } catch (e) {
-      console.error('Failed to load functions', e)
-      functions.value = []
+      console.warn('Failed to load detailed functions list, trying fallback', e)
+      try {
+        const bindings = await apiFetch<ToolBinding[]>(`/agents/${agentId.value}/tools`)
+        const loaded = await Promise.all(
+          bindings.map(async (binding) => {
+            try {
+              return await apiFetch<Tool>(`/tools/${binding.tool_id}`)
+            } catch (toolErr) {
+              console.warn(`Failed to load tool ${binding.tool_id}`, toolErr)
+              return null
+            }
+          }),
+        )
+        functions.value = loaded.filter((tool): tool is Tool => Boolean(tool))
+        const credMap: Record<string, string | null> = {}
+        bindings.forEach((binding) => {
+          if (binding.tool_id) credMap[binding.tool_id] = binding.credential_id ?? null
+        })
+        bindingCredentials.value = credMap
+      } catch (fallbackErr) {
+        console.error('Failed to load functions', fallbackErr)
+        functions.value = []
+      }
+    }
+  }
+
+  const fetchToolById = async (toolId: string) => {
+    try {
+      const tool = await apiFetch<Tool>(`/tools/${toolId}`)
+      const existingIndex = functions.value.findIndex((item) => item.id === tool.id)
+      if (existingIndex >= 0) {
+        functions.value.splice(existingIndex, 1, tool)
+      } else {
+        functions.value.unshift(tool)
+      }
+      if (tool.id && bindingCredentials.value[tool.id] === undefined) {
+        bindingCredentials.value[tool.id] = null
+      }
+      return tool
+    } catch (e) {
+      console.warn(`Failed to fetch tool by id ${toolId}`, e)
+      return null
     }
   }
 
   // Create
   const createFunction = (): Tool => {
+    const defaultName = ensureUniqueName(`webhook_${Date.now()}`)
     const newTool: Tool = {
       id: `new_${Date.now()}`,
-      name: '',
+      name: defaultName,
       description: '',
       endpoint: '',
       http_method: 'POST',
       execution_type: 'http_webhook',
       auth_type: 'none',
-      input_schema: { type: 'object', properties: {} },
+      input_schema: { type: 'object', properties: {}, _displayName: 'Новый webhook' },
       parameter_mapping: null,
       response_transform: null,
       headers: null,
       status: 'active',
+      webhook_scope: 'tool',
       version: 1
     }
     functions.value.unshift(newTool)
@@ -145,24 +207,42 @@ export const useFunctionsCrud = (agentId: Ref<string>) => {
         name: selectedFunction.value.name,
         description: selectedFunction.value.description || '',
         input_schema: selectedFunction.value.input_schema || { type: 'object', properties: {} },
-        execution_type: 'http_webhook',
-        endpoint: selectedFunction.value.endpoint,
+        execution_type: selectedFunction.value.execution_type || 'internal',
         auth_type: selectedFunction.value.auth_type || 'none',
         status: selectedFunction.value.status || 'active',
+        webhook_scope: selectedFunction.value.webhook_scope || 'tool',
+      }
+
+      if ((selectedFunction.value.execution_type || 'internal') === 'http_webhook') {
+        payload.endpoint = selectedFunction.value.endpoint
       }
 
       if (selectedFunction.value.http_method) payload.http_method = selectedFunction.value.http_method
 
-      payload.custom_headers = headers.value.reduce((obj, h) => {
-        if (h.key.trim()) obj[h.key] = h.value
-        return obj
-      }, {} as Record<string, string>)
+      if ((selectedFunction.value.execution_type || 'internal') === 'http_webhook') {
+        payload.custom_headers = headers.value.reduce((obj, h) => {
+          if (h.key.trim()) obj[h.key] = h.value
+          return obj
+        }, {} as Record<string, string>)
+      }
 
       if (selectedFunction.value.response_transform) payload.response_transform = selectedFunction.value.response_transform
       if (selectedFunction.value.parameter_mapping) payload.parameter_mapping = selectedFunction.value.parameter_mapping
 
       if (isNew) {
-        const toolResponse = await apiFetch<Tool>('/tools', { method: 'POST', body: payload })
+        payload.name = ensureUniqueName(String(payload.name || ''))
+        let toolResponse: Tool
+        try {
+          toolResponse = await apiFetch<Tool>('/tools', { method: 'POST', body: payload })
+        } catch (createErr: any) {
+          // Retry once with a suffixed name on uniqueness conflict.
+          if (createErr?.statusCode === 409 || createErr?.status === 409) {
+            payload.name = ensureUniqueName(`${String(payload.name)}_new`)
+            toolResponse = await apiFetch<Tool>('/tools', { method: 'POST', body: payload })
+          } else {
+            throw createErr
+          }
+        }
         await apiFetch(`/agents/${agentId.value}/tools/${toolResponse.id}`, {
           method: 'POST',
           body: { permission_scope: 'write', credential_id: credentialId }
@@ -278,22 +358,27 @@ export const useFunctionsCrud = (agentId: Ref<string>) => {
     headers: Ref<Header[]>,
     bodyParameters: Ref<BodyParameter[]>,
     buildVariableMap: () => Record<string, string>,
-    onTestComplete: (response: ToolTestResponse) => void
+    onTestComplete: (response: ToolTestResponse) => void,
+    explicitArgs?: Record<string, any>
   ) => {
     if (!selectedFunction.value) return
     testing.value = true
     try {
       const variableMap = buildVariableMap()
-      let args = {}
-      try { args = JSON.parse(testPayload.value) } catch {
-        testResult.value = {
-          status_code: 0, latency_ms: 0, raw_body: { error: 'Invalid JSON in payload' },
-          transformed_body: null, raw_size_bytes: 0, transformed_size_bytes: null,
-          error: 'Invalid JSON', request_url: selectedFunction.value?.endpoint || '',
-          request_method: selectedFunction.value?.http_method || 'POST'
+      let args: Record<string, any> = {}
+      if (explicitArgs && typeof explicitArgs === 'object') {
+        args = explicitArgs
+      } else {
+        try { args = JSON.parse(testPayload.value) } catch {
+          testResult.value = {
+            status_code: 0, latency_ms: 0, raw_body: { error: 'Invalid JSON in payload' },
+            transformed_body: null, raw_size_bytes: 0, transformed_size_bytes: null,
+            error: 'Invalid JSON', request_url: selectedFunction.value?.endpoint || '',
+            request_method: selectedFunction.value?.http_method || 'POST'
+          }
+          testing.value = false
+          return
         }
-        testing.value = false
-        return
       }
       args = resolveVariablesDeep(args, variableMap)
 
@@ -303,11 +388,12 @@ export const useFunctionsCrud = (agentId: Ref<string>) => {
         if (headerKey) customHeaders[headerKey] = resolveVariableTokens(h.value, variableMap)
       })
 
-      let mapping = selectedFunction.value.parameter_mapping
-      if (!mapping && bodyParameters.value.length > 0) {
-        mapping = {}
-        bodyParameters.value.forEach(p => { if (p.key) mapping![p.key] = p.location })
-      }
+      // For test run, always build mapping from the currently visible parameters.
+      // This avoids stale mapping from previously saved schema.
+      const mapping: Record<string, string> = {}
+      bodyParameters.value.forEach(p => {
+        if (p.key) mapping[p.key] = p.location
+      })
 
       const credentialId = selectedBindingCredentialId.value || null
       const response = await apiFetch<ToolTestResponse>('/tools/test', {
@@ -315,7 +401,8 @@ export const useFunctionsCrud = (agentId: Ref<string>) => {
         body: {
           endpoint: resolveVariableTokens(selectedFunction.value.endpoint, variableMap),
           http_method: selectedFunction.value.http_method,
-          args, parameter_mapping: mapping,
+          args,
+          parameter_mapping: Object.keys(mapping).length > 0 ? mapping : undefined,
           custom_headers: Object.keys(customHeaders).length > 0 ? customHeaders : undefined,
           auth_type: selectedFunction.value.auth_type || 'none',
           credential_id: credentialId,
@@ -325,12 +412,12 @@ export const useFunctionsCrud = (agentId: Ref<string>) => {
       testResult.value = response
       onTestComplete(response)
     } catch (error: any) {
-      testResult.value = {
-        status_code: 500, latency_ms: 0, raw_body: { error: error.message || 'Request failed' },
-        transformed_body: null, raw_size_bytes: 0, transformed_size_bytes: null,
-        error: error.message,
-        request_url: selectedFunction.value.endpoint, request_method: selectedFunction.value.http_method
-      }
+        testResult.value = {
+          status_code: 500, latency_ms: 0, raw_body: { error: error.message || 'Request failed' },
+          transformed_body: null, raw_size_bytes: 0, transformed_size_bytes: null,
+          error: error.message,
+          request_url: selectedFunction.value.endpoint, request_method: selectedFunction.value.http_method
+        }
     } finally {
       testing.value = false
     }
@@ -356,6 +443,7 @@ export const useFunctionsCrud = (agentId: Ref<string>) => {
     showStatus,
     markAsChanged,
     loadFunctions,
+    fetchToolById,
     createFunction,
     saveFunction,
     deleteFunction,

@@ -17,6 +17,7 @@ type AgentForm = {
   model: string
   timezone: string
   status: AgentStatus
+  is_disabled: boolean
   llm_params: {
     temperature: number
     max_tokens: number
@@ -67,12 +68,80 @@ type ChatMessage = {
   }>
 }
 
+type ToolCallView = {
+  name: string
+  tool_call_id: string | null
+  args: Record<string, unknown>
+}
+
+const normalizeToolArgs = (raw: unknown): Record<string, unknown> => {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
+    } catch {
+      return {}
+    }
+  }
+  return {}
+}
+
+const collectCurrentTurnToolCallKeys = (messagesPayload: unknown): Set<string> => {
+  const keys = new Set<string>()
+  if (!Array.isArray(messagesPayload)) return keys
+  for (const msg of messagesPayload) {
+    if (!msg || typeof msg !== 'object') continue
+    const parts = (msg as any).parts
+    if (!Array.isArray(parts)) continue
+    for (const part of parts) {
+      if (!part || typeof part !== 'object') continue
+      const kind = String((part as any).part_kind || (part as any).partKind || '')
+      if (kind !== 'tool-call' && kind !== 'tool_call') continue
+      const toolName = String((part as any).tool_name || (part as any).toolName || '')
+      if (!toolName) continue
+      const callIdRaw = (part as any).tool_call_id ?? (part as any).toolCallId ?? (part as any).id ?? null
+      const callId = callIdRaw == null ? null : String(callIdRaw)
+      const args = normalizeToolArgs((part as any).args ?? (part as any).arguments)
+      if (callId) {
+        keys.add(`id:${callId}`)
+      } else {
+        const argsKey = JSON.stringify(args, Object.keys(args).sort())
+        keys.add(`payload:${toolName}:${argsKey}`)
+      }
+    }
+  }
+  return keys
+}
+
+const filterToolsCalledForCurrentTurn = (responsePayload: any): ToolCallView[] | undefined => {
+  const rawTools = Array.isArray(responsePayload?.tools_called) ? responsePayload.tools_called : []
+  if (!rawTools.length) return undefined
+
+  const allowed = collectCurrentTurnToolCallKeys(responsePayload?.messages)
+  if (!allowed.size) return undefined
+
+  const filtered = rawTools.filter((item: any) => {
+    if (!item || typeof item !== 'object') return false
+    const toolName = String(item.name || '')
+    if (!toolName) return false
+    const toolCallId = item.tool_call_id == null ? null : String(item.tool_call_id)
+    if (toolCallId) return allowed.has(`id:${toolCallId}`)
+    const args = normalizeToolArgs(item.args)
+    const argsKey = JSON.stringify(args, Object.keys(args).sort())
+    return allowed.has(`payload:${toolName}:${argsKey}`)
+  })
+
+  return filtered.length ? filtered : undefined
+}
+
 const createEmptyForm = (): AgentForm => ({
   name: '',
   system_prompt: '',
   model: '',
   timezone: 'Europe/Moscow',
   status: 'draft',
+  is_disabled: false,
   llm_params: {
     temperature: 0.7,
     max_tokens: 1000
@@ -85,6 +154,7 @@ const buildForm = (agent: Agent): AgentForm => ({
   model: agent.model,
   timezone: agent.timezone ?? 'Europe/Moscow',
   status: agent.status,
+  is_disabled: Boolean(agent.is_disabled),
   llm_params: {
     temperature: agent.llm_params?.temperature ?? 0.7,
     max_tokens: agent.llm_params?.max_tokens ?? 1000
@@ -564,6 +634,11 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
   const sendMessage = async () => {
     if (!userInput.value.trim() || isTyping.value || !agent.value) return false
 
+    if (agent.value.is_disabled) {
+      toastError('Агент отключен', 'Агент временно отключен и не может инициировать новые ответы')
+      return false
+    }
+
     const userMessage = userInput.value.trim()
     userInput.value = ''
     messages.value.push({ role: 'user', content: userMessage })
@@ -602,9 +677,7 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
           total: response.total_tokens ?? null
         } : undefined
 
-        const toolsCalled = response.tools_called && response.tools_called.length > 0
-          ? response.tools_called
-          : undefined
+        const toolsCalled = filterToolsCalledForCurrentTurn(response)
 
         if (response.status === 'succeeded' && response.output_message) {
           let content = response.output_message
@@ -807,6 +880,18 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
         if (newTimezone === (agent.value.timezone ?? 'Europe/Moscow')) return
         
         await autoSaveField({ timezone: newTimezone })
+      }
+    )
+
+    // Auto-save disabled state immediately
+    watch(
+      () => form.value.is_disabled,
+      async (newIsDisabled, oldIsDisabled) => {
+        if (!agent.value || !isLoaded.value) return
+        if (newIsDisabled === oldIsDisabled) return
+        if (newIsDisabled === Boolean(agent.value.is_disabled)) return
+
+        await autoSaveField({ is_disabled: newIsDisabled })
       }
     )
 

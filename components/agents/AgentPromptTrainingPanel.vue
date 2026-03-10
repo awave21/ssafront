@@ -16,7 +16,6 @@
       :is-applying="isApplying"
       :is-submitting-feedback="isSubmittingFeedback"
       :generated-preview="generatedPreview"
-      :model-groups="modelGroups"
       @submit-feedback="handleSubmitFeedback"
       @generate="handleGenerate"
       @apply="(prompt?: string) => handleApply(prompt)"
@@ -65,7 +64,7 @@ import CompletedSession from '~/components/agents/prompt-training/CompletedSessi
 const route = useRoute()
 const router = useRouter()
 const store = useAgentEditorStore()
-const { success: toastSuccess } = useToast()
+const { success: toastSuccess, error: toastError } = useToast()
 const { modelGroups, isLoading: isLoadingModels, fetchActiveModels } = useActiveModels()
 
 const {
@@ -93,8 +92,17 @@ const {
   clearCurrentSession,
 } = usePromptTraining(() => route.params.id as string)
 
+const getFirstActiveModel = () => {
+  for (const group of modelGroups.value) {
+    const firstOption = group.options[0]
+    if (firstOption?.value) return firstOption.value
+  }
+  return ''
+}
+
 const handleCreateSession = async (metaModel?: string) => {
-  const payload = metaModel ? { meta_model: metaModel } : {}
+  const resolvedMetaModel = metaModel || getFirstActiveModel()
+  const payload = resolvedMetaModel ? { meta_model: resolvedMetaModel } : {}
   const session = await createSession(payload)
   if (session) {
     router.replace({ query: { ...route.query, session: session.id } })
@@ -117,9 +125,14 @@ const handleSubmitFeedback = async (payload: CreateFeedbackPayload) => {
   await submitFeedback(currentSession.value.id, payload)
 }
 
-const handleGenerate = async (metaModel?: string) => {
+const handleGenerate = async () => {
   if (!currentSession.value) return
-  const request = metaModel ? { meta_model: metaModel } : undefined
+  const resolvedMetaModel = currentSession.value.meta_model || getFirstActiveModel()
+  if (!resolvedMetaModel) {
+    toastError('Ошибка генерации', 'Нет доступной мета-модели для обучения')
+    return
+  }
+  const request = { meta_model: resolvedMetaModel }
   await generatePrompt(currentSession.value.id, request)
 }
 

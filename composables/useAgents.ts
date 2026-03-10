@@ -64,6 +64,7 @@ export type Agent = {
     max_tokens?: number
   }
   status: AgentStatus
+  is_disabled: boolean
   version: number
   created_at: string
   updated_at: string
@@ -82,6 +83,7 @@ export type CreateAgentData = {
     max_tokens?: number
   }
   status?: AgentStatus
+  is_disabled?: boolean
   version?: number
 }
 

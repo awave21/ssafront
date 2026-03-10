@@ -187,7 +187,7 @@ export const useFunctionParameters = (
 
   // Generate test payload (updates shared testPayload ref)
   const generateTestPayload = () => {
-    testPayload.value = JSON.stringify(buildParamsObject(bodyParameters.value, true), null, 2)
+    testPayload.value = JSON.stringify(buildParamsObject(bodyParameters.value, false), null, 2)
   }
 
   // Load from schema

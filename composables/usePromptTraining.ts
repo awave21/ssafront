@@ -166,7 +166,7 @@ export const usePromptTraining = (agentId: () => string | undefined) => {
       isGenerating.value = true
       error.value = null
 
-      const body = request?.meta_model ? { meta_model: request.meta_model } : undefined
+      const body = request?.meta_model ? { meta_model: request.meta_model } : {}
       const preview = await apiFetch<GeneratedPromptPreview>(
         `${basePath()}/sessions/${sessionId}/generate`,
         { method: 'POST', body }

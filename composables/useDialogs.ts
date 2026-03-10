@@ -5,6 +5,26 @@ import { getReadableErrorMessage } from '~/utils/api-errors'
 
 const AGENT_STATUSES = new Set<string>(['active', 'paused'])
 
+type UserAgentStateResponse = {
+  agent_id: string
+  platform: string
+  platform_user_id: string
+  is_disabled: boolean
+  disabled_at: string | null
+  disabled_by_user_id: string | null
+}
+
+const coerceIsDisabled = (value: unknown): boolean => {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true' || normalized === '1') return true
+    if (normalized === 'false' || normalized === '0' || normalized === '') return false
+  }
+  if (typeof value === 'number') return value === 1
+  return Boolean(value)
+}
+
 /**
  * Normalize a raw dialog from the API:
  * backend returns agent toggle as `status: "active"|"paused"`,
@@ -12,8 +32,11 @@ const AGENT_STATUSES = new Set<string>(['active', 'paused'])
  * so we move it to `agent_status` and reset `status` to 'NORMAL'.
  */
 const normalizeDialog = (raw: any): Dialog => {
+  const hasIsDisabled = raw?.is_disabled !== undefined && raw?.is_disabled !== null
   const agentStatus: DialogAgentStatus =
-    raw.status && AGENT_STATUSES.has(raw.status) ? raw.status : (raw.agent_status ?? 'active')
+    hasIsDisabled
+      ? (coerceIsDisabled(raw.is_disabled) ? 'paused' : 'active')
+      : (raw.status && AGENT_STATUSES.has(raw.status) ? raw.status : (raw.agent_status ?? 'active'))
 
   return {
     ...raw,
@@ -31,6 +54,26 @@ const currentAgentId = ref<string | null>(null)
 
 export const useDialogs = () => {
   const apiFetch = useApiFetch()
+
+  const resolvePlatformAndUserId = (dialog: Dialog): { platform: string; platformUserId: string } | null => {
+    const platform = dialog.platform || dialog.user_info?.platform
+    const rawPlatformUserId = dialog.user_info?.platform_id || dialog.user_info?.session_id || null
+
+    if (platform && rawPlatformUserId) {
+      return { platform, platformUserId: String(rawPlatformUserId) }
+    }
+
+    // Fallback for legacy telegram dialog IDs like telegram:306597938
+    if (dialog.id?.includes(':')) {
+      const [derivedPlatform, ...idParts] = dialog.id.split(':')
+      const derivedId = idParts.join(':')
+      if (derivedPlatform && derivedId) {
+        return { platform: derivedPlatform, platformUserId: derivedId }
+      }
+    }
+
+    return null
+  }
 
   /**
    * Fetch dialogs for a specific agent
@@ -158,36 +201,64 @@ export const useDialogs = () => {
   }
 
   /**
-   * Toggle per-dialog agent status (active <-> paused) via API
-   * PATCH /agents/{agent_id}/dialogs/{dialog_id}/status  { status: "paused"|"active" }
+   * Toggle per-user agent status (active <-> paused) via API
+   * PUT /agents/{agent_id}/users/{platform}/{platform_user_id}/state  { is_disabled: boolean }
    */
   const toggleDialogAgentStatus = async (
     agentId: string,
-    dialogId: string
+    dialog: Dialog
   ): Promise<DialogAgentStatus | null> => {
-    if (!agentId || !dialogId) return null
+    if (!agentId || !dialog?.id) return null
 
-    const idx = dialogs.value.findIndex(d => d.id === dialogId)
+    const resolved = resolvePlatformAndUserId(dialog)
+    if (!resolved) {
+      error.value = 'Не удалось определить пользователя диалога'
+      return null
+    }
+
+    const { platform, platformUserId } = resolved
+    const encodedPlatform = encodeURIComponent(platform)
+    const encodedUserId = encodeURIComponent(platformUserId)
+
+    const stateUrl = `agents/${agentId}/users/${encodedPlatform}/${encodedUserId}/state`
+
+    const idx = dialogs.value.findIndex(d => d.id === dialog.id)
     const currentStatus: DialogAgentStatus = idx !== -1
       ? (dialogs.value[idx].agent_status ?? 'active')
       : 'active'
-    const newStatus: DialogAgentStatus = currentStatus === 'active' ? 'paused' : 'active'
 
     // Optimistic update
+    const optimisticStatus: DialogAgentStatus = currentStatus === 'active' ? 'paused' : 'active'
     if (idx !== -1) {
-      dialogs.value[idx] = { ...dialogs.value[idx], agent_status: newStatus }
+      dialogs.value[idx] = { ...dialogs.value[idx], agent_status: optimisticStatus }
     }
 
     try {
-      await apiFetch(
-        `agents/${agentId}/dialogs/${encodeURIComponent(dialogId)}/status`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: { status: newStatus }
-        }
-      )
-      return newStatus
+      const nextIsDisabled = currentStatus === 'active'
+
+      console.info('[Dialog Agent Toggle] PUT state request', {
+        method: 'PUT',
+        url: stateUrl,
+        body: { is_disabled: nextIsDisabled },
+        action: nextIsDisabled ? 'disable' : 'enable'
+      })
+      await apiFetch(stateUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: { is_disabled: nextIsDisabled }
+      })
+      console.info('[Dialog Agent Toggle] PUT state response', {
+        method: 'PUT',
+        url: stateUrl,
+        success: true,
+        is_disabled: nextIsDisabled
+      })
+
+      const finalStatus: DialogAgentStatus = nextIsDisabled ? 'paused' : 'active'
+      if (idx !== -1) {
+        dialogs.value[idx] = { ...dialogs.value[idx], agent_status: finalStatus }
+      }
+      return finalStatus
     } catch (err: any) {
       // Rollback on failure
       if (idx !== -1) {
@@ -195,6 +266,48 @@ export const useDialogs = () => {
       }
       error.value = getReadableErrorMessage(err, 'Не удалось изменить статус агента')
       console.error('[useDialogs] toggleDialogAgentStatus error:', err)
+      return null
+    }
+  }
+
+  const syncDialogAgentStatus = async (
+    agentId: string,
+    dialog: Dialog
+  ): Promise<DialogAgentStatus | null> => {
+    if (!agentId || !dialog?.id) return null
+
+    const resolved = resolvePlatformAndUserId(dialog)
+    if (!resolved) return null
+
+    const { platform, platformUserId } = resolved
+    const stateUrl = `agents/${agentId}/users/${encodeURIComponent(platform)}/${encodeURIComponent(platformUserId)}/state`
+
+    try {
+      console.info('[Dialog Agent Toggle] GET state sync request', {
+        method: 'GET',
+        url: stateUrl,
+        agentId,
+        platform,
+        platformUserId,
+        dialogId: dialog.id
+      })
+      const currentState = await apiFetch<UserAgentStateResponse>(stateUrl)
+      console.info('[Dialog Agent Toggle] GET state sync response', {
+        method: 'GET',
+        url: stateUrl,
+        is_disabled: currentState.is_disabled,
+        is_disabled_type: typeof (currentState as any)?.is_disabled,
+        disabled_at: currentState.disabled_at,
+        disabled_by_user_id: currentState.disabled_by_user_id
+      })
+      const normalized: DialogAgentStatus = coerceIsDisabled((currentState as any)?.is_disabled) ? 'paused' : 'active'
+      const idx = dialogs.value.findIndex(d => d.id === dialog.id)
+      if (idx !== -1) {
+        dialogs.value[idx] = { ...dialogs.value[idx], agent_status: normalized }
+      }
+      return normalized
+    } catch (err: any) {
+      console.error('[useDialogs] syncDialogAgentStatus error:', err)
       return null
     }
   }
@@ -352,6 +465,7 @@ export const useDialogs = () => {
     updateDialog,
     deleteDialog,
     toggleDialogAgentStatus,
+    syncDialogAgentStatus,
     upsertDialog,
     updateDialogStatus,
     updateLastMessage,

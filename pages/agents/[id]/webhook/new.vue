@@ -1,11 +1,18 @@
 <template>
-  <div class="h-full">
-    <AgentFunctionsPanel ref="functionsPanelRef" :agent-id="route.params.id as string" />
+  <div class="h-full flex flex-col">
+    <div class="flex-1 min-h-0">
+    <AgentFunctionsPanel
+      ref="functionsPanelRef"
+      :agent-id="agentId"
+      :hide-list="true"
+      :auto-create="true"
+    />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AgentFunctionsPanel from '~/components/agents/AgentFunctionsPanel.vue'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
@@ -14,26 +21,38 @@ const route = useRoute()
 const functionsPanelRef = ref<InstanceType<typeof AgentFunctionsPanel>>()
 const store = useAgentEditorStore()
 
-const { 
-  functionsRunAction, 
-  functionsDeleteAction, 
+const agentId = computed(() => {
+  const value = route.params.id
+  return Array.isArray(value) ? value[0] : String(value || '')
+})
+
+const {
+  functionsRunAction,
+  functionsDeleteAction,
   functionsDuplicateAction,
   functionsToggleStatusAction,
   functionsSaveAction,
+  setFunctionsCreateAction,
+  clearFunctionsCreateAction,
   functionsSelectedFunction,
   functionsTesting,
   functionsCanSave,
   breadcrumbTitle,
-  breadcrumbAgentName
+  breadcrumbAgentName,
+  breadcrumbBackPath,
 } = useLayoutState()
+const createActionOwner = 'webhook-new-page'
 
-// Set breadcrumb
-breadcrumbTitle.value = 'Функции'
-watch(() => store.agent?.name, (name) => {
-  breadcrumbAgentName.value = name || ''
+const syncBreadcrumb = () => {
+  breadcrumbTitle.value = 'Webhook'
+  breadcrumbAgentName.value = store.agent?.name || ''
+  breadcrumbBackPath.value = `/agents/${agentId.value}/webhook`
+}
+
+watch(() => store.agent?.name, () => {
+  syncBreadcrumb()
 }, { immediate: true })
 
-// Provide actions to layout immediately
 functionsRunAction.value = () => {
   functionsPanelRef.value?.testTool()
 }
@@ -49,8 +68,8 @@ functionsSaveAction.value = () => {
 functionsDuplicateAction.value = () => {
   functionsPanelRef.value?.duplicateFunction()
 }
+setFunctionsCreateAction(createActionOwner, null)
 
-// Watch for changes in panel state and sync to layout
 watch(() => functionsPanelRef.value?.selectedFunctionRef || null, (val) => {
   functionsSelectedFunction.value = val
 }, { deep: true, immediate: true })
@@ -63,20 +82,18 @@ watch(() => functionsPanelRef.value?.canSaveRef ?? false, (val) => {
   functionsCanSave.value = val || false
 }, { immediate: true })
 
-// Load agent data
-const resolveAgentId = (value: string | string[] | undefined) =>
-  Array.isArray(value) ? value[0] : value
-
 watch(
-  () => route.params.id,
+  () => agentId.value,
   (id) => {
-    const resolved = resolveAgentId(id as string | string[] | undefined)
-    if (resolved) {
-      store.ensureAgentLoaded(resolved)
-    }
+    if (id) store.ensureAgentLoaded(id)
   },
-  { immediate: true }
+  { immediate: true },
 )
+
+onMounted(() => {
+  syncBreadcrumb()
+  setTimeout(syncBreadcrumb, 0)
+})
 
 onUnmounted(() => {
   functionsRunAction.value = null
@@ -84,15 +101,14 @@ onUnmounted(() => {
   functionsDuplicateAction.value = null
   functionsToggleStatusAction.value = null
   functionsSaveAction.value = null
+  clearFunctionsCreateAction(createActionOwner)
   functionsSelectedFunction.value = null
   functionsTesting.value = false
   functionsCanSave.value = false
-  breadcrumbTitle.value = ''
-  breadcrumbAgentName.value = ''
 })
 
 definePageMeta({
   layout: 'agent' as any,
-  middleware: 'auth'
+  middleware: 'auth',
 })
 </script>

@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { storeToRefs } from 'pinia'
-import { Menu, Check, Loader2, Play, Trash2, Copy } from 'lucide-vue-next'
+import { computed, ref, onMounted } from 'vue'
+import { Menu, Check, Play, Trash2, Copy } from 'lucide-vue-next'
 import { navigateTo } from '#app'
 import DashboardSidebar from '~/components/DashboardSidebar.vue'
 import DashboardTopBar from '~/components/DashboardTopBar.vue'
 import Switch from '~/components/ui/switch/Switch.vue'
-import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
-import { usePermissions } from '~/composables/usePermissions'
 import { useLayoutState } from '~/composables/useLayoutState'
 
 const {
@@ -16,7 +13,7 @@ const {
   toggleSidebar,
   breadcrumbTitle,
   breadcrumbAgentName,
-  hideTopBarActions,
+  breadcrumbBackPath,
   functionsRunAction,
   functionsDeleteAction,
   functionsDuplicateAction,
@@ -24,19 +21,17 @@ const {
   functionsSaveAction,
   functionsSelectedFunction,
   functionsTesting,
-  functionsCanSave
+  functionsCanSave,
+  functionsCreateAction
 } = useLayoutState()
-const store = useAgentEditorStore()
-const { isPromptFullscreen, isSaving } = storeToRefs(store)
-const { canEditAgents } = usePermissions()
+const isPromptFullscreen = useState<boolean>('prompt-fullscreen', () => false)
 const isMobileSidebarOpen = ref(false)
-
-const handleSave = async () => {
-  await store.saveAgent()
-}
-
-const handleCancel = () => {
-  navigateTo('/agents')
+const functionsCreateLabel = computed(() =>
+  breadcrumbTitle.value === 'Webhook' ? 'Создать webhook' : 'Создать функцию',
+)
+const handleBreadcrumbBack = () => {
+  if (!breadcrumbBackPath.value) return
+  navigateTo(breadcrumbBackPath.value)
 }
 
 onMounted(() => {
@@ -92,6 +87,13 @@ onMounted(() => {
         <template #left>
           <!-- Хлебные крошки агента -->
           <template v-if="breadcrumbTitle">
+            <button
+              v-if="breadcrumbBackPath"
+              @click="handleBreadcrumbBack"
+              class="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              ←
+            </button>
             <span class="text-sm text-muted-foreground font-normal">{{ breadcrumbTitle }}</span>
             <span v-if="breadcrumbAgentName" class="text-sm text-border">/</span>
             <span v-if="breadcrumbAgentName" class="text-sm text-foreground font-medium">{{ breadcrumbAgentName }}</span>
@@ -106,8 +108,18 @@ onMounted(() => {
             <Menu class="w-5 h-5" />
           </button>
           <!-- Functions page: show Run, Save, Delete, Status toggle -->
-          <template v-if="functionsRunAction">
+          <template
+            v-if="functionsRunAction || functionsSaveAction || functionsDeleteAction || functionsDuplicateAction || functionsToggleStatusAction || functionsCreateAction"
+          >
             <button
+              v-if="functionsCreateAction"
+              @click="functionsCreateAction"
+              class="px-4 py-1.5 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700 transition-colors"
+            >
+              {{ functionsCreateLabel }}
+            </button>
+            <button
+              v-if="functionsRunAction"
               @click="functionsRunAction"
               :disabled="functionsTesting || !functionsSelectedFunction"
               class="px-4 py-1.5 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
@@ -150,24 +162,6 @@ onMounted(() => {
                 @update:model-value="functionsToggleStatusAction" 
               />
             </div>
-          </template>
-          <!-- Other pages: show Save/Cancel (hidden for auto-saving pages) -->
-          <template v-else-if="canEditAgents && breadcrumbTitle && !functionsRunAction && !hideTopBarActions">
-            <button
-              @click="handleCancel"
-              class="px-4 py-1.5 text-sm text-muted-foreground font-medium hover:text-foreground transition-colors"
-            >
-              Отменить
-            </button>
-            <button
-              @click="handleSave"
-              :disabled="isSaving"
-              class="px-4 py-1.5 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-            >
-              <Loader2 v-if="isSaving" class="h-3.5 w-3.5 animate-spin" />
-              <Check v-else class="h-3.5 w-3.5" />
-              Сохранить
-            </button>
           </template>
         </template>
       </DashboardTopBar>

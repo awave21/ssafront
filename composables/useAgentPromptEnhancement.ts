@@ -52,9 +52,10 @@ export const useAgentPromptEnhancement = () => {
     if (!feedback) return { ok: false, failedStep: 'submit-feedback' }
 
     onStepChange?.('generate-prompt')
+    const resolvedMetaModel = metaModel || session.meta_model
     const preview = await generatePrompt(
       session.id,
-      metaModel ? { meta_model: metaModel } : undefined
+      resolvedMetaModel ? { meta_model: resolvedMetaModel } : {}
     )
     if (!preview) return { ok: false, failedStep: 'generate-prompt' }
 

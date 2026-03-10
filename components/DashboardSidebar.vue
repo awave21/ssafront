@@ -174,6 +174,7 @@ import {
   Database,
   Cpu,
   Code,
+  Webhook,
   KeyRound,
   GraduationCap,
   ChevronsUpDown
@@ -284,6 +285,7 @@ const agentMenuItems = [
   { id: 'connections', name: 'Интеграции', icon: Link, path: (id: string) => `/agents/${id}/connections` },
   { id: 'knowledge', name: 'База знаний', icon: Database, path: (id: string) => `/agents/${id}/knowledge` },
   { id: 'functions', name: 'Функции', icon: Code, path: (id: string) => `/agents/${id}/functions` },
+  { id: 'webhook', name: 'Webhook', icon: Webhook, path: (id: string) => `/agents/${id}/webhook` },
   { id: 'model', name: 'Модель', icon: Cpu, path: (id: string) => `/agents/${id}/model` },
   { id: 'chat', name: 'Чат', icon: MessageSquare, path: (id: string) => `/agents/${id}/chat` },
   { id: 'api-keys', name: 'API-ключи', icon: KeyRound, path: (id: string) => `/agents/${id}/api-keys`, requiresScope: 'settings:write' },

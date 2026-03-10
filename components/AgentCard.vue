@@ -17,15 +17,17 @@
         </h3>
         <span
           class="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium"
-          :class="agent.status === 'published'
+          :class="agent.is_disabled
+            ? 'bg-amber-50 text-amber-700'
+            : agent.status === 'published'
             ? 'bg-green-50 text-green-700'
             : 'bg-amber-50 text-amber-700'"
         >
           <span
             class="w-1.5 h-1.5 rounded-full"
-            :class="agent.status === 'published' ? 'bg-green-500' : 'bg-amber-500'"
+            :class="agent.is_disabled ? 'bg-amber-500' : (agent.status === 'published' ? 'bg-green-500' : 'bg-amber-500')"
           />
-          {{ agent.status === 'published' ? 'Активен' : 'Черновик' }}
+          {{ agent.is_disabled ? 'Отключен' : (agent.status === 'published' ? 'Активен' : 'Черновик') }}
         </span>
       </div>
     </div>

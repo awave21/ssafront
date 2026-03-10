@@ -148,8 +148,8 @@ const userInitials = computed(() => {
 })
 
 // Methods
-const toggleEnabled = () => {
+const toggleEnabled = async () => {
   if (!props.dialog?.id) return
-  toggleDialogAgentStatus(props.agent.id, props.dialog.id)
+  await toggleDialogAgentStatus(props.agent.id, props.dialog)
 }
 </script>

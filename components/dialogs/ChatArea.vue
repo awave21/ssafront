@@ -46,7 +46,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import ChatHeader from './ChatHeader.vue'
 import MessagesFeed from './MessagesFeed.vue'
 import MessageComposer from './MessageComposer.vue'
@@ -81,17 +81,40 @@ const {
   dialogHasMore
 } = useMessages()
 
-const { markAsRead, getDialogById } = useDialogs()
+const { markAsRead, getDialogById, syncDialogAgentStatus } = useDialogs()
 
 // Computed
 const messages = computed(() => messagesMap[props.dialogId] ?? [])
 const currentDialog = computed(() => getDialogById(props.dialogId))
 const hasMore = computed(() => dialogHasMore(props.dialogId))
 const isAgentEnabled = computed(() => (currentDialog.value?.agent_status ?? 'active') === 'active')
+const syncedStateDialogId = ref<string | null>(null)
+const isSyncingState = ref(false)
+
+const syncDialogStateIfNeeded = async () => {
+  const dialog = currentDialog.value
+  if (!dialog?.id) {
+    console.info('[ChatArea] Skip user-state sync: dialog meta is not loaded yet', {
+      dialogId: props.dialogId,
+      agentId: props.agent.id
+    })
+    return
+  }
+  if (syncedStateDialogId.value === dialog.id || isSyncingState.value) return
+
+  isSyncingState.value = true
+  try {
+    await syncDialogAgentStatus(props.agent.id, dialog)
+    syncedStateDialogId.value = dialog.id
+  } finally {
+    isSyncingState.value = false
+  }
+}
 
 // Load messages on mount and dialog change
 const loadMessages = async () => {
   console.log('[ChatArea] loadMessages for dialog:', props.dialogId, 'agent:', props.agent.id)
+  await syncDialogStateIfNeeded()
   await fetchMessages(props.agent.id, props.dialogId, { limit: 50 })
   console.log('[ChatArea] Messages loaded, count:', messages.value.length, 'error:', messagesError.value)
   markAsRead(props.dialogId)
@@ -132,5 +155,17 @@ const handleRetry = async (messageId: string) => {
 }
 
 // Watch for dialog changes
-watch(() => props.dialogId, () => loadMessages(), { immediate: true })
+watch(() => props.dialogId, () => {
+  syncedStateDialogId.value = null
+  loadMessages()
+}, { immediate: true })
+
+watch(
+  () => currentDialog.value?.id,
+  async (id) => {
+    if (!id) return
+    await syncDialogStateIfNeeded()
+  },
+  { immediate: true }
+)
 </script>

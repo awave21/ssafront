@@ -20,28 +20,36 @@
       Напр: get_patient_list, create_appointment, send_notification
     </div>
     
-    <Input
-      :model-value="description"
-      @update:model-value="$emit('update:description', $event)"
-      placeholder="Краткое описание функции"
-      class="mt-1.5 text-[13px] text-slate-500 border-none bg-transparent p-0 h-auto focus-visible:ring-0 focus-visible:ring-offset-0"
-    />
+    <div v-if="functionType === 'http_webhook'" class="mt-3 grid gap-1.5 max-w-[320px]">
+      <span class="text-xs font-medium text-slate-600">Режим webhook</span>
+      <Select :model-value="functionScope" @update:model-value="$emit('update:functionScope', String($event))">
+        <SelectTrigger class="h-8 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="tool">Прямой вызов</SelectItem>
+          <SelectItem value="function_only">Через функции</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { Input } from '~/components/ui/input'
 import { Badge } from '~/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select'
 
 defineProps<{
   displayName: string
   functionName: string
   functionId: string
-  description: string
+  functionType: 'internal' | 'http_webhook'
+  functionScope: 'tool' | 'function_only'
 }>()
 
 defineEmits<{
   'update:displayName': [value: string]
-  'update:description': [value: string]
+  'update:functionScope': [value: string]
 }>()
 </script>

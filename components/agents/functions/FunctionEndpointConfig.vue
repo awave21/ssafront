@@ -58,7 +58,7 @@
           :title="v.description || v.value"
         >
           <Braces class="w-3 h-3 mr-1" />
-          {{ v.name }}
+          <span v-text="formatVariableToken(v.name)" />
         </Button>
       </div>
     </div>
@@ -67,14 +67,14 @@
     <div>
       <label class="block text-xs font-medium mb-1.5 text-slate-900">Учётные данные (Credential)</label>
       <Select
-        :model-value="credentialId"
-        @update:model-value="$emit('update:credentialId', $event)"
+        :model-value="credentialSelectValue"
+        @update:model-value="handleCredentialChange"
       >
         <SelectTrigger>
           <SelectValue placeholder="Без авторизации" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem :value="null">Без авторизации</SelectItem>
+          <SelectItem :value="NONE_CREDENTIAL_VALUE">Без авторизации</SelectItem>
           <SelectItem
             v-for="cred in credentials"
             :key="cred.id"
@@ -110,7 +110,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { Braces, AlertCircle } from 'lucide-vue-next'
 import { hasVariables, splitByVars } from '~/utils/function-schema'
 
@@ -125,25 +125,6 @@ import SelectValue from '~/components/ui/select/SelectValue.vue'
 import Alert from '~/components/ui/alert/Alert.vue'
 import AlertDescription from '~/components/ui/alert/AlertDescription.vue'
 import AlertTitle from '~/components/ui/alert/AlertTitle.vue'
-
-defineProps<{
-  endpoint: string
-  httpMethod: string
-  credentialId: string | null
-  credentials: any[]
-  variables: Array<{ name: string; value: string; description: string }>
-  hasSecretHeaders: boolean
-}>()
-
-defineEmits<{
-  'update:endpoint': [value: string]
-  'update:httpMethod': [value: string]
-  'update:credentialId': [value: string | null]
-  'insert-variable': [name: string]
-  'remove-secret-headers': []
-  'focus-url': []
-  'register-url-ref': [el: HTMLInputElement | null]
-}>()
 
 // Sync overlay scroll with input scroll
 const overlayRef = ref<HTMLElement | null>(null)
@@ -172,4 +153,33 @@ const CREDENTIAL_AUTH_TYPES: Record<string, string> = {
 }
 
 const getAuthTypeLabel = (type: string) => CREDENTIAL_AUTH_TYPES[type] || type
+
+const NONE_CREDENTIAL_VALUE = '__none__'
+
+const props = defineProps<{
+  endpoint: string
+  httpMethod: string
+  credentialId: string | null
+  credentials: any[]
+  variables: Array<{ name: string; value: string; description: string }>
+  hasSecretHeaders: boolean
+}>()
+
+const emit = defineEmits<{
+  'update:endpoint': [value: string]
+  'update:httpMethod': [value: string]
+  'update:credentialId': [value: string | null]
+  'insert-variable': [name: string]
+  'remove-secret-headers': []
+  'focus-url': []
+  'register-url-ref': [el: HTMLInputElement | null]
+}>()
+
+const credentialSelectValue = computed(() => props.credentialId ?? NONE_CREDENTIAL_VALUE)
+
+const handleCredentialChange = (value: string) => {
+  emit('update:credentialId', value === NONE_CREDENTIAL_VALUE ? null : value)
+}
+
+const formatVariableToken = (name: string) => `{{${name}}}`
 </script>

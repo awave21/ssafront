@@ -23,6 +23,7 @@ export interface Tool {
   response_transform: ResponseTransform | null;
   headers?: Record<string, string> | null;
   status?: 'active' | 'deprecated';
+  webhook_scope?: 'tool' | 'function_only' | 'both';
   version?: number;
   created_at?: string;
   updated_at?: string;

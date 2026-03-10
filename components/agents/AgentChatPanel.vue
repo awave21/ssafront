@@ -3,8 +3,15 @@
     <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
       <div class="flex flex-col gap-1">
         <div class="flex items-center gap-3">
-          <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+          <div class="w-2 h-2 rounded-full" :class="agent?.is_disabled ? 'bg-amber-500' : 'bg-green-500 animate-pulse'"></div>
           <h3 class="font-bold text-slate-900">Тестовый чат с агентом</h3>
+          <span
+            v-if="agent?.is_disabled"
+            class="inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 uppercase tracking-wide"
+            title="Агент не инициирует новые ответы, но входящие сообщения продолжают приходить"
+          >
+            Отключен
+          </span>
         </div>
         <p
           v-if="chatContextLabel"
@@ -83,16 +90,25 @@
           </div>
           <div
             v-if="msg.role === 'agent' && msg.tools_called && msg.tools_called.length > 0"
-            class="flex flex-wrap gap-1.5"
+            class="flex flex-col gap-1.5"
           >
-            <span
+            <div
               v-for="(tool, toolIndex) in msg.tools_called"
               :key="toolIndex"
-              class="text-[10px] text-indigo-600 px-2 py-0.5 bg-indigo-50 rounded-md font-medium border border-indigo-100"
-              :title="`Аргументы: ${JSON.stringify(tool.args)}`"
+              class="text-[10px] text-indigo-700 px-2.5 py-1.5 bg-indigo-50 rounded-md border border-indigo-100"
             >
-              🔧 {{ tool.name }}
-            </span>
+              <div class="font-medium">🔧 {{ tool.name }}</div>
+              <div class="mt-0.5 whitespace-pre-wrap text-indigo-700/90">
+                Когда вызывать: {{ formatQuoted(getToolWhenToCall(tool)) }}
+              </div>
+              <div
+                v-for="(paramLine, paramIndex) in getToolParameterLines(tool)"
+                :key="paramIndex"
+                class="whitespace-pre-wrap text-indigo-700/90"
+              >
+                {{ paramLine }}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -115,13 +131,14 @@
           v-model="userInput"
           @input="autoResize"
           @keydown.enter.prevent="sendMessage"
-          placeholder="Напишите сообщение..."
+          :placeholder="agent?.is_disabled ? 'Агент отключен: новые ответы не отправляются' : 'Напишите сообщение...'"
           rows="1"
+          :disabled="agent?.is_disabled"
           class="flex-1 bg-slate-50 border border-slate-100 rounded-md px-5 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all resize-none max-h-32"
         ></textarea>
         <button
           type="submit"
-          :disabled="!userInput.trim() || isTyping"
+          :disabled="!userInput.trim() || isTyping || !!agent?.is_disabled"
           class="absolute right-2 p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
         >
           <Send class="w-5 h-5" />
@@ -150,6 +167,32 @@ const md = createSafeMarkdownRenderer({
 const renderAgentContent = (content: unknown) => {
   if (typeof content !== 'string') return ''
   return md.render(content)
+}
+
+const formatQuoted = (value: string) => JSON.stringify(value ?? '')
+
+const formatToolValue = (value: unknown) => JSON.stringify(value ?? null)
+
+const getToolWhenToCall = (tool: any) => {
+  if (typeof tool?.when_to_call === 'string') return tool.when_to_call
+  if (typeof tool?.description === 'string') return tool.description
+  return ''
+}
+
+const getToolParameterLines = (tool: any) => {
+  const args = tool?.args
+  if (args && typeof args === 'object' && !Array.isArray(args)) {
+    const entries = Object.entries(args as Record<string, unknown>)
+    if (entries.length) {
+      return entries.map(([key, value]) => `${key} = ${formatToolValue(value)}`)
+    }
+  }
+
+  if (Array.isArray(tool?.parameters_display) && tool.parameters_display.length > 0) {
+    return tool.parameters_display.map((line: unknown) => String(line))
+  }
+
+  return ['(без параметров)']
 }
 
 const store = useAgentEditorStore()

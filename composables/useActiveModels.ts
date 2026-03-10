@@ -13,12 +13,18 @@ export type ActiveModelGroup = {
   options: ActiveModelOption[]
 }
 
+// Временно скрываем проблемные модели из UI выбора.
+const HIDDEN_MODEL_VALUES = new Set<string>(['5'])
+
 const isValidOption = (option: any): option is ActiveModelOption =>
   option &&
   typeof option.value === 'string' &&
   typeof option.provider === 'string' &&
   typeof option.model_name === 'string' &&
   typeof option.label === 'string'
+
+const isVisibleOption = (option: ActiveModelOption): boolean =>
+  !HIDDEN_MODEL_VALUES.has(option.value)
 
 const normalizeGroups = (payload: any): ActiveModelGroup[] => {
   if (!Array.isArray(payload)) return []
@@ -27,7 +33,7 @@ const normalizeGroups = (payload: any): ActiveModelGroup[] => {
     .filter((group: any) => group && typeof group.group === 'string' && Array.isArray(group.options))
     .map((group: any) => ({
       group: group.group,
-      options: group.options.filter(isValidOption)
+      options: group.options.filter(isValidOption).filter(isVisibleOption)
     }))
     .filter((group: ActiveModelGroup) => group.options.length > 0)
 }
