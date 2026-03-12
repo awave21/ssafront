@@ -38,7 +38,8 @@ export type SqnsService = {
 }
 
 export type SqnsSpecialist = {
-  id: number
+  id: string
+  external_id: number
   name: string
   role?: string
   email?: string
@@ -398,9 +399,22 @@ export const useAgents = () => {
     }
   }
 
-  const fetchSqnsSpecialists = async (agentId: string) => {
+  const fetchSqnsSpecialists = async (agentId: string, params?: {
+    search?: string,
+    is_active?: boolean,
+    limit?: number,
+    offset?: number
+  }) => {
     try {
-      const response = await apiFetch<{ specialists: SqnsSpecialist[] }>(`/agents/${agentId}/sqns/specialists`)
+      const query = new URLSearchParams()
+      if (params?.search) query.append('search', params.search)
+      if (params?.is_active !== undefined) query.append('is_active', params.is_active.toString())
+      if (params?.limit) query.append('limit', params.limit.toString())
+      if (params?.offset) query.append('offset', params.offset.toString())
+
+      const response = await apiFetch<{ specialists: SqnsSpecialist[] }>(`/agents/${agentId}/sqns/specialists`, {
+        query: Object.fromEntries(query)
+      })
       return response.specialists
     } catch (err: any) {
       sqnsError.value = getReadableErrorMessage(err, 'Не удалось загрузить специалистов')

@@ -538,7 +538,7 @@ const filteredSpecialists = computed(() => {
   if (!query) return specialists.value
 
   return specialists.value.filter((specialist) => {
-    const haystack = `${specialist.name ?? ''} ${specialist.role ?? ''}`.toLowerCase()
+    const haystack = `${specialist.name ?? ''} ${specialist.role ?? ''} ${specialist.email ?? ''} ${specialist.phone ?? ''}`.toLowerCase()
     return haystack.includes(query)
   })
 })
@@ -573,16 +573,17 @@ const loadCategories = async (silent = false) => {
   }
 }
 
-const loadSpecialists = async () => {
+const loadSpecialists = async (silent = false) => {
   try {
-    isSpecialistsLoading.value = true
-    // TODO: Backend endpoint /sqns/specialists не реализован
-    // specialists.value = await fetchSqnsSpecialists(props.agentId)
-    specialists.value = []
+    if (!silent) isSpecialistsLoading.value = true
+    specialists.value = await fetchSqnsSpecialists(props.agentId, {
+      limit: 1000,
+      offset: 0
+    })
   } catch (err) {
     console.error('Failed to load specialists:', err)
   } finally {
-    isSpecialistsLoading.value = false
+    if (!silent) isSpecialistsLoading.value = false
   }
 }
 
@@ -590,11 +591,16 @@ const handleSync = async () => {
   try {
     isSyncing.value = true
     const result = await syncSqns(props.agentId)
-    toastSuccess('Синхронизация завершена', `Обновлено: ${result.services_synced} услуг, ${result.categories_synced} категорий`)
+    toastSuccess(
+      'Синхронизация завершена',
+      `Обновлено: ${result.resources_synced} специалистов, ${result.services_synced} услуг, ${result.categories_synced} категорий`
+    )
     emit('sync-complete')
-    loadServices()
-    loadCategories()
-    await loadSpecialists()
+    await Promise.all([
+      loadServices(true),
+      loadCategories(true),
+      loadSpecialists(true)
+    ])
   } catch (err: any) {
     toastError('Ошибка синхронизации', getReadableErrorMessage(err, 'Не удалось выполнить синхронизацию'))
   } finally {
