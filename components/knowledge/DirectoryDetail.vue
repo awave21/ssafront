@@ -226,18 +226,19 @@
             <RowContextMenu
               v-for="row in table.getRowModel().rows"
               :key="row.id"
-              @edit="startEditRow(row.original)"
+              @edit="openEditRowSheet(row.original)"
               @duplicate="duplicateRow(row.original)"
               @delete="$emit('delete', row.original.id)"
             >
               <TableRow 
-                class="group"
+                class="group cursor-pointer"
                 :class="{ 'bg-indigo-50/30': editingCell?.itemId === row.original.id }"
+                @click="openEditRowSheet(row.original)"
               >
                 <TableCell class-name="w-14 !px-0">
                   <div class="flex items-center justify-center gap-1 h-full">
                     <button
-                      @click="openEditRowSheet(row.original)"
+                      @click.stop="openEditRowSheet(row.original)"
                       class="p-1 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors opacity-0 group-hover:opacity-100"
                       title="Развернуть"
                     >
@@ -247,6 +248,7 @@
                       type="checkbox"
                       :checked="row.getIsSelected()"
                       @change="row.toggleSelected()"
+                      @click.stop
                       class="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                     />
                   </div>
@@ -275,7 +277,7 @@
                 <TableCell class-name="px-4 py-2 w-16">
                   <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
-                      @click="$emit('delete', row.original.id)"
+                      @click.stop="$emit('delete', row.original.id)"
                       class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                       title="Удалить"
                     >
@@ -822,11 +824,6 @@ const redo = async () => {
 }
 
 // --- Row Actions ---
-const startEditRow = (item: DirectoryItem) => {
-  const firstCol = orderedColumns.value[0]
-  if (firstCol) startEdit(item, firstCol)
-}
-
 const duplicateRow = (item: DirectoryItem) => {
   emit('create', { ...item.data })
 }

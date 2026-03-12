@@ -35,14 +35,14 @@
             <span class="text-sm text-slate-700">{{ formData[col.name] ? 'Да' : 'Нет' }}</span>
           </label>
 
-          <!-- Long text -->
+          <!-- Text -->
           <textarea
-            v-else-if="col.type === 'text' && isLongField(col.name)"
+            v-else-if="col.type === 'text'"
             :ref="(el) => setRef(col.name, el)"
             v-model="formData[col.name]"
             :placeholder="getPlaceholder(col.name, col.label)"
             rows="4"
-            class="mt-1 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:bg-white transition-all resize-none"
+            class="mt-1 w-full min-h-[96px] rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 whitespace-pre-wrap break-words focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:bg-white transition-all resize-y"
           />
 
           <!-- Number -->
@@ -123,7 +123,7 @@ import {
   SheetTitle,
   SheetClose,
 } from '~/components/ui/sheet'
-import { isLongTextField, getFieldPlaceholder } from '~/utils/directory-helpers'
+import { getFieldPlaceholder } from '~/utils/directory-helpers'
 
 const props = defineProps<{
   open: boolean
@@ -144,7 +144,6 @@ const hasData = computed(() =>
   Object.values(formData.value).some(v => v !== null && v !== undefined && v !== '' && v !== false)
 )
 
-const isLongField = (name: string) => isLongTextField(name)
 const getPlaceholder = (name: string, label: string) => getFieldPlaceholder(name, label)
 
 const setRef = (name: string, el: any) => {
