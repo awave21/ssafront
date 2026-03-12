@@ -132,21 +132,40 @@ const filterToolsCalledForCurrentTurn = (responsePayload: any): ToolCallView[] |
   const rawTools = Array.isArray(responsePayload?.tools_called) ? responsePayload.tools_called : []
   if (!rawTools.length) return undefined
 
-  const allowed = collectCurrentTurnToolCallKeys(responsePayload?.messages)
-  if (!allowed.size) return undefined
+  const normalizedRawTools: ToolCallView[] = rawTools
+    .map((item: any) => {
+      if (!item || typeof item !== 'object') return null
 
-  const filtered = rawTools.filter((item: any) => {
-    if (!item || typeof item !== 'object') return false
-    const toolName = String(item.name || '')
-    if (!toolName) return false
-    const toolCallId = item.tool_call_id == null ? null : String(item.tool_call_id)
+      const toolNameRaw = item.name ?? item.tool_name ?? item.toolName
+      const toolName = String(toolNameRaw || '').trim()
+      if (!toolName) return null
+
+      return {
+        name: toolName,
+        tool_call_id: item.tool_call_id == null ? null : String(item.tool_call_id),
+        args: normalizeToolArgs(item.args ?? item.arguments)
+      } satisfies ToolCallView
+    })
+    .filter((tool: ToolCallView | null): tool is ToolCallView => tool !== null)
+
+  if (!normalizedRawTools.length) return undefined
+
+  const allowed = collectCurrentTurnToolCallKeys(responsePayload?.messages)
+  // Some backends (notably knowledge/directory tools) may return tools_called
+  // without corresponding tool-call parts in messages payload.
+  // In this case fallback to raw tools to avoid hiding valid calls in UI.
+  if (!allowed.size) return normalizedRawTools
+
+  const filtered = normalizedRawTools.filter((item) => {
+    const toolName = item.name
+    const toolCallId = item.tool_call_id
     if (toolCallId) return allowed.has(`id:${toolCallId}`)
-    const args = normalizeToolArgs(item.args)
+    const args = item.args
     const argsKey = JSON.stringify(args, Object.keys(args).sort())
     return allowed.has(`payload:${toolName}:${argsKey}`)
   })
 
-  return filtered.length ? filtered : undefined
+  return filtered.length ? filtered : normalizedRawTools
 }
 
 const createEmptyForm = (): AgentForm => ({
@@ -803,19 +822,17 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
         }))
       : []
 
-    const knowledgeToolNames = new Set(
-      (directoriesComposable.value?.directories ?? [])
-        .map(directory => String(directory.tool_name || '').trim())
-        .filter(Boolean)
-    )
+    const directoryTools: PromptSidebarTool[] = (directoriesComposable.value?.directories ?? [])
+      .map(directory => ({
+        name: String(directory.tool_name || '').trim(),
+        description: String(directory.tool_description || '').trim(),
+        source: 'knowledge' as const
+      }))
+      .filter(tool => Boolean(tool.name))
 
-    const knowledgeToolDescriptions = new Map<string, string>(
-      (directoriesComposable.value?.directories ?? [])
-        .map(directory => [
-          String(directory.tool_name || '').trim(),
-          String(directory.tool_description || '').trim(),
-        ] as const)
-        .filter(([toolName]) => Boolean(toolName))
+    const knowledgeToolNames = new Set(directoryTools.map(tool => tool.name))
+    const knowledgeToolDescriptions = new Map(
+      directoryTools.map(tool => [tool.name, tool.description || ''])
     )
 
     const classifyCustomToolSource = (binding: ToolBinding): PromptSidebarToolSource => {
@@ -853,7 +870,10 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
 
     const groups: PromptSidebarToolGroup[] = []
     const uniqueSqnsTools = dedupeByName(sqnsTools)
-    const uniqueKnowledgeTools = dedupeByName(customTools.filter(tool => tool.source === 'knowledge'))
+    const uniqueKnowledgeTools = dedupeByName([
+      ...directoryTools,
+      ...customTools.filter(tool => tool.source === 'knowledge')
+    ])
     const uniqueFunctionTools = dedupeByName(customTools.filter(tool => tool.source === 'functions'))
     const uniqueWebhookTools = dedupeByName(customTools.filter(tool => tool.source === 'webhook'))
 
