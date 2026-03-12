@@ -74,6 +74,20 @@ type ToolCallView = {
   args: Record<string, unknown>
 }
 
+type PromptSidebarToolSource = 'sqns' | 'knowledge' | 'functions' | 'webhook'
+
+type PromptSidebarTool = {
+  name: string
+  description?: string
+  source: PromptSidebarToolSource
+}
+
+type PromptSidebarToolGroup = {
+  id: PromptSidebarToolSource
+  label: string
+  tools: PromptSidebarTool[]
+}
+
 const normalizeToolArgs = (raw: unknown): Record<string, unknown> => {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>
   if (typeof raw === 'string') {
@@ -193,7 +207,6 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
   const lastAutoSavedAt = ref<Date | null>(null)
   const isPromptFocused = ref(false)
 
-  const availableTools = ref<Tool[]>([])
   const boundTools = ref<ToolBinding[]>([])
   const isLoadingTools = ref(false)
   const toolsLoaded = ref(false)
@@ -241,7 +254,6 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     lastAutoSavedAt.value = null
     isPromptFocused.value = false
 
-    availableTools.value = []
     boundTools.value = []
     isLoadingTools.value = false
     toolsLoaded.value = false
@@ -398,11 +410,10 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     if (!agent.value) return
     try {
       isLoadingTools.value = true
-      const [allTools, currentBindings] = await Promise.all([
-        apiFetch<Tool[]>('/tools', { headers: { Authorization: `Bearer ${token.value}` } }),
-        apiFetch<ToolBinding[]>(`/agents/${agent.value.id}/tools`, { headers: { Authorization: `Bearer ${token.value}` } })
-      ])
-      availableTools.value = allTools
+      const currentBindings = await apiFetch<ToolBinding[]>(
+        `/agents/${agent.value.id}/tools/details`,
+        { headers: { Authorization: `Bearer ${token.value}` } }
+      )
       boundTools.value = currentBindings
       toolsLoaded.value = true
     } catch (err) {
@@ -750,16 +761,6 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     currentSessionId.value = null
   }
 
-  const getToolName = (toolId: string) => {
-    const tool = availableTools.value.find(t => t.id === toolId)
-    return tool?.name || 'Инструмент'
-  }
-
-  const getToolDescription = (toolId: string) => {
-    const tool = availableTools.value.find(t => t.id === toolId)
-    return tool?.description || ''
-  }
-
   const sqnsToolsList = computed(() => {
     const tools = sqnsStatus.value?.sqnsTools ?? []
     const nameMap: Record<string, string> = {
@@ -793,19 +794,109 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     return parsed.toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })
   })
 
-  const promptSidebarTools = computed(() => {
-    const tools: { name: string; description?: string }[] = []
-    if (isSqnsEnabled.value && sqnsToolsList.value.length) {
-      tools.push(...sqnsToolsList.value.map(t => ({ name: t.name, description: t.description })))
+  const promptSidebarToolGroups = computed<PromptSidebarToolGroup[]>(() => {
+    const sqnsTools: PromptSidebarTool[] = isSqnsEnabled.value
+      ? sqnsToolsList.value.map(tool => ({
+          name: tool.name,
+          description: tool.description || '',
+          source: 'sqns',
+        }))
+      : []
+
+    const knowledgeToolNames = new Set(
+      (directoriesComposable.value?.directories ?? [])
+        .map(directory => String(directory.tool_name || '').trim())
+        .filter(Boolean)
+    )
+
+    const knowledgeToolDescriptions = new Map<string, string>(
+      (directoriesComposable.value?.directories ?? [])
+        .map(directory => [
+          String(directory.tool_name || '').trim(),
+          String(directory.tool_description || '').trim(),
+        ] as const)
+        .filter(([toolName]) => Boolean(toolName))
+    )
+
+    const classifyCustomToolSource = (binding: ToolBinding): PromptSidebarToolSource => {
+      const toolName = String(binding.tool?.name || '').trim()
+      if (toolName && knowledgeToolNames.has(toolName)) return 'knowledge'
+
+      const scope = binding.tool?.webhook_scope
+      const executionType = binding.tool?.execution_type
+
+      if (scope === 'function_only') return 'functions'
+      if (executionType === 'http_webhook') return 'webhook'
+      return 'functions'
     }
-    if (boundTools.value.length) {
-      tools.push(...boundTools.value.map(bt => ({
-        name: getToolName(bt.tool_id),
-        description: getToolDescription(bt.tool_id)
-      })))
+
+    const customTools: PromptSidebarTool[] = boundTools.value
+      .filter(binding => Boolean(binding.tool?.name))
+      .map(binding => ({
+        name: binding.tool?.name || 'Инструмент',
+        description: (() => {
+          const toolName = String(binding.tool?.name || '').trim()
+          const apiDescription = String(binding.tool?.description || '').trim()
+          if (apiDescription) return apiDescription
+          return knowledgeToolDescriptions.get(toolName) || ''
+        })(),
+        source: classifyCustomToolSource(binding),
+      }))
+
+    const dedupeByName = (tools: PromptSidebarTool[]) => {
+      const uniqueByName = new Map<string, PromptSidebarTool>()
+      tools.forEach(tool => {
+        if (!uniqueByName.has(tool.name)) uniqueByName.set(tool.name, tool)
+      })
+      return Array.from(uniqueByName.values())
     }
-    return tools
+
+    const groups: PromptSidebarToolGroup[] = []
+    const uniqueSqnsTools = dedupeByName(sqnsTools)
+    const uniqueKnowledgeTools = dedupeByName(customTools.filter(tool => tool.source === 'knowledge'))
+    const uniqueFunctionTools = dedupeByName(customTools.filter(tool => tool.source === 'functions'))
+    const uniqueWebhookTools = dedupeByName(customTools.filter(tool => tool.source === 'webhook'))
+
+    if (uniqueKnowledgeTools.length) {
+      groups.push({
+        id: 'knowledge',
+        label: 'База знаний',
+        tools: uniqueKnowledgeTools,
+      })
+    }
+
+    if (uniqueFunctionTools.length) {
+      groups.push({
+        id: 'functions',
+        label: 'Функции',
+        tools: uniqueFunctionTools,
+      })
+    }
+
+    if (uniqueWebhookTools.length) {
+      groups.push({
+        id: 'webhook',
+        label: 'Webhook',
+        tools: uniqueWebhookTools,
+      })
+    }
+
+    if (uniqueSqnsTools.length) {
+      groups.push({
+        id: 'sqns',
+        label: 'SQNS',
+        tools: uniqueSqnsTools,
+      })
+    }
+
+    return groups
   })
+
+  const promptSidebarTools = computed(() =>
+    promptSidebarToolGroups.value.flatMap(group =>
+      group.tools.map(tool => ({ name: tool.name, description: tool.description }))
+    )
+  )
 
   const chatContextLabel = computed(() => {
     const count = messages.value.length
@@ -922,7 +1013,6 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     isAutoSaving,
     lastAutoSavedAt,
     isPromptFocused,
-    availableTools,
     boundTools,
     isLoadingTools,
     toolsLoaded,
@@ -954,6 +1044,7 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     sqnsHostLabel,
     sqnsErrorMessage,
     formattedSqnsSyncAt,
+    promptSidebarToolGroups,
     promptSidebarTools,
     chatContextLabel,
     setAgentId,
@@ -981,8 +1072,6 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     ensurePromptHistoryLoaded,
     ensureChatLoaded,
     sendMessage,
-    clearChat,
-    getToolName,
-    getToolDescription
+    clearChat
   }
 })

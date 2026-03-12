@@ -135,6 +135,37 @@ const knowledgeSubTabs = computed(() => [
   { id: 'sqns', label: 'SQNS', count: isSqnsEnabled.value ? sqnsToolsList.value.length : undefined }
 ])
 
+const isValidKnowledgeSubTab = (value: string): value is 'sqns' | 'directories' =>
+  value === 'sqns' || value === 'directories'
+
+const getKnowledgeTabStorageKey = () => `agent-knowledge-subtab:${agent.value?.id ?? 'unknown'}`
+
+const syncKnowledgeTabToQuery = (tab: 'sqns' | 'directories') => {
+  if ((route.query.knowledgeTab as string | undefined) === tab) return
+  router.replace({
+    query: {
+      ...route.query,
+      knowledgeTab: tab
+    }
+  })
+}
+
+const restoreKnowledgeTabState = () => {
+  const tabFromQuery = route.query.knowledgeTab as string | undefined
+  if (tabFromQuery && isValidKnowledgeSubTab(tabFromQuery)) {
+    knowledgeSubTab.value = tabFromQuery
+    return
+  }
+
+  if (typeof window !== 'undefined') {
+    const tabFromStorage = window.localStorage.getItem(getKnowledgeTabStorageKey())
+    if (tabFromStorage && isValidKnowledgeSubTab(tabFromStorage)) {
+      knowledgeSubTab.value = tabFromStorage
+      syncKnowledgeTabToQuery(tabFromStorage)
+    }
+  }
+}
+
 const loadDirectories = async () => {
   await store.ensureDirectoriesLoaded()
 }
@@ -159,6 +190,7 @@ watch(directories, (newDirs) => {
 })
 
 onMounted(() => {
+  restoreKnowledgeTabState()
   if (knowledgeSubTab.value === 'directories') {
     store.ensureDirectoriesLoaded()
   } else {
@@ -178,12 +210,24 @@ watch(agent, async (value) => {
 }, { immediate: true })
 
 watch(knowledgeSubTab, async (value) => {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(getKnowledgeTabStorageKey(), value)
+  }
+  syncKnowledgeTabToQuery(value)
+
   if (value === 'directories') {
     await store.ensureDirectoriesLoaded()
   } else {
     await store.ensureSqnsStatusLoaded()
     await store.ensureSqnsHints()
   }
+})
+
+watch(() => route.query.knowledgeTab, (tabValue) => {
+  const parsed = typeof tabValue === 'string' ? tabValue : undefined
+  if (!parsed || !isValidKnowledgeSubTab(parsed)) return
+  if (knowledgeSubTab.value === parsed) return
+  knowledgeSubTab.value = parsed
 })
 
 const handleCreateDirectory = async (data: any) => {

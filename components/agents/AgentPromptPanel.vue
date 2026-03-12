@@ -219,7 +219,7 @@
               </div>
             </div>
 
-            <div v-if="promptSidebarTools.length" class="border-b border-border">
+            <div v-if="promptSidebarToolGroups.length" class="border-b border-border">
               <button
                 @click="toggleAccordion('functions')"
                 class="w-full flex items-center justify-between p-4 bg-muted/30 hover:bg-muted/50 transition-colors"
@@ -237,17 +237,36 @@
               >
                 <div class="overflow-hidden">
                   <div class="p-4 pt-0 bg-muted/30">
-                    <div class="space-y-1">
-                      <button
-                        v-for="(tool, toolIndex) in promptSidebarTools"
-                        :key="toolIndex"
-                        @click="addToolToPrompt((tool as any).name, (tool as any).description)"
-                        class="w-full flex items-center justify-between px-2 py-1.5 rounded hover:bg-background group transition-colors text-left"
-                      >
-                        <code class="text-xs text-emerald-600 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded">{{ (tool as any).name }}()</code>
-                        <span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">+ вставить</span>
-                      </button>
-                    </div>
+                    <TooltipProvider :delay-duration="120">
+                      <div class="space-y-3">
+                        <div
+                          v-for="group in promptSidebarToolGroups"
+                          :key="group.id"
+                          class="space-y-1.5"
+                        >
+                          <div class="px-2 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            {{ group.label }}
+                          </div>
+
+                          <template v-for="(tool, toolIndex) in group.tools" :key="`${group.id}-${tool.name}-${toolIndex}`">
+                            <Tooltip>
+                              <TooltipTrigger as-child>
+                                <button
+                                  @click="addToolToPrompt((tool as any).name, (tool as any).description)"
+                                  class="w-full flex items-center justify-between px-2 py-1.5 rounded hover:bg-background group transition-colors text-left"
+                                >
+                                  <code class="text-xs text-emerald-600 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded">{{ (tool as any).name }}()</code>
+                                  <span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">+ вставить</span>
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="left" :side-offset="8" class="max-w-[260px] text-xs leading-relaxed break-words">
+                                {{ getToolTooltipText(tool) }}
+                              </TooltipContent>
+                            </Tooltip>
+                          </template>
+                        </div>
+                      </div>
+                    </TooltipProvider>
                   </div>
                 </div>
               </div>
@@ -304,11 +323,12 @@ import {
 import { useToast } from '~/composables/useToast'
 import { usePermissions } from '~/composables/usePermissions'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip'
 import { SystemPromptHistorySection, SystemPromptVersionPreview } from '~/components/prompt'
 import type { SystemPromptVersionListItem, SystemPromptVersionRead } from '~/types/systemPromptHistory'
 
 const store = useAgentEditorStore()
-const { form, agent, isPromptFullscreen, promptSidebarTools, promptHistory } = storeToRefs(store)
+const { form, agent, isPromptFullscreen, promptSidebarToolGroups, promptHistory } = storeToRefs(store)
 const { canEditAgents } = usePermissions()
 const { success: toastSuccess, error: toastError } = useToast()
 
@@ -496,6 +516,12 @@ const addToolToPrompt = (name: string, description?: string) => {
   toastSuccess('Инструмент добавлен', `Инструмент ${name}() вставлен`)
 }
 
+const getToolTooltipText = (tool: { description?: string }) => {
+  const description = String(tool?.description || '').trim()
+  if (description) return description
+  return 'Описание инструмента не заполнено'
+}
+
 const addTagToPrompt = (tag: { label: string, value: string, cursorOffset?: number }) => {
   insertTextAtCursor(tag.value, tag.cursorOffset)
   toastSuccess('Тег добавлен', `${tag.label} вставлен`)
@@ -509,6 +535,7 @@ const toggleAccordion = (id: string) => {
   if (id === 'functions') {
     store.ensureToolsLoaded()
     store.ensureSqnsStatusLoaded()
+    store.ensureDirectoriesLoaded()
   }
 }
 
@@ -592,6 +619,7 @@ watch(agent, (value) => {
   if (!value) return
   store.ensureToolsLoaded()
   store.ensureSqnsStatusLoaded()
+  store.ensureDirectoriesLoaded()
   if (activeAccordions.value.includes('history')) {
     store.ensurePromptHistoryLoaded()
   }

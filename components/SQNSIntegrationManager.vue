@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5">
+    <div class="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-5">
       <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div class="flex items-center gap-4">
           <div 
@@ -53,7 +53,7 @@
       </div>
     </div>
 
-    <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
+    <div class="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-6">
       <Tabs v-model:value="activeTab">
         <TabsList className="bg-slate-50/70 p-1 rounded-xl">
           <TabsTrigger value="services">Услуги</TabsTrigger>
@@ -62,7 +62,7 @@
         </TabsList>
 
         <TabsContent value="services">
-          <div class="space-y-0.5 border border-slate-100 rounded-2xl overflow-hidden">
+          <div class="space-y-0.5 border border-slate-200 rounded-lg overflow-hidden">
             <div class="p-6 border-b border-slate-100 space-y-4">
               <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <h3 class="text-lg font-bold text-slate-900">Управление услугами</h3>
@@ -135,8 +135,7 @@
               </div>
             </Transition>
 
-            <div class="overflow-x-auto bg-white">
-              <Table>
+            <Table wrapper-class="rounded-none border-0 bg-transparent">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10">
@@ -147,12 +146,42 @@
                         class="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
                       />
                     </TableHead>
-                    <TableHead>Услуга</TableHead>
-                    <TableHead>Категория</TableHead>
-                    <TableHead>Цена</TableHead>
-                    <TableHead>Длительность</TableHead>
-                    <TableHead>Статус</TableHead>
-                    <TableHead className="w-24">Приоритет</TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(servicesTable, 'name')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Услуга
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(servicesTable, 'category')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Категория
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(servicesTable, 'price')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Цена
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(servicesTable, 'duration')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Длительность
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(servicesTable, 'status')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Статус
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
+                    <TableHead className="w-24">
+                      <button @click="toggleSort(servicesTable, 'priority')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Приоритет
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -172,7 +201,7 @@
                   </TableRow>
                   <TableRow
                     v-else
-                    v-for="service in services"
+                    v-for="service in sortedServices"
                     :key="service.id"
                     :class="[
                       'hover:bg-slate-50/50 transition-colors',
@@ -229,7 +258,6 @@
                   </TableRow>
                 </TableBody>
               </Table>
-            </div>
 
             <div class="p-4 border-t border-slate-100 bg-slate-50/30 flex items-center justify-between">
               <p class="text-xs text-slate-500">
@@ -257,18 +285,17 @@
         </TabsContent>
 
         <TabsContent value="specialists">
-          <div class="space-y-0.5 border border-slate-100 rounded-2xl overflow-hidden">
-            <div class="p-6 border-b border-slate-100 space-y-4">
+          <div class="space-y-0.5 border border-slate-200 rounded-lg overflow-hidden bg-card">
+            <div class="p-5 border-b border-slate-200 space-y-4">
               <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <h3 class="text-lg font-bold text-slate-900">Специалисты</h3>
                 <div class="flex flex-wrap items-center gap-3">
                   <div class="relative">
                     <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                    <input
+                    <Input
                       v-model="specialistSearch"
-                      type="text"
                       placeholder="Поиск специалистов..."
-                      class="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all w-64"
+                      class="pl-9 w-64 md:w-72 rounded-md"
                     />
                   </div>
                   <span class="text-sm text-slate-500">Всего: {{ specialists.length }}</span>
@@ -276,14 +303,39 @@
               </div>
             </div>
 
-            <div class="overflow-x-auto bg-white">
-              <Table>
+            <Table wrapper-class="rounded-none border-0 bg-transparent">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Имя</TableHead>
-                    <TableHead>Роль</TableHead>
-                    <TableHead>Услуг</TableHead>
-                    <TableHead>Статус</TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(specialistsTable, 'name')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Имя
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(specialistsTable, 'role')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Роль
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(specialistsTable, 'services')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Услуг
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(specialistsTable, 'active')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Активен
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(specialistsTable, 'information')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Информация
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -291,20 +343,21 @@
                     <TableCell><div class="h-4 w-24 bg-slate-100 rounded"></div></TableCell>
                     <TableCell><div class="h-4 w-32 bg-slate-100 rounded"></div></TableCell>
                     <TableCell><div class="h-4 w-16 bg-slate-100 rounded"></div></TableCell>
-                    <TableCell><div class="h-4 w-12 bg-slate-100 rounded"></div></TableCell>
+                    <TableCell><div class="h-6 w-10 bg-slate-100 rounded-full"></div></TableCell>
+                    <TableCell><div class="h-8 w-40 bg-slate-100 rounded"></div></TableCell>
                   </TableRow>
                   <TableRow v-else-if="filteredSpecialists.length === 0">
-                    <TableCell :colspan="4" className="p-12 text-center text-slate-400 italic">
+                    <TableCell :colspan="5" className="p-12 text-center text-slate-400 italic">
                       Специалисты не найдены
                     </TableCell>
                   </TableRow>
                   <TableRow
                     v-else
-                    v-for="specialist in filteredSpecialists"
+                    v-for="specialist in sortedSpecialists"
                     :key="specialist.id"
                     :class="[
                       'hover:bg-slate-50/50 transition-colors',
-                      specialist.is_active ? 'bg-emerald-50/30' : ''
+                      isSpecialistEnabled(specialist) ? 'bg-emerald-50/30' : ''
                     ]"
                   >
                     <TableCell>
@@ -314,23 +367,42 @@
                       </p>
                     </TableCell>
                     <TableCell>
-                      <span class="text-sm text-slate-600 capitalize">{{ specialist.role || 'Специалист' }}</span>
+                      <Badge variant="secondary" class="font-medium">
+                        {{ specialist.role || 'Специалист' }}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <span class="text-sm text-slate-600">{{ specialist.services_count ?? specialist.linked_services ?? '-' }}</span>
                     </TableCell>
                     <TableCell>
-                      <span
-                        class="inline-flex items-center px-3 py-0.5 rounded-full text-xs font-semibold"
-                        :class="specialist.is_active ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'"
-                      >
-                        {{ specialist.is_active ? 'Активен' : 'Отключён' }}
-                      </span>
+                      <div class="flex items-center">
+                        <Switch
+                          :model-value="isSpecialistEnabled(specialist)"
+                          :disabled="togglingSpecialistIds.has(specialist.id)"
+                          @update:model-value="() => handleToggleSpecialistActive(specialist)"
+                        />
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div class="flex items-center justify-between gap-2">
+                        <p class="text-xs text-slate-500 line-clamp-1">
+                          {{ specialist.information || '—' }}
+                        </p>
+                        <Button
+                          @click="openSpecialistInformationSheet(specialist)"
+                          variant="outline"
+                          size="sm"
+                          class="h-8 w-8 rounded-md p-0"
+                          aria-label="Редактировать информацию"
+                          title="Редактировать информацию"
+                        >
+                          <Pencil class="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 </TableBody>
               </Table>
-            </div>
 
             <div class="p-4 border-t border-slate-100 bg-slate-50/30 text-xs text-slate-500">
               {{ filteredSpecialists.length }} из {{ specialists.length }} специалистов отображаются
@@ -339,7 +411,7 @@
         </TabsContent>
 
         <TabsContent value="categories">
-          <div class="space-y-0.5 border border-slate-100 rounded-2xl overflow-hidden">
+          <div class="space-y-0.5 border border-slate-200 rounded-lg overflow-hidden">
             <div class="p-6 border-b border-slate-100 space-y-4">
               <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <h3 class="text-lg font-bold text-slate-900">Категории</h3>
@@ -365,14 +437,33 @@
               </div>
             </div>
 
-            <div class="overflow-x-auto bg-white">
-              <Table>
+            <Table wrapper-class="rounded-none border-0 bg-transparent">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Категория</TableHead>
-                    <TableHead>Услуг</TableHead>
-                    <TableHead>Статус</TableHead>
-                    <TableHead>Приоритет</TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(categoriesTable, 'name')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Категория
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(categoriesTable, 'services')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Услуг
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(categoriesTable, 'status')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Статус
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button @click="toggleSort(categoriesTable, 'priority')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                        Приоритет
+                        <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -389,7 +480,7 @@
                   </TableRow>
                   <TableRow
                     v-else
-                    v-for="cat in filteredCategories"
+                    v-for="cat in sortedCategories"
                     :key="cat.id"
                     class="hover:bg-slate-50/50 transition-colors"
                   >
@@ -428,7 +519,6 @@
                   </TableRow>
                 </TableBody>
               </Table>
-            </div>
 
             <div class="p-4 border-t border-slate-100 bg-slate-50/30 text-xs text-slate-500">
               {{ filteredCategories.length }} из {{ categories.length }} категорий отображаются
@@ -438,23 +528,78 @@
       </Tabs>
     </div>
 
+    <Sheet
+      :open="specialistInformationSheetOpen"
+      @update:open="(open) => { if (!open) closeSpecialistInformationSheet() }"
+    >
+      <SheetContent side="right" class-name="w-full sm:max-w-xl flex flex-col">
+        <SheetHeader>
+          <SheetTitle>Информация о специалисте</SheetTitle>
+        </SheetHeader>
+
+        <div class="flex-1 overflow-y-auto p-6 space-y-4">
+          <p v-if="selectedSpecialistForInformation" class="text-sm text-slate-600">
+            {{ selectedSpecialistForInformation.name }}
+          </p>
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-slate-700">Информация</label>
+            <Textarea
+              v-model="specialistInformationDraft"
+              rows="8"
+              placeholder="Введите информацию о сотруднике"
+              class="resize-none"
+            />
+          </div>
+        </div>
+
+        <div class="border-t border-slate-200 bg-white px-6 py-4 flex items-center justify-end gap-2">
+          <button
+            @click="closeSpecialistInformationSheet"
+            class="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors"
+            :disabled="Boolean(savingSpecialistInformationForId)"
+          >
+            Отмена
+          </button>
+          <button
+            @click="handleSaveSpecialistInformation"
+            class="px-5 py-2 bg-indigo-600 text-white rounded-md text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1.5"
+            :disabled="Boolean(savingSpecialistInformationForId)"
+          >
+            <Loader2 v-if="savingSpecialistInformationForId" class="h-4 w-4 animate-spin" />
+            {{ savingSpecialistInformationForId ? 'Сохранение...' : 'Сохранить' }}
+          </button>
+        </div>
+      </SheetContent>
+    </Sheet>
+
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import {
+  useVueTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  type ColumnDef,
+  type SortingState,
+} from '@tanstack/vue-table'
 import { 
   Link, 
   RefreshCw, 
   AlertTriangle, 
+  ArrowUpDown,
   X, 
   Search, 
+  Pencil,
+  Loader2,
   ChevronLeft, 
   ChevronRight
 } from 'lucide-vue-next'
-import { useAgents } from '../composables/useAgents'
+import { useAgents, type SqnsSpecialist } from '../composables/useAgents'
 import { useToast } from '../composables/useToast'
 import { getReadableErrorMessage } from '~/utils/api-errors'
+import { valueUpdater } from '~/lib/utils'
 import {
   Table,
   TableBody,
@@ -465,6 +610,12 @@ import {
   TableRow,
 } from './ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
+import { Input } from './ui/input'
+import { Switch } from './ui/switch'
+import { Button } from './ui/button'
+import { Badge } from './ui/badge'
+import { Textarea } from './ui/textarea'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from './ui/sheet'
 
 const props = defineProps<{
   agentId: string
@@ -485,6 +636,7 @@ const {
   bulkUpdateSqnsServices,
   fetchSqnsCategories,
   fetchSqnsSpecialists,
+  updateSqnsSpecialist,
   updateSqnsCategory
 } = useAgents()
 const { success: toastSuccess, error: toastError } = useToast()
@@ -500,9 +652,14 @@ const isCategoriesLoading = ref(false)
 const categorySearch = ref('')
 const showOnlyEnabledCategories = ref(false)
 const activeTab = ref<'services' | 'specialists' | 'categories'>('services')
-const specialists = ref<any[]>([])
+const specialists = ref<SqnsSpecialist[]>([])
 const isSpecialistsLoading = ref(false)
 const specialistSearch = ref('')
+const specialistInformationSheetOpen = ref(false)
+const selectedSpecialistForInformation = ref<SqnsSpecialist | null>(null)
+const specialistInformationDraft = ref('')
+const savingSpecialistInformationForId = ref<string | null>(null)
+const togglingSpecialistIds = ref<Set<string>>(new Set())
 
 const filters = ref({
   search: '',
@@ -514,6 +671,10 @@ const pagination = ref({
   limit: 50,
   offset: 0
 })
+
+const getActiveTabStorageKey = () => `sqns-active-tab:${props.agentId}`
+const isValidActiveTab = (value: string): value is 'services' | 'specialists' | 'categories' =>
+  value === 'services' || value === 'specialists' || value === 'categories'
 
 const currentPage = computed(() => Math.floor(pagination.value.offset / pagination.value.limit) + 1)
 const isAllSelected = computed(() => services.value.length > 0 && services.value.every(s => selectedIds.value.includes(s.id)))
@@ -542,6 +703,84 @@ const filteredSpecialists = computed(() => {
     return haystack.includes(query)
   })
 })
+
+const isSpecialistEnabled = (specialist: SqnsSpecialist) => specialist.active ?? specialist.is_active ?? false
+const parseServicePrice = (service: any) => {
+  if (typeof service?.price === 'number' && Number.isFinite(service.price)) return service.price
+  if (typeof service?.price_range !== 'string') return 0
+  const numeric = Number(service.price_range.replace(/[^\d]/g, ''))
+  return Number.isFinite(numeric) ? numeric : 0
+}
+const servicesSorting = ref<SortingState>([])
+const specialistsSorting = ref<SortingState>([])
+const categoriesSorting = ref<SortingState>([])
+
+const servicesColumns: ColumnDef<any>[] = [
+  { id: 'name', accessorFn: (row) => row.name ?? '' },
+  { id: 'category', accessorFn: (row) => row.category ?? '' },
+  { id: 'price', accessorFn: (row) => parseServicePrice(row) },
+  { id: 'duration', accessorFn: (row) => row.duration ?? 0 },
+  { id: 'status', accessorFn: (row) => Boolean(row.is_enabled) },
+  { id: 'priority', accessorFn: (row) => row.priority ?? 0 },
+]
+
+const specialistsColumns: ColumnDef<SqnsSpecialist>[] = [
+  { id: 'name', accessorFn: (row) => row.name ?? '' },
+  { id: 'role', accessorFn: (row) => row.role ?? '' },
+  { id: 'services', accessorFn: (row) => row.services_count ?? row.linked_services ?? 0 },
+  { id: 'active', accessorFn: (row) => isSpecialistEnabled(row) },
+  { id: 'information', accessorFn: (row) => row.information ?? '' },
+]
+
+const categoriesColumns: ColumnDef<any>[] = [
+  { id: 'name', accessorFn: (row) => row.name ?? '' },
+  { id: 'services', accessorFn: (row) => row.services_count ?? 0 },
+  { id: 'status', accessorFn: (row) => Boolean(row.is_enabled) },
+  { id: 'priority', accessorFn: (row) => row.priority ?? 0 },
+]
+
+const servicesTable = useVueTable({
+  get data() { return services.value },
+  columns: servicesColumns,
+  state: {
+    get sorting() { return servicesSorting.value },
+  },
+  onSortingChange: (updater) => valueUpdater(updater, servicesSorting),
+  getCoreRowModel: getCoreRowModel(),
+  getSortedRowModel: getSortedRowModel(),
+})
+
+const specialistsTable = useVueTable({
+  get data() { return filteredSpecialists.value },
+  columns: specialistsColumns,
+  state: {
+    get sorting() { return specialistsSorting.value },
+  },
+  onSortingChange: (updater) => valueUpdater(updater, specialistsSorting),
+  getCoreRowModel: getCoreRowModel(),
+  getSortedRowModel: getSortedRowModel(),
+})
+
+const categoriesTable = useVueTable({
+  get data() { return filteredCategories.value },
+  columns: categoriesColumns,
+  state: {
+    get sorting() { return categoriesSorting.value },
+  },
+  onSortingChange: (updater) => valueUpdater(updater, categoriesSorting),
+  getCoreRowModel: getCoreRowModel(),
+  getSortedRowModel: getSortedRowModel(),
+})
+
+const sortedServices = computed(() => servicesTable.getRowModel().rows.map((row) => row.original))
+const sortedSpecialists = computed(() => specialistsTable.getRowModel().rows.map((row) => row.original))
+const sortedCategories = computed(() => categoriesTable.getRowModel().rows.map((row) => row.original))
+
+const toggleSort = (table: any, columnId: string) => {
+  const column = table.getColumn(columnId)
+  if (!column) return
+  column.toggleSorting(column.getIsSorted() === 'asc')
+}
 
 // Actions
 const loadServices = async (silent = false) => {
@@ -718,6 +957,59 @@ const handleUpdateCategoryPriority = async (cat: any) => {
   }
 }
 
+const handleToggleSpecialistActive = async (specialist: SqnsSpecialist) => {
+  const specialistId = specialist.id
+  if (!specialistId || togglingSpecialistIds.value.has(specialistId)) return
+
+  const originalState = isSpecialistEnabled(specialist)
+  const nextState = !originalState
+  specialist.active = nextState
+  togglingSpecialistIds.value.add(specialistId)
+
+  try {
+    await updateSqnsSpecialist(props.agentId, specialistId, { active: nextState })
+    toastSuccess('Статус специалиста обновлен', `Сотрудник "${specialist.name}" ${nextState ? 'включен' : 'отключен'}`)
+  } catch (err: any) {
+    specialist.active = originalState
+    toastError('Ошибка', getReadableErrorMessage(err, 'Не удалось изменить статус специалиста'))
+  } finally {
+    togglingSpecialistIds.value.delete(specialistId)
+  }
+}
+
+const openSpecialistInformationSheet = (specialist: SqnsSpecialist) => {
+  selectedSpecialistForInformation.value = specialist
+  specialistInformationDraft.value = specialist.information ?? ''
+  specialistInformationSheetOpen.value = true
+}
+
+const closeSpecialistInformationSheet = () => {
+  specialistInformationSheetOpen.value = false
+  selectedSpecialistForInformation.value = null
+  specialistInformationDraft.value = ''
+}
+
+const handleSaveSpecialistInformation = async () => {
+  const specialist = selectedSpecialistForInformation.value
+  if (!specialist?.id) return
+
+  const infoValue = specialistInformationDraft.value.trim()
+  savingSpecialistInformationForId.value = specialist.id
+
+  try {
+    await updateSqnsSpecialist(props.agentId, specialist.id, {
+      information: infoValue || null
+    })
+    specialist.information = infoValue || null
+    toastSuccess('Информация обновлена', `Для сотрудника "${specialist.name}" сохранено описание`)
+    closeSpecialistInformationSheet()
+  } catch (err: any) {
+    toastError('Ошибка', getReadableErrorMessage(err, 'Не удалось сохранить информацию о специалисте'))
+  } finally {
+    savingSpecialistInformationForId.value = null
+  }
+}
+
 const toggleSelect = (id: string) => {
   const index = selectedIds.value.indexOf(id)
   if (index === -1) selectedIds.value.push(id)
@@ -755,6 +1047,9 @@ watch([() => filters.value.category, () => filters.value.is_enabled], () => {
 })
 
 watch(activeTab, (tab) => {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(getActiveTabStorageKey(), tab)
+  }
   if (tab === 'specialists' && specialists.value.length === 0) {
     loadSpecialists()
   }
@@ -764,6 +1059,12 @@ watch(activeTab, (tab) => {
 })
 
 onMounted(() => {
+  if (typeof window !== 'undefined') {
+    const savedTab = window.localStorage.getItem(getActiveTabStorageKey())
+    if (savedTab && isValidActiveTab(savedTab)) {
+      activeTab.value = savedTab
+    }
+  }
   loadServices()
   loadCategories()
   loadSpecialists()

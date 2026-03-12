@@ -47,6 +47,8 @@ export type SqnsSpecialist = {
   services_count?: number
   linked_services?: number
   is_active?: boolean
+  active?: boolean | null
+  information?: string | null
 }
 
 export type SqnsSlot = {
@@ -402,6 +404,7 @@ export const useAgents = () => {
   const fetchSqnsSpecialists = async (agentId: string, params?: {
     search?: string,
     is_active?: boolean,
+    active?: boolean,
     limit?: number,
     offset?: number
   }) => {
@@ -409,15 +412,40 @@ export const useAgents = () => {
       const query = new URLSearchParams()
       if (params?.search) query.append('search', params.search)
       if (params?.is_active !== undefined) query.append('is_active', params.is_active.toString())
+      if (params?.active !== undefined) query.append('active', params.active.toString())
       if (params?.limit) query.append('limit', params.limit.toString())
       if (params?.offset) query.append('offset', params.offset.toString())
 
-      const response = await apiFetch<{ specialists: SqnsSpecialist[] }>(`/agents/${agentId}/sqns/specialists`, {
+      const response = await apiFetch<{
+        specialists: SqnsSpecialist[],
+        total?: number,
+        limit?: number,
+        offset?: number,
+        has_more?: boolean,
+        page?: number,
+        pages?: number
+      }>(`/agents/${agentId}/sqns/specialists`, {
         query: Object.fromEntries(query)
       })
       return response.specialists
     } catch (err: any) {
       sqnsError.value = getReadableErrorMessage(err, 'Не удалось загрузить специалистов')
+      throw err
+    }
+  }
+
+  const updateSqnsSpecialist = async (
+    agentId: string,
+    specialistId: string,
+    data: { active?: boolean | null, information?: string | null }
+  ) => {
+    try {
+      await apiFetch(`/agents/${agentId}/sqns/specialists/${specialistId}`, {
+        method: 'PATCH',
+        body: data
+      })
+    } catch (err: any) {
+      sqnsError.value = getReadableErrorMessage(err, 'Не удалось обновить специалиста')
       throw err
     }
   }
@@ -487,6 +515,7 @@ export const useAgents = () => {
     bulkUpdateSqnsServices,
     fetchSqnsCategories,
     fetchSqnsSpecialists,
+    updateSqnsSpecialist,
     updateSqnsCategory,
     getSqnsDisablePreview
   }
