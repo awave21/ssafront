@@ -110,7 +110,7 @@
       </div>
 
       <!-- Sticky Footer -->
-      <div class="flex-shrink-0 border-t border-slate-200 bg-white px-6 py-3">
+      <div class="relative z-10 flex-shrink-0 border-t border-slate-200 bg-white px-6 py-3 pointer-events-auto">
         <div class="flex items-center justify-between">
           <button
             @click="showDeleteConfirm = true"
@@ -350,7 +350,16 @@ watch(() => props.isOpen, (open) => {
     error.value = ''
     toolNameError.value = ''
     showDeleteConfirm.value = false
+    isDeleting.value = false
+    isSaving.value = false
+    return
   }
+
+  // When parent closes the sheet (e.g. after successful delete),
+  // force-close nested confirm dialog so its overlay can't block UI.
+  showDeleteConfirm.value = false
+  isDeleting.value = false
+  isSaving.value = false
 })
 
 watch(() => form.value.tool_name, () => {

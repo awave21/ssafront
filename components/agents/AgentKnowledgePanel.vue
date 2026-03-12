@@ -31,6 +31,8 @@
           :error="directoriesError"
           @create="showCreateDirectoryModal = true"
           @select="handleSelectDirectory"
+          @toggle="handleToggleDirectory"
+          @settings="handleOpenDirectorySettings"
           @retry="loadDirectories"
         />
       </div>
@@ -189,6 +191,17 @@ watch(directories, (newDirs) => {
   }
 })
 
+watch(selectedDirectory, (dir) => {
+  if (dir) return
+
+  const { directoryId, ...rest } = route.query
+  if (!directoryId) return
+
+  router.replace({
+    query: rest
+  })
+})
+
 onMounted(() => {
   restoreKnowledgeTabState()
   if (knowledgeSubTab.value === 'directories') {
@@ -246,6 +259,23 @@ const handleSelectDirectory = (dir: Directory) => {
     directoriesComposable.value.setCurrentDirectory(dir)
     // Сохраняем ID справочника в query, чтобы при перезагрузке он восстановился
     router.replace({ query: { ...route.query, directoryId: dir.id } })
+  }
+}
+
+const handleOpenDirectorySettings = (dir: Directory) => {
+  if (!directoriesComposable.value) return
+  directoriesComposable.value.setCurrentDirectory(dir)
+  showDirectorySettingsSheet.value = true
+}
+
+const handleToggleDirectory = async (id: string, enabled: boolean) => {
+  if (!directoriesComposable.value) return
+
+  try {
+    await directoriesComposable.value.updateDirectory(id, { is_enabled: enabled })
+    toastSuccess(enabled ? 'Справочник включён' : 'Справочник выключен')
+  } catch (err: any) {
+    toastError(err.message || 'Не удалось изменить статус справочника')
   }
 }
 
@@ -386,6 +416,14 @@ const handleDeleteDirectoryFromSettings = async (id: string) => {
     toastError(err.message || 'Не удалось удалить справочник')
   } finally {
     directorySettingsSheetRef.value?.setDeleting(false)
+    // Safety net for known Dialog/Sheet body lock edge-cases:
+    // ensure stale body styles don't keep the page unclickable.
+    if (typeof document !== 'undefined') {
+      window.requestAnimationFrame(() => {
+        document.body.style.pointerEvents = ''
+        document.body.style.overflow = ''
+      })
+    }
   }
 }
 </script>
