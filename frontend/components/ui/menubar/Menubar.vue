@@ -1,0 +1,20 @@
+<script setup lang="ts">
+import type { MenubarRootProps } from 'reka-ui'
+import type { HTMLAttributes } from 'vue'
+import { reactiveOmit } from '@vueuse/core'
+import { MenubarRoot, useForwardProps } from 'reka-ui'
+import { cn } from '~/lib/utils'
+
+const props = defineProps<MenubarRootProps & { class?: HTMLAttributes['class'] }>()
+const delegatedProps = reactiveOmit(props, 'class')
+const forwarded = useForwardProps(delegatedProps)
+</script>
+
+<template>
+  <MenubarRoot
+    v-bind="forwarded"
+    :class="cn('flex h-9 items-center space-x-1 rounded-md border bg-background p-1', props.class)"
+  >
+    <slot />
+  </MenubarRoot>
+</template>

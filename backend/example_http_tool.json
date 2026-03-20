@@ -1,0 +1,268 @@
+{
+  "description": "Примеры создания HTTP tools через API",
+  "examples": [
+    {
+      "name": "Example 1: GET запрос с path параметром",
+      "request": {
+        "method": "POST",
+        "url": "/tools",
+        "body": {
+          "name": "get_github_user",
+          "description": "Получить информацию о пользователе GitHub",
+          "endpoint": "https://api.github.com/users/{username}",
+          "http_method": "GET",
+          "execution_type": "http_webhook",
+          "auth_type": "none",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "username": {
+                "type": "string",
+                "description": "GitHub username для поиска"
+              }
+            },
+            "required": ["username"]
+          },
+          "parameter_mapping": {
+            "username": "path"
+          },
+          "response_transform": {
+            "mode": "fields",
+            "fields": [
+              {"source": "login", "target": "username"},
+              {"source": "name", "target": "full_name"},
+              {"source": "public_repos", "target": "repos_count"},
+              {"source": "followers", "target": "followers"}
+            ]
+          }
+        }
+      },
+      "test_request": {
+        "method": "POST",
+        "url": "/tools/test",
+        "body": {
+          "endpoint": "https://api.github.com/users/{username}",
+          "http_method": "GET",
+          "args": {
+            "username": "torvalds"
+          },
+          "parameter_mapping": {
+            "username": "path"
+          },
+          "auth_type": "none",
+          "response_transform": {
+            "mode": "fields",
+            "fields": [
+              {"source": "login", "target": "username"},
+              {"source": "name", "target": "full_name"},
+              {"source": "public_repos", "target": "repos_count"}
+            ]
+          }
+        }
+      },
+      "expected_result": {
+        "status_code": 200,
+        "raw_body": {
+          "login": "torvalds",
+          "name": "Linus Torvalds",
+          "public_repos": 6,
+          "followers": 200000,
+          "...": "50+ других полей"
+        },
+        "transformed_body": {
+          "username": "torvalds",
+          "full_name": "Linus Torvalds",
+          "repos_count": 6
+        },
+        "token_savings": "90%"
+      }
+    },
+    {
+      "name": "Example 2: POST с query и body параметрами",
+      "request": {
+        "method": "POST",
+        "url": "/tools",
+        "body": {
+          "name": "create_todo",
+          "description": "Создать задачу в списке дел",
+          "endpoint": "https://jsonplaceholder.typicode.com/todos",
+          "http_method": "POST",
+          "execution_type": "http_webhook",
+          "auth_type": "none",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "user_id": {
+                "type": "integer",
+                "description": "ID пользователя-владельца задачи"
+              },
+              "title": {
+                "type": "string",
+                "description": "Название задачи"
+              },
+              "completed": {
+                "type": "boolean",
+                "description": "Выполнена ли задача"
+              }
+            },
+            "required": ["user_id", "title"]
+          },
+          "parameter_mapping": {
+            "user_id": "query",
+            "title": "body",
+            "completed": "body"
+          }
+        }
+      },
+      "test_request": {
+        "method": "POST",
+        "url": "/tools/test",
+        "body": {
+          "endpoint": "https://jsonplaceholder.typicode.com/todos",
+          "http_method": "POST",
+          "args": {
+            "user_id": 1,
+            "title": "Test task",
+            "completed": false
+          },
+          "parameter_mapping": {
+            "user_id": "query",
+            "title": "body",
+            "completed": "body"
+          },
+          "auth_type": "none"
+        }
+      },
+      "expected_url": "https://jsonplaceholder.typicode.com/todos?user_id=1",
+      "expected_body": {
+        "title": "Test task",
+        "completed": false
+      }
+    },
+    {
+      "name": "Example 3: Фильтрация массива (экономия токенов)",
+      "request": {
+        "method": "POST",
+        "url": "/tools",
+        "body": {
+          "name": "get_github_repos",
+          "description": "Получить список репозиториев пользователя",
+          "endpoint": "https://api.github.com/users/{username}/repos",
+          "http_method": "GET",
+          "execution_type": "http_webhook",
+          "auth_type": "none",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "username": {
+                "type": "string",
+                "description": "GitHub username"
+              },
+              "per_page": {
+                "type": "integer",
+                "description": "Количество репозиториев на странице (макс 100)"
+              }
+            },
+            "required": ["username"]
+          },
+          "parameter_mapping": {
+            "username": "path",
+            "per_page": "query"
+          },
+          "response_transform": {
+            "mode": "fields",
+            "arrays": [
+              {
+                "source": "@",
+                "target": "repositories",
+                "fields": [
+                  {"source": "name", "target": "name"},
+                  {"source": "description", "target": "description"},
+                  {"source": "stargazers_count", "target": "stars"},
+                  {"source": "language", "target": "language"}
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "test_request": {
+        "method": "POST",
+        "url": "/tools/test",
+        "body": {
+          "endpoint": "https://api.github.com/users/{username}/repos",
+          "http_method": "GET",
+          "args": {
+            "username": "torvalds",
+            "per_page": 5
+          },
+          "parameter_mapping": {
+            "username": "path",
+            "per_page": "query"
+          },
+          "auth_type": "none",
+          "response_transform": {
+            "mode": "fields",
+            "arrays": [
+              {
+                "source": "@",
+                "target": "repositories",
+                "fields": [
+                  {"source": "name", "target": "name"},
+                  {"source": "stargazers_count", "target": "stars"}
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected_result": {
+        "comment": "Вместо 80 полей × 5 repos = 400 полей",
+        "transformed_body": {
+          "repositories": [
+            {"name": "linux", "stars": 150000},
+            {"name": "subsurface", "stars": 2000}
+          ]
+        },
+        "token_savings": "95%"
+      }
+    },
+    {
+      "name": "Example 4: JMESPath фильтрация (продвинутая)",
+      "request": {
+        "method": "POST",
+        "url": "/tools",
+        "body": {
+          "name": "get_weather_forecast",
+          "description": "Получить прогноз погоды с фильтрацией",
+          "endpoint": "https://api.weatherapi.com/v1/forecast.json",
+          "http_method": "GET",
+          "execution_type": "http_webhook",
+          "auth_type": "api_key",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "Город для прогноза"
+              },
+              "days": {
+                "type": "integer",
+                "description": "Количество дней (1-10)"
+              }
+            },
+            "required": ["location"]
+          },
+          "parameter_mapping": {
+            "location": "query",
+            "days": "query"
+          },
+          "response_transform": {
+            "mode": "jmespath",
+            "expression": "{location: location.name, current_temp: current.temp_c, forecast: forecast.forecastday[].{date: date, max_temp: day.maxtemp_c, min_temp: day.mintemp_c, condition: day.condition.text}}"
+          }
+        }
+      }
+    }
+  ]
+}

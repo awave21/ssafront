@@ -1,0 +1,10 @@
+.env
+.env.*
+!env.example
+logs/
+*.log
+*.pid
+*.sock
+backup_before_password_change.sql
+.DS_Store
+node_modules

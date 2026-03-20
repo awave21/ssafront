@@ -1,0 +1,10 @@
+// Dialogs components export
+export { default as DialogsSidebar } from './DialogsSidebar.vue'
+export { default as DialogItem } from './DialogItem.vue'
+export { default as DialogsEmptyState } from './DialogsEmptyState.vue'
+export { default as StatusIndicator } from './StatusIndicator.vue'
+export { default as ChatArea } from './ChatArea.vue'
+export { default as ChatHeader } from './ChatHeader.vue'
+export { default as MessagesFeed } from './MessagesFeed.vue'
+export { default as MessageBubble } from './MessageBubble.vue'
+export { default as MessageComposer } from './MessageComposer.vue'

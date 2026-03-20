@@ -1,0 +1,555 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+from uuid import UUID
+
+import structlog
+from pydantic_ai.tools import Tool as PydanticTool
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models.binding import AgentToolBinding
+from app.db.models.direct_question import DirectQuestion
+from app.db.models.knowledge_file import KnowledgeFile
+from app.db.models.tool import Tool
+from app.db.session import async_session_factory
+from app.schemas.auth import AuthContext
+from app.services.credentials import decrypt_config
+from app.services.direct_questions.safety import sanitize_direct_question_content, split_direct_question_content
+from app.services.knowledge_files import search_indexed_knowledge_files
+from app.services.function_rules_runtime import run_rules_for_phase
+from app.services.tool_executor import ToolExecutionError, execute_tool_call, transform_response
+from app.services.directory.service import get_agent_directory_tools
+from app.services.runtime.utils import _safe_identifier
+
+logger = structlog.get_logger("app.services.runtime")
+
+DEFAULT_KNOWLEDGE_SEARCH_TOOL_DESCRIPTION = (
+    "Search uploaded knowledge files and return relevant fragments for RAG answers. "
+    "Use when user asks factual questions covered by documentation, policies, prices, or instructions."
+)
+
+
+def _normalize_input_schema(input_schema: dict[str, Any]) -> dict[str, Any]:
+    """
+    Конвертировать кастомный _variables в стандартный properties.
+    
+    Для обратной совместимости со старыми инструментами, созданными
+    на фронтенде с использованием нестандартного поля _variables.
+    
+    Args:
+        input_schema: JSON Schema с возможным полем _variables
+        
+    Returns:
+        Нормализованная схема с правильным properties
+    """
+    # Если есть _variables и properties пустой/отсутствует
+    if '_variables' in input_schema:
+        properties = input_schema.get('properties', {})
+        
+        # Конвертируем _variables в properties
+        for var in input_schema.get('_variables', []):
+            if not isinstance(var, dict):
+                continue
+                
+            var_name = var.get('name')
+            if not var_name:
+                continue
+            
+            # Не перезаписываем существующий property
+            if var_name in properties:
+                continue
+            
+            # Создаём property из variable
+            properties[var_name] = {
+                'type': var.get('type', 'string'),
+                'description': var.get('description', f'Параметр {var_name}'),
+                'x-fromAI': True,  # Переменные всегда должны заполняться AI
+            }
+            
+            # Добавляем default если есть
+            if 'value' in var:
+                properties[var_name]['default'] = var['value']
+        
+        # Создаём новую схему с обновлёнными properties
+        normalized = {**input_schema, 'properties': properties}
+        
+        logger.info(
+            "input_schema_normalized",
+            variables_converted=len(input_schema.get('_variables', [])),
+            properties_added=len(properties) - len(input_schema.get('properties', {})),
+        )
+        
+        return normalized
+    
+    return input_schema
+
+
+def _build_llm_schema(input_schema: dict[str, Any]) -> dict[str, Any]:
+    """
+    Построить JSON Schema только из x-fromAI параметров для LLM.
+
+    Если ни одно свойство не имеет x-fromAI — возвращает оригинальную схему
+    (обратная совместимость для инструментов без этого флага).
+    """
+    properties = input_schema.get("properties", {})
+    has_from_ai = any(
+        isinstance(p, dict) and p.get("x-fromAI") is True
+        for p in properties.values()
+    )
+    if not has_from_ai:
+        return input_schema
+
+    ai_properties: dict[str, Any] = {}
+    ai_required: list[str] = []
+
+    for key, prop in properties.items():
+        if not isinstance(prop, dict):
+            continue
+        if prop.get("x-fromAI") is True:
+            # Убираем x-fromAI — LLM его не понимает
+            clean_prop = {k: v for k, v in prop.items() if k != "x-fromAI"}
+            ai_properties[key] = clean_prop
+            # Если нет default — параметр обязательный для LLM
+            if "default" not in prop:
+                ai_required.append(key)
+
+    return {
+        "type": "object",
+        "properties": ai_properties,
+        "required": ai_required,
+        "additionalProperties": False,
+    }
+
+
+def _merge_tool_args(
+    input_schema: dict[str, Any], llm_args: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Смержить AI-аргументы от LLM со статическими default из схемы.
+
+    Если ни одно свойство не имеет x-fromAI — возвращает оригинальные аргументы
+    (обратная совместимость).
+    """
+    properties = input_schema.get("properties", {})
+    has_from_ai = any(
+        isinstance(p, dict) and p.get("x-fromAI") is True
+        for p in properties.values()
+    )
+    if not has_from_ai:
+        return llm_args
+
+    merged: dict[str, Any] = {}
+    for key, prop in properties.items():
+        if not isinstance(prop, dict):
+            continue
+        if prop.get("x-fromAI") is True:
+            # AI-параметр: берём значение от LLM (или fallback на default)
+            if key in llm_args:
+                merged[key] = llm_args[key]
+            elif "default" in prop:
+                merged[key] = prop["default"]
+        else:
+            # Статический параметр: берём default из схемы
+            if "default" in prop:
+                merged[key] = prop["default"]
+    return merged
+
+
+def _build_tool_wrapper(
+    tool: Tool,
+    binding: AgentToolBinding,
+    *,
+    agent_id: UUID | None,
+    session_id: str | None,
+    trace_id: str,
+    user: AuthContext,
+    tool_events: list[dict[str, Any]] | None = None,
+) -> PydanticTool:
+    """
+    Создать pydantic-ai Tool из нашей DB модели БЕЗ exec().
+
+    Использует Tool.from_schema() для создания инструмента с правильной JSON Schema.
+    """
+    async def _tool_impl(**kwargs: Any) -> Any:
+        started_at = datetime.now(timezone.utc)
+        transformed_result: Any = None
+        final_args: dict[str, Any] = {}
+        if binding.permission_scope == "write" and "tools:write" not in user.scopes:
+            raise ToolExecutionError("Missing tools:write scope")
+        if tool.execution_type not in {"http_webhook", "internal"}:
+            raise ToolExecutionError("Unsupported tool execution type")
+        if tool.execution_type == "http_webhook" and not tool.endpoint:
+            raise ToolExecutionError("Unsupported tool execution type")
+        secret_payload = None
+        if binding.credential and binding.credential.is_active:
+            try:
+                secret_payload = decrypt_config(binding.credential.config)
+            except ValueError as exc:
+                raise ToolExecutionError("Invalid credential config") from exc
+        
+        # Смержить AI-аргументы от LLM со статическими default
+        # Используем нормализованную схему
+        try:
+            final_args = _merge_tool_args(normalized_schema, kwargs)
+
+            if tool.execution_type == "internal":
+                # Internal tools do not perform HTTP calls.
+                transformed_result = {
+                    "mode": "internal",
+                    "tool_name": tool.name,
+                    "args": final_args,
+                    "status": "ok",
+                }
+            else:
+                # Вызвать tool
+                raw_result = await execute_tool_call(
+                    tool.endpoint,
+                    tool.input_schema,
+                    final_args,
+                    trace_id=trace_id,
+                    auth_type=tool.auth_type,
+                    http_method=tool.http_method or "POST",
+                    parameter_mapping=tool.parameter_mapping,
+                    custom_headers=tool.custom_headers,
+                    secrets_ref=binding.secrets_ref,
+                    secret_payload=secret_payload,
+                    allowed_domains=binding.allowed_domains,
+                    timeout_ms=binding.timeout_ms,
+                    user=user,
+                )
+                transformed_result = raw_result
+                # Применить response_transform если настроен
+                if tool.response_transform:
+                    transformed_result = transform_response(raw_result, tool.response_transform)
+
+            # Post-actions/reactions are attached to a specific tool and run
+            # only after this exact tool call succeeds.
+            if agent_id and session_id:
+                try:
+                    async with async_session_factory() as db:
+                        _, post_tool_context = await run_rules_for_phase(
+                            db,
+                            tenant_id=tool.tenant_id,
+                            agent_id=agent_id,
+                            session_id=session_id,
+                            trace_id=trace_id,
+                            phase="post_tool",
+                            message=f"tool:{tool.name}",
+                            user=user,
+                            run_id=None,
+                            context={
+                                "tool_name": tool.name,
+                                "tool_args": final_args,
+                                "tool_call_args": final_args,
+                                "tool_result": transformed_result,
+                                "last_tool_result": transformed_result,
+                                "skip_rule_tool_execution": True,
+                            },
+                            rules_enabled=True,
+                            semantic_allowed=False,
+                            tool_id_filter=tool.id,
+                        )
+                        await db.commit()
+                        # Make post-tool AI instruction visible to the model in the same turn.
+                        # This is a pragmatic replacement for removed pre/post-run prompt merging.
+                        extra_instructions = post_tool_context.get("augment_prompt", [])
+                        if isinstance(extra_instructions, list):
+                            rendered = [str(item).strip() for item in extra_instructions if str(item).strip()]
+                        else:
+                            rendered = []
+                        if rendered:
+                            if isinstance(transformed_result, dict):
+                                transformed_result = {
+                                    **transformed_result,
+                                    "__post_tool_ai_instruction": "\n".join(rendered),
+                                }
+                            else:
+                                transformed_result = {
+                                    "result": transformed_result,
+                                    "__post_tool_ai_instruction": "\n".join(rendered),
+                                }
+                        queued_messages = post_tool_context.get("messages_to_send", [])
+                        if isinstance(queued_messages, list):
+                            rendered_messages = [str(item).strip() for item in queued_messages if str(item).strip()]
+                        else:
+                            rendered_messages = []
+                        if rendered_messages:
+                            if isinstance(transformed_result, dict):
+                                transformed_result = {
+                                    **transformed_result,
+                                    "__post_tool_reaction_messages": rendered_messages,
+                                }
+                            else:
+                                transformed_result = {
+                                    "result": transformed_result,
+                                    "__post_tool_reaction_messages": rendered_messages,
+                                }
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "tool_post_actions_failed",
+                        tool_name=tool.name,
+                        agent_id=str(agent_id),
+                        session_id=session_id,
+                        error=str(exc),
+                    )
+
+            if tool_events is not None:
+                finished_at = datetime.now(timezone.utc)
+                duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+                tool_events.append(
+                    {
+                        "tool_name": tool.name,
+                        "tool_id": str(tool.id),
+                        "status": "success",
+                        "invoked_at": started_at,
+                        "duration_ms": max(duration_ms, 0),
+                        "request_payload": final_args,
+                        "response_payload": transformed_result if isinstance(transformed_result, dict) else None,
+                        "error_payload": None,
+                    }
+                )
+            return transformed_result
+        except Exception as exc:
+            if tool_events is not None:
+                finished_at = datetime.now(timezone.utc)
+                duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+                error_payload: dict[str, Any] = {
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                }
+                tool_events.append(
+                    {
+                        "tool_name": tool.name,
+                        "tool_id": str(tool.id),
+                        "status": "error",
+                        "invoked_at": started_at,
+                        "duration_ms": max(duration_ms, 0),
+                        "request_payload": final_args if isinstance(final_args, dict) else {},
+                        "response_payload": None,
+                        "error_payload": error_payload,
+                    }
+                )
+            raise
+
+    _tool_impl.__name__ = _safe_identifier(tool.name)
+    _tool_impl.__doc__ = tool.description or tool.name
+
+    # Нормализуем input_schema (конвертируем _variables → properties)
+    normalized_schema = _normalize_input_schema(tool.input_schema)
+    
+    # LLM видит только x-fromAI параметры (если они есть)
+    llm_schema = _build_llm_schema(normalized_schema)
+
+    return PydanticTool.from_schema(
+        function=_tool_impl,
+        name=tool.name,
+        description=tool.description,
+        json_schema=llm_schema,
+        takes_ctx=False,
+    )
+
+
+def build_direct_answer_tool(
+    *,
+    db: AsyncSession,
+    tenant_id: UUID,
+    agent_id: UUID,
+) -> PydanticTool:
+    """
+    Runtime tool for direct question routing.
+
+    The model should call this tool with an ID from the injected
+    "Available Direct Answers" block to retrieve a prepared answer.
+    """
+
+    async def _get_direct_answer(direct_question_id: str) -> dict[str, Any]:
+        question_uuid = None
+        try:
+            question_uuid = UUID(str(direct_question_id))
+        except (ValueError, TypeError):
+            return {
+                "status": "not_found",
+                "error": "invalid_direct_question_id",
+                "direct_question_id": str(direct_question_id),
+            }
+
+        stmt = select(DirectQuestion).where(
+            DirectQuestion.id == question_uuid,
+            DirectQuestion.tenant_id == tenant_id,
+            DirectQuestion.agent_id == agent_id,
+            DirectQuestion.is_enabled.is_(True),
+        )
+        question = (await db.execute(stmt)).scalar_one_or_none()
+        if question is None:
+            return {
+                "status": "not_found",
+                "error": "direct_question_not_found",
+                "direct_question_id": str(question_uuid),
+            }
+
+        safe_content = sanitize_direct_question_content(question.content)
+        system_instruction, user_content = split_direct_question_content(safe_content)
+
+        return {
+            "status": "ok",
+            "direct_question_id": str(question.id),
+            "title": question.title,
+            "search_title": question.search_title,
+            "interrupt_dialog": bool(question.interrupt_dialog),
+            "notify_telegram": bool(question.notify_telegram),
+            "content": user_content,
+            "system_instruction": system_instruction,
+        }
+
+    _get_direct_answer.__name__ = "get_direct_answer"
+
+    return PydanticTool.from_schema(
+        function=_get_direct_answer,
+        name="get_direct_answer",
+        description=(
+            "Retrieve a prepared answer from the knowledge base by topic UUID. "
+            "CALL when the user's request clearly matches a topic in the 'Knowledge base' list — match by meaning, not just keywords. "
+            "DO NOT call if no topic clearly matches. "
+            "After status=ok: use `content` as factual base, preserve exact data (numbers, addresses, prices, URLs). "
+            "If `system_instruction` is present — apply it as a behavioral directive for tone, format, or follow-up actions. "
+            "If `content` is incomplete — call other tools to fill the gaps."
+        ),
+        json_schema={
+            "type": "object",
+            "properties": {
+                "direct_question_id": {
+                    "type": "string",
+                    "description": "UUID from Available Direct Answers list.",
+                }
+            },
+            "required": ["direct_question_id"],
+            "additionalProperties": False,
+        },
+        takes_ctx=False,
+    )
+
+
+async def build_knowledge_search_tool(
+    *,
+    db: AsyncSession,
+    tenant_id: UUID,
+    agent_id: UUID,
+    openai_api_key: str | None,
+    description: str | None = None,
+) -> PydanticTool | None:
+    files_count_stmt = select(KnowledgeFile.id).where(
+        KnowledgeFile.tenant_id == tenant_id,
+        KnowledgeFile.agent_id == agent_id,
+        KnowledgeFile.type == "file",
+        KnowledgeFile.is_enabled.is_(True),
+    ).limit(1)
+    has_files = (await db.execute(files_count_stmt)).first() is not None
+    if not has_files:
+        return None
+
+    async def _search_knowledge_files(query: str, limit: int = 5) -> dict[str, Any]:
+        normalized_limit = max(1, min(int(limit or 5), 10))
+        rows = await search_indexed_knowledge_files(
+            db,
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            query=query,
+            openai_api_key=openai_api_key,
+            limit=normalized_limit,
+        )
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            content = str(row.get("content") or "")
+            excerpt = content[:900]
+            if len(content) > 900:
+                excerpt += "..."
+            results.append(
+                {
+                    "id": row.get("id"),
+                    "title": row.get("title"),
+                    "meta_tags": row.get("meta_tags") or [],
+                    "relevance": row.get("relevance"),
+                    "excerpt": excerpt,
+                }
+            )
+        return {"status": "ok", "results": results}
+
+    _search_knowledge_files.__name__ = "search_knowledge_files"
+    tool_description = (description or "").strip() or DEFAULT_KNOWLEDGE_SEARCH_TOOL_DESCRIPTION
+
+    return PydanticTool.from_schema(
+        function=_search_knowledge_files,
+        name="search_knowledge_files",
+        description=tool_description,
+        json_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural language question or search phrase.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "default": 5,
+                    "description": "Maximum number of returned fragments.",
+                },
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        takes_ctx=False,
+    )
+
+
+async def build_directory_tools(agent_id: UUID) -> list[PydanticTool]:
+    try:
+        from app.db.session import async_session_factory
+
+        async with async_session_factory() as db:
+            directory_tools_info = await get_agent_directory_tools(
+                db=db,
+                agent_id=agent_id,
+                db_session_factory=async_session_factory,
+            )
+
+            tools: list[PydanticTool] = []
+            for tool_info in directory_tools_info:
+                tool_fn = tool_info["function"]
+                pydantic_tool = PydanticTool.from_schema(
+                    function=tool_fn,
+                    name=tool_info["name"],
+                    description=tool_info["description"],
+                    json_schema={
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Поисковый запрос для поиска по справочнику",
+                            }
+                        },
+                        "required": [],
+                    },
+                    takes_ctx=True,
+                )
+                tools.append(pydantic_tool)
+
+            if directory_tools_info:
+                logger.info(
+                    "directory_tools_loaded",
+                    agent_id=str(agent_id),
+                    count=len(directory_tools_info),
+                    tool_names=[t["name"] for t in directory_tools_info],
+                )
+
+            return tools
+    except Exception as exc:
+        logger.error(
+            "directory_tools_error",
+            agent_id=str(agent_id),
+            error=str(exc),
+        )
+        return []

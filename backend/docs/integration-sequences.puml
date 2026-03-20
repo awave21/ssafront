@@ -1,0 +1,353 @@
+@startuml integration-sequences
+!theme plain
+skinparam Style strictuml
+skinparam ParticipantPadding 20
+skinparam BoxPadding 10
+
+title Схемы интеграций Agent Platform - Sequence Diagrams
+
+' ============================================
+' 1. СИНХРОННЫЙ ЗАПУСК АГЕНТА (Direct API Run)
+' ============================================
+@startuml sync-run
+autonumber
+skinparam Style strictuml
+
+actor "Пользователь" as User
+participant "Nginx\n(Reverse Proxy)" as Nginx
+participant "FastAPI\n(API Service)" as API
+participant "Runtime Service" as RS
+participant "LLM Provider\n(OpenAI)" as LLM
+database "PostgreSQL" as DB
+
+User -> Nginx : HTTPS POST /api/v1/runs
+note right: Запрос на запуск агента\n{agent_id, input_message}
+
+Nginx -> API : HTTP POST /api/v1/runs
+note right: Проксирование запроса\n(SSL termination)
+
+activate API
+
+API -> API : Аутентификация (JWT/API Key)
+API -> API : Rate Limiting (SlowAPI + Redis)
+
+API -> DB : Загрузка Агента и Инструментов
+activate DB
+note right: SELECT agent, tools, bindings\nWHERE agent_id = ?
+DB --> API : Конфиг агента, привязки (Bindings)
+deactivate DB
+
+API -> RS : run_agent_with_tools(agent, input, history)
+note right: Передача управления в Runtime Service
+activate RS
+
+RS -> RS : Подготовка инструментов (Tools)
+RS -> RS : Фильтрация истории сообщений
+note left: Удаление старых System Prompts
+
+RS -> LLM : Генерация ответа (System Prompt + Input + History)
+activate LLM
+note right: PydanticAI Agent.run()
+LLM --> RS : Запрос на вызов инструмента (Tool Call)
+note left: LLM решил использовать tool
+deactivate LLM
+
+RS -> RS : Выполнение инструментов
+note left: Проверка разрешений\nи запуск кода инструмента
+
+RS -> LLM : Передача результатов инструментов в LLM
+activate LLM
+LLM --> RS : Финальный текстовый ответ
+deactivate LLM
+
+RS --> API : Результат выполнения (Run Result)
+deactivate RS
+
+API -> DB : Сохранение запуска и истории сообщений
+activate DB
+note right: INSERT INTO runs, session_messages
+DB --> API : OK
+deactivate DB
+
+API --> Nginx : HTTP 200 OK {output_message}
+Nginx --> User : HTTPS 200 OK {output_message}
+note left: Возврат ответа пользователю
+deactivate API
+
+@enduml
+
+' ============================================
+' 2. ИНТЕГРАЦИЯ С SQNS CRM (MCP/Tool Calling)
+' ============================================
+@startuml sqns-integration
+autonumber
+
+participant "Runtime Service" as RS
+participant "SQNS MCP Server" as MCP
+participant "SQNS CRM API\n(External)" as CRM
+database "Secrets Service" as Secrets
+database "PostgreSQL" as DB
+
+RS -> DB : Получение SQNS credential агента
+activate DB
+note right: SELECT credential WHERE\nagent.sqns_credential_id = ?
+DB --> RS : Credential (зашифрованный)
+deactivate DB
+
+RS -> Secrets : Расшифровка учетных данных
+activate Secrets
+note right: Используется agent.sqns_credential_id\nи CREDENTIALS_ENCRYPTION_KEY
+Secrets --> RS : Bearer Token (API Ключ SQNS)
+deactivate Secrets
+
+RS -> MCP : Вызов инструмента (например, sqns_list_slots)
+activate MCP
+note right: FastMCP Toolset\nили Legacy wrapper
+
+MCP -> CRM : HTTP GET /api/v1/slots?resource_id=...
+activate CRM
+note right: Авторизация через\nAuthorization: Bearer {token}
+CRM --> MCP : JSON данные из CRM
+note left: Список свободных слотов
+deactivate CRM
+
+MCP --> RS : Результат инструмента (отформатированный JSON)
+note left: Данные готовы для\nпередачи в LLM
+deactivate MCP
+
+@enduml
+
+' ============================================
+' 3. HTTP WEBHOOK TOOL (Внешние инструменты)
+' ============================================
+@startuml webhook-tool
+autonumber
+
+participant "Runtime Service" as RS
+participant "Tool Executor" as Exec
+participant "Внешний HTTP Сервис" as Ext
+database "Audit Service" as Audit
+database "Credentials Service" as Creds
+
+RS -> Exec : execute_tool_call(tool, args)
+activate Exec
+note right: Вызов инструмента\nс параметрами
+
+Exec -> Creds : Получение учетных данных инструмента
+activate Creds
+note right: Расшифровка секретов\nдля auth_type
+Creds --> Exec : Заголовки/параметры аутентификации
+deactivate Creds
+
+Exec -> Exec : Подготовка HTTP запроса
+note left: Валидация input_schema\nПроверка allowed_domains\nСборка JSON body
+
+Exec -> Audit : Логирование начала вызова
+activate Audit
+note right: Audit log: tool_call_start
+Audit --> Exec : OK
+deactivate Audit
+
+Exec -> Ext : HTTP POST /webhook (входные данные)
+activate Ext
+note right: Вызов стороннего API\nс аутентификацией
+Ext --> Exec : HTTP 200 OK (результат выполнения)
+note left: JSON ответ от внешнего сервиса
+deactivate Ext
+
+Exec -> Audit : Логирование успешного завершения
+activate Audit
+note right: Audit log: tool_call_success
+Audit --> Exec : OK
+deactivate Audit
+
+Exec --> RS : Возврат результата в Runtime
+note left: Результат передается в LLM
+deactivate Exec
+
+@enduml
+
+' ============================================
+' 4. УПРАВЛЕНИЕ ИСТОРИЕЙ ДИАЛОГА (Session History)
+' ============================================
+@startuml session-history
+autonumber
+
+actor "Пользователь" as User
+participant "FastAPI\n(API Service)" as API
+database "PostgreSQL" as DB
+participant "Runtime Service" as RS
+participant "LLM Provider" as LLM
+
+User -> API : POST /api/v1/runs {session_id, input}
+note right: Пользователь продолжает диалог\nс тем же session_id
+
+activate API
+
+API -> DB : Загрузка истории сообщений
+activate DB
+note right: SELECT message FROM session_messages\nWHERE session_id = ?\nORDER BY message_index\nLIMIT agent.max_history_messages
+DB --> API : List[Message] (история диалога)
+deactivate DB
+
+API -> RS : run_agent_with_tools(agent, input, history)
+activate RS
+
+RS -> RS : Фильтрация старых System Prompts
+note left: Удаление всех частей\nс part_kind='system-prompt'\nиз истории
+
+RS -> RS : Добавление актуального System Prompt агента
+note left: SystemPromptPart(agent.system_prompt)\nвставляется в начало истории
+
+RS -> LLM : Запрос к модели со всем контекстом
+activate LLM
+note right: Передача:\n1. Актуальный system prompt\n2. История диалога\n3. Новое сообщение пользователя
+LLM --> RS : Ответ модели
+deactivate LLM
+
+RS --> API : Результат выполнения
+deactivate RS
+
+API -> DB : Сохранение новых сообщений в сессию
+activate DB
+note right: INSERT INTO session_messages\n(сообщения пользователя и агента)\n\nЕсли превышен max_history:\nDELETE старых сообщений
+DB --> API : OK
+deactivate DB
+
+API --> User : 200 OK {output_message}
+note left: История обновлена\nдля следующего шага диалога
+deactivate API
+
+@enduml
+
+' ============================================
+' 5. АУТЕНТИФИКАЦИЯ И ПОЛУЧЕНИЕ ТОКЕНА
+' ============================================
+@startuml authentication
+autonumber
+
+actor "Клиент" as Client
+participant "Nginx" as Nginx
+participant "FastAPI\nAuth Router" as API
+database "PostgreSQL" as DB
+
+Client -> Nginx : POST /api/v1/auth/token
+note right: x-api-key: your-api-key\nили {api_key: "..."}
+
+Nginx -> API : HTTP POST /api/v1/auth/token
+activate API
+
+API -> DB : Поиск API ключа
+activate DB
+note right: SELECT * FROM api_keys\nWHERE key_hash = ?\nAND is_revoked = false
+DB --> API : ApiKey (scopes, tenant_id)
+deactivate DB
+
+API -> API : Валидация API ключа
+note left: Проверка хеша\nс API_KEY_PEPPER
+
+API -> API : Генерация JWT токена
+note left: JWT payload:\n{tenant_id, scopes, ...}\nПодпись: JWT_SECRET
+
+API --> Nginx : HTTP 200 OK {token: "..."}
+Nginx --> Client : HTTPS 200 OK {token}
+note left: JWT токен для\nпоследующих запросов
+deactivate API
+
+@enduml
+
+' ============================================
+' 6. СОЗДАНИЕ И ПРИВЯЗКА ИНСТРУМЕНТА К АГЕНТУ
+' ============================================
+@startuml tool-binding
+autonumber
+
+actor "Администратор" as Admin
+participant "FastAPI\nTools Router" as API
+database "PostgreSQL" as DB
+participant "Credentials Service" as Creds
+
+Admin -> API : POST /api/v1/tools
+note right: Создание нового инструмента\n{name, endpoint, input_schema, auth_type}
+
+activate API
+
+API -> API : Валидация input_schema (JSON Schema Draft 2020-12)
+API -> API : Проверка разрешений пользователя
+
+API -> DB : INSERT INTO tools
+activate DB
+note right: Сохранение инструмента\nс tenant_id
+DB --> API : Tool (id, ...)
+deactivate DB
+
+API --> Admin : 201 Created {tool_id}
+
+Admin -> API : POST /api/v1/agents/{agent_id}/bindings
+note right: Привязка инструмента к агенту\n{tool_id, permission_scope, timeout_ms}
+
+activate API
+
+API -> DB : Проверка существования агента и инструмента
+activate DB
+DB --> API : Agent, Tool
+deactivate DB
+
+API -> Creds : Получение credential (если secrets_ref указан)
+activate Creds
+Creds --> API : Credential config
+deactivate Creds
+
+API -> DB : INSERT INTO agent_tool_bindings
+activate DB
+note right: Связь agent_id <-> tool_id\nс настройками безопасности
+DB --> API : Binding (id, ...)
+deactivate DB
+
+API --> Admin : 201 Created {binding_id}
+deactivate API
+
+@enduml
+
+' ============================================
+' 7. ВКЛЮЧЕНИЕ SQNS ИНТЕГРАЦИИ ДЛЯ АГЕНТА
+' ============================================
+@startuml sqns-enable
+autonumber
+
+actor "Администратор" as Admin
+participant "FastAPI\nAgents Router" as API
+participant "SQNS CRM API" as SQNS
+database "PostgreSQL" as DB
+participant "Credentials Service" as Creds
+
+Admin -> API : POST /api/v1/agents/{agent_id}/sqns/enable-by-password
+note right: {host, email, password}
+
+activate API
+
+API -> SQNS : POST /api/v1/auth/login
+activate SQNS
+note right: Аутентификация в SQNS CRM
+SQNS --> API : Bearer Token
+deactivate SQNS
+
+API -> Creds : Создание credential для SQNS
+activate Creds
+note right: Шифрование токена\nс CREDENTIALS_ENCRYPTION_KEY
+Creds --> API : Credential (id, encrypted_config)
+deactivate Creds
+
+API -> DB : UPDATE agent SET sqns_enabled=true
+activate DB
+note right: Сохранение:\n- sqns_enabled = true\n- sqns_host = host\n- sqns_credential_id = credential.id\n- sqns_status = "ok"
+DB --> API : Agent updated
+deactivate DB
+
+API --> Admin : 200 OK {status: "ok", available_tools: [...]}
+note left: SQNS интеграция активирована
+deactivate API
+
+@enduml
+
+@enduml

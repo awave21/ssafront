@@ -1,0 +1,50 @@
+BACKEND READY - FRONTEND INTEGRATION TODO
+==========================================
+
+Backend is complete! 3 new fields added to Tool:
+- http_method (GET/POST/PUT/PATCH/DELETE)
+- parameter_mapping (where each param goes: path/query/body)
+- response_transform (filter API responses to save tokens)
+
+New API Endpoints:
+- POST /tools/test - test tool before saving
+- POST /tools/{id}/test - test saved tool
+
+PHASE 1: Basic Integration (2-3 hours)
+---------------------------------------
+1. Update TypeScript types - add 3 new fields
+2. Add HTTP method selector in tool form (dropdown)
+3. Add "Test" button that calls POST /tools/test
+4. Show test results (raw_body, status_code, latency)
+5. Include new fields when saving tool
+
+PHASE 2: Visual Filter Builder (1-2 days)
+------------------------------------------
+6. Parse response JSON into field tree
+7. Show checkboxes for field selection
+8. Generate response_transform from selections
+9. Live preview of filtered response
+10. Show token savings percentage
+
+PHASE 3: Advanced (optional)
+-----------------------------
+11. Parameter mapping UI
+12. JMESPath mode for response filtering
+13. Tree view for JSON responses
+
+Documentation Ready:
+--------------------
+- /root/agentsapp/backend/API_CHANGES_HTTP_TOOLS.md (complete API docs)
+- /root/agentsapp/backend/TESTING_GUIDE.md (curl examples)
+- /root/agentsapp/backend/http_tools_api.postman_collection.json (Postman)
+- /root/agentsapp/backend/test_http_tools.sh (automated tests)
+
+Quick Start:
+------------
+1. Read API_CHANGES_HTTP_TOOLS.md for TypeScript types
+2. Import Postman collection to test endpoints
+3. Add HTTP method selector to tool form
+4. Add "Test" button
+5. Display test results
+
+Backend is waiting!

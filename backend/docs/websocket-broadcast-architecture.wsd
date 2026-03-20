@@ -1,0 +1,150 @@
+@startuml WebSocket Broadcast Architecture
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontSize 11
+skinparam responseMessageBelowArrow true
+
+title Real-time Events: Telegram → Redis Pub/Sub → WebSocket\n(Синхронные и асинхронные вызовы)
+
+actor "Telegram User" as TgUser
+participant "Telegram\nBot API" as TgAPI
+box "Gunicorn Worker A (Producer)" #LightBlue
+    participant "webhooks.py" as Webhook
+    participant "runs.py\n_append_session_\nmessages()" as Runs
+end box
+database "PostgreSQL" as DB
+queue "Redis Pub/Sub\nagent:{id}:events" as Redis
+box "Gunicorn Worker B (Consumer)" #LightGreen
+    participant "broadcast.py\n_listener()" as Listener
+    participant "ws.py" as WS
+end box
+participant "Frontend\nWebSocket" as Frontend
+
+== 1. PRODUCER: Telegram отправляет webhook (SYNC) ==
+
+TgUser -> TgAPI : Сообщение "Кто принимает?"
+activate TgAPI
+TgAPI -> Webhook : POST /webhooks/telegram/{token}
+activate Webhook #LightBlue
+
+note right of Webhook
+  **Синхронный вызов (->)**
+  Telegram ждёт HTTP 200 OK
+  в течение 60 секунд
+end note
+
+Webhook -> Webhook : _parse_telegram_message()
+Webhook -> Runs : _process_telegram_message()
+activate Runs #LightBlue
+
+== 2. PRODUCER: Сохранение в БД (SYNC) ==
+
+Runs -> DB : INSERT session_messages
+activate DB
+DB --> Runs : OK (commit)
+deactivate DB
+
+note right of DB
+  **Синхронный вызов (->)**
+  Ждём подтверждения записи
+  перед публикацией события
+end note
+
+== 3. PRODUCER: Публикация в Redis (ASYNC / Fire-and-Forget) ==
+
+Runs ->> Redis : PUBLISH "message_created"
+note right of Redis #Yellow
+  **Асинхронный вызов (->>)**
+  Fire-and-forget!
+  
+  Producer НЕ ждёт подтверждения.
+  Redis сразу возвращает число
+  получателей (может быть 0).
+  
+  **НЕТ гарантии доставки.**
+  **НЕТ ACK от consumer.**
+end note
+
+Runs ->> Redis : PUBLISH "dialog_updated"
+
+Runs --> Webhook : output (ответ агента)
+deactivate Runs
+
+Webhook ->> TgAPI : sendMessage() [async]
+note left of TgAPI
+  Отправка ответа в Telegram
+  не блокирует webhook response
+end note
+
+Webhook --> TgAPI : HTTP 200 OK
+deactivate Webhook
+TgAPI --> TgUser : Показывает ответ
+deactivate TgAPI
+
+== 4. CONSUMER: Redis доставляет сообщение (PUSH) ==
+
+Redis ->> Listener : Message callback
+activate Listener #LightGreen
+
+note right of Listener #Pink
+  **Redis Pub/Sub особенности:**
+  
+  1. НЕТ подтверждения (ACK)
+  2. НЕТ retry при ошибке
+  3. НЕТ очереди - если consumer
+     оффлайн, сообщение теряется
+  
+  **Это сознательный trade-off:**
+  Real-time UI не требует
+  гарантированной доставки.
+  История загружается из PostgreSQL.
+end note
+
+Listener -> Listener : json.loads()
+Listener ->> WS : queue.put(event)
+deactivate Listener
+note right of WS
+  Локальная asyncio.Queue
+  в этом воркере
+end note
+
+== 5. CONSUMER: WebSocket отправляет клиенту (ASYNC) ==
+
+activate WS #LightGreen
+WS -> WS : _map_pydantic_message_to_ws_format()
+WS ->> Frontend : send_json(message_created)
+deactivate WS
+
+note right of Frontend #LightCyan
+  **WebSocket — асинхронный**
+  
+  Сервер НЕ ждёт подтверждения.
+  Если клиент отключился —
+  сообщение теряется.
+  
+  При переподключении клиент
+  делает GET /messages для
+  загрузки пропущенных.
+end note
+
+activate Frontend
+Frontend -> Frontend : Обновляет UI
+deactivate Frontend
+
+== Легенда стрелок ==
+
+note over TgUser, Frontend
+  **Типы стрелок:**
+  
+  ─────> (->)  Синхронный вызов. Вызывающий ЖДЁТ ответа.
+  ─ ─ ─> (-->) Ответ/возврат на синхронный вызов.
+  ────>> (->>) Асинхронный / Fire-and-forget. НЕ ждём ответа.
+  
+  **Гарантии доставки:**
+  
+  PostgreSQL: ACID, транзакции — данные НЕ теряются
+  Redis Pub/Sub: Fire-and-forget — события МОГУТ теряться
+  WebSocket: Best-effort — при отключении теряются
+end note
+
+@enduml

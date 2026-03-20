@@ -1,0 +1,183 @@
+{
+  "info": {
+    "name": "HTTP Tools Enhancement API",
+    "description": "Коллекция для тестирования новых возможностей HTTP tools",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "auth_token",
+      "value": "your-token-here",
+      "type": "string"
+    },
+    {
+      "key": "tool_id",
+      "value": "",
+      "type": "string",
+      "description": "ID созданного tool (скопируйте из ответа запроса 5)"
+    },
+    {
+      "key": "agent_id",
+      "value": "",
+      "type": "string",
+      "description": "ID вашего агента"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Тест GET с path параметром",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+        ],
+        "url": {
+          "raw": "{{base_url}}/tools/test",
+          "host": ["{{base_url}}"],
+          "path": ["tools", "test"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"endpoint\": \"https://api.github.com/users/{username}\",\n  \"http_method\": \"GET\",\n  \"args\": {\n    \"username\": \"torvalds\"\n  },\n  \"parameter_mapping\": {\n    \"username\": \"path\"\n  },\n  \"auth_type\": \"none\"\n}"
+        },
+        "description": "Простейший GET запрос с одним path параметром.\nДолжен вернуть полный профиль GitHub пользователя."
+      }
+    },
+    {
+      "name": "2. Тест GET с фильтрацией (Fields)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+        ],
+        "url": {
+          "raw": "{{base_url}}/tools/test",
+          "host": ["{{base_url}}"],
+          "path": ["tools", "test"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"endpoint\": \"https://api.github.com/users/{username}\",\n  \"http_method\": \"GET\",\n  \"args\": {\n    \"username\": \"torvalds\"\n  },\n  \"parameter_mapping\": {\n    \"username\": \"path\"\n  },\n  \"auth_type\": \"none\",\n  \"response_transform\": {\n    \"mode\": \"fields\",\n    \"fields\": [\n      {\"source\": \"login\", \"target\": \"username\"},\n      {\"source\": \"name\", \"target\": \"full_name\"},\n      {\"source\": \"public_repos\", \"target\": \"repos_count\"}\n    ]\n  }\n}"
+        },
+        "description": "GET запрос с фильтрацией ответа в режиме Fields.\nВместо 50+ полей вернётся только 3 выбранных.\nСравните raw_size_bytes и transformed_size_bytes!"
+      }
+    },
+    {
+      "name": "3. Тест GET с фильтрацией массива (JMESPath)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+        ],
+        "url": {
+          "raw": "{{base_url}}/tools/test",
+          "host": ["{{base_url}}"],
+          "path": ["tools", "test"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"endpoint\": \"https://api.github.com/users/{username}/repos\",\n  \"http_method\": \"GET\",\n  \"args\": {\n    \"username\": \"torvalds\",\n    \"per_page\": 5\n  },\n  \"parameter_mapping\": {\n    \"username\": \"path\",\n    \"per_page\": \"query\"\n  },\n  \"auth_type\": \"none\",\n  \"response_transform\": {\n    \"mode\": \"jmespath\",\n    \"expression\": \"[].{name: name, stars: stargazers_count, language: language}\"\n  }\n}"
+        },
+        "description": "GET запрос возвращает массив репозиториев.\nФильтрация в режиме JMESPath оставляет только 3 поля из 80+.\nЭкономия токенов: ~95%!"
+      }
+    },
+    {
+      "name": "4. Тест POST с query и body параметрами",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+        ],
+        "url": {
+          "raw": "{{base_url}}/tools/test",
+          "host": ["{{base_url}}"],
+          "path": ["tools", "test"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"endpoint\": \"https://jsonplaceholder.typicode.com/todos\",\n  \"http_method\": \"POST\",\n  \"args\": {\n    \"userId\": 1,\n    \"title\": \"Test HTTP Tool\",\n    \"completed\": false\n  },\n  \"parameter_mapping\": {\n    \"userId\": \"query\",\n    \"title\": \"body\",\n    \"completed\": \"body\"\n  },\n  \"auth_type\": \"none\"\n}"
+        },
+        "description": "POST запрос с параметрами в разных местах:\n- userId → query parameter\n- title, completed → body\nПроверьте request_url - должен содержать ?userId=1"
+      }
+    },
+    {
+      "name": "5. Создать tool (сохранить в БД)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+        ],
+        "url": {
+          "raw": "{{base_url}}/tools",
+          "host": ["{{base_url}}"],
+          "path": ["tools"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"get_github_user\",\n  \"description\": \"Получить информацию о пользователе GitHub\",\n  \"endpoint\": \"https://api.github.com/users/{username}\",\n  \"http_method\": \"GET\",\n  \"execution_type\": \"http_webhook\",\n  \"auth_type\": \"none\",\n  \"input_schema\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"username\": {\n        \"type\": \"string\",\n        \"description\": \"GitHub username для поиска\"\n      }\n    },\n    \"required\": [\"username\"]\n  },\n  \"parameter_mapping\": {\n    \"username\": \"path\"\n  },\n  \"response_transform\": {\n    \"mode\": \"fields\",\n    \"fields\": [\n      {\"source\": \"login\", \"target\": \"username\"},\n      {\"source\": \"name\", \"target\": \"full_name\"},\n      {\"source\": \"public_repos\", \"target\": \"repos_count\"},\n      {\"source\": \"followers\", \"target\": \"followers\"}\n    ]\n  }\n}"
+        },
+        "description": "Создать и сохранить tool в БД.\nСкопируйте tool_id из ответа для следующих тестов."
+      }
+    },
+    {
+      "name": "6. Тест сохранённого tool",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+        ],
+        "url": {
+          "raw": "{{base_url}}/tools/{{tool_id}}/test",
+          "host": ["{{base_url}}"],
+          "path": ["tools", "{{tool_id}}", "test"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"args\": {\n    \"username\": \"gvanrossum\"\n  }\n}"
+        },
+        "description": "Протестировать сохранённый tool.\nИспользует конфигурацию из БД, нужно передать только args."
+      }
+    },
+    {
+      "name": "7. Получить список tools",
+      "request": {
+        "method": "GET",
+        "header": [
+          {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+        ],
+        "url": {
+          "raw": "{{base_url}}/tools",
+          "host": ["{{base_url}}"],
+          "path": ["tools"]
+        },
+        "description": "Проверить, что новые поля присутствуют в ответе:\n- http_method\n- parameter_mapping\n- response_transform"
+      }
+    },
+    {
+      "name": "8. Получить tools агента с полной информацией",
+      "request": {
+        "method": "GET",
+        "header": [
+          {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+        ],
+        "url": {
+          "raw": "{{base_url}}/agents/{{agent_id}}/tools/details",
+          "host": ["{{base_url}}"],
+          "path": ["agents", "{{agent_id}}", "tools", "details"]
+        },
+        "description": "Получить все tools привязанные к агенту с полной информацией.\n\nОдин запрос вместо N+1:\n- binding настройки (timeout, permissions)\n- полная информация о tool (name, endpoint, http_method, parameter_mapping, response_transform)\n\nУкажите agent_id в переменных Postman."
+      }
+    }
+  ]
+}

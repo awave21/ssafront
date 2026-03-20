@@ -1,0 +1,12 @@
+node_modules
+.nuxt
+.output
+dist
+.env
+.env.*
+!.env.example
+.cursor/
+*.log
+.DS_Store
+coverage/
+.eslintcache

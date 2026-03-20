@@ -1,0 +1,38 @@
+<script setup lang="ts">
+import {
+  ProgressRoot,
+  type ProgressRootProps,
+} from 'reka-ui'
+import { computed, type HTMLAttributes } from 'vue'
+import { cn } from '~/lib/utils'
+
+const props = withDefaults(
+  defineProps<ProgressRootProps & { class?: HTMLAttributes['class'], indicatorClass?: HTMLAttributes['class'] }>(),
+  {
+    modelValue: 0,
+  },
+)
+
+const delegatedProps = computed(() => {
+  const { class: _, indicatorClass: __, ...delegated } = props
+
+  return delegated
+})
+</script>
+
+<template>
+  <ProgressRoot
+    v-bind="delegatedProps"
+    :class="
+      cn(
+        'relative h-4 w-full overflow-hidden rounded-full bg-secondary',
+        props.class,
+      )
+    "
+  >
+    <div
+      :class="cn('h-full w-full flex-1 bg-primary transition-all', props.indicatorClass)"
+      :style="`transform: translateX(-${100 - (props.modelValue ?? 0)}%);`"
+    />
+  </ProgressRoot>
+</template>
