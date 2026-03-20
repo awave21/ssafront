@@ -107,12 +107,13 @@ async def run_agent_with_tools(
     
     # Определяем контекст для суммаризатора:
     # приоритет — кастомный summary_prompt агента,
-    # иначе — первые 500 символов system_prompt для доменного контекста.
+    # иначе — первые 1500 символов system_prompt для доменного контекста
+    # (500 было слишком мало — обрезало ключевые доменные инструкции).
     agent_summary_context: str | None = None
     if getattr(agent, "summary_prompt", None):
         agent_summary_context = agent.summary_prompt
     elif agent.system_prompt:
-        agent_summary_context = agent.system_prompt[:500]
+        agent_summary_context = agent.system_prompt[:1500]
 
     history_processors = create_history_processor(
         max_messages=agent.max_history_messages or 50,

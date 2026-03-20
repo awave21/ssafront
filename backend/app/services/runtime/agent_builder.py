@@ -43,13 +43,14 @@ def _build_agent(
     signature = inspect.signature(PydanticAgent.__init__)
     agent_kwargs: dict[str, Any] = {}
 
-    # В новых версиях pydantic-ai system_prompt может называться instructions.
-    # Наше поле agent.system_prompt используется как единый управляющий слой
-    # (роль/стиль/поведение) и маппится на доступный параметр конструктора.
-    if "system_prompt" in signature.parameters:
-        agent_kwargs["system_prompt"] = system_prompt
-    elif "instructions" in signature.parameters:
+    # Согласно документации pydantic-ai, instructions — предпочтительный параметр
+    # для агентов с message_history: старые инструкции из истории автоматически
+    # не включаются в новый запрос, в отличие от system_prompt.
+    # system_prompt используется только как фолбек для старых версий библиотеки.
+    if "instructions" in signature.parameters:
         agent_kwargs["instructions"] = system_prompt
+    elif "system_prompt" in signature.parameters:
+        agent_kwargs["system_prompt"] = system_prompt
 
     # Добавить llm_params при наличии.
     if llm_params:
