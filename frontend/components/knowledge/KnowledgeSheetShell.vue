@@ -1,5 +1,5 @@
 <template>
-  <Sheet :open="open" @update:open="(v) => !v && $emit('close')">
+  <Sheet :open="open" @update:open="onRootOpenChange">
     <SheetContent
       side="right"
       :class="[
@@ -60,7 +60,8 @@
       <div class="p-6 border-t border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
         <slot name="footer">
           <button
-            @click="$emit('close')"
+            type="button"
+            @click="$emit('cancel')"
             class="px-6 py-2.5 rounded-md border border-slate-200 bg-white text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
           >
             {{ cancelText || 'Отменить' }}
@@ -95,26 +96,43 @@ type Tab = {
   disabled?: boolean
 }
 
-const props = defineProps<{
-  open: boolean
-  title: string
-  subtitle?: string
-  showBack?: boolean
-  tabs?: Tab[]
-  activeTab?: string
-  loading?: boolean
-  submitDisabled?: boolean
-  submitText?: string
-  cancelText?: string
-  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
-}>()
+const props = withDefaults(
+  defineProps<{
+    open: boolean
+    title: string
+    subtitle?: string
+    showBack?: boolean
+    tabs?: Tab[]
+    activeTab?: string
+    loading?: boolean
+    submitDisabled?: boolean
+    submitText?: string
+    cancelText?: string
+    size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
+    /**
+     * Если true (по умолчанию), закрытие по оверлею / Esc / крестику шлёт `close` родителю.
+     * Если false — только `update:open`, чтобы родитель сам решил (например автосохранение).
+     */
+    dismissEmitsClose?: boolean
+  }>(),
+  { dismissEmitsClose: true }
+)
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'cancel'): void
   (e: 'back'): void
   (e: 'submit'): void
   (e: 'update:activeTab', id: string): void
+  (e: 'update:open', value: boolean): void
 }>()
+
+const onRootOpenChange = (v: boolean) => {
+  emit('update:open', v)
+  if (!v && props.dismissEmitsClose) {
+    emit('close')
+  }
+}
 
 const widthClass = computed(() => {
   switch (props.size) {

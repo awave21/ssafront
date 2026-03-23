@@ -1,13 +1,15 @@
 <template>
   <KnowledgeSheetShell
     :open="open"
+    :dismiss-emits-close="false"
     :title="question ? 'Редактирование прямого вопроса' : 'Добавление прямого вопроса'"
     :tabs="tabs"
     v-model:active-tab="activeTab"
     :loading="saving"
     :submit-disabled="!isValid"
     size="lg"
-    @close="$emit('close')"
+    @update:open="onSheetOpenChange"
+    @cancel="emit('close')"
     @submit="handleSave"
   >
     <template #header-actions>
@@ -248,8 +250,46 @@ const emit = defineEmits<{
   (e: 'save', data: CreateDirectQuestionPayload): void
 }>()
 
+const baselinePayloadJson = ref('')
+
+const buildPayload = (): CreateDirectQuestionPayload => ({
+  ...form.value,
+  followup: {
+    enabled: followupEnabled.value,
+    content: followupContent.value,
+    delay_minutes: followupDelay.value
+  }
+})
+
+const isDirty = computed(() => {
+  if (!props.open || baselinePayloadJson.value === '') return false
+  try {
+    return JSON.stringify(buildPayload()) !== baselinePayloadJson.value
+  } catch {
+    return true
+  }
+})
+
+const onSheetOpenChange = (nextOpen: boolean) => {
+  if (nextOpen || !props.open) return
+  if (props.saving) return
+
+  if (isDirty.value && isValid.value) {
+    handleSave()
+    return
+  }
+  if (isDirty.value && !isValid.value) {
+    toastInfo(
+      'Нельзя сохранить',
+      'Заполните название и содержание — или нажмите «Отменить», чтобы закрыть без сохранения.'
+    )
+    return
+  }
+  emit('close')
+}
+
 const apiFetch = useApiFetch()
-const { error: toastError } = useToast()
+const { error: toastError, info: toastInfo } = useToast()
 const route = useRoute()
 
 const activeTab = ref('content')
@@ -285,51 +325,60 @@ const isValid = computed(() => {
   return form.value.title.trim() && form.value.content.trim()
 })
 
-watch(() => props.open, (isOpen) => {
-  if (isOpen) {
-    isSyncingForm.value = true
-    if (props.question) {
-      form.value = {
-        title: props.question.title,
-        search_title: props.question.search_title,
-        content: props.question.content,
-        tags: [...props.question.tags],
-        is_enabled: props.question.is_enabled,
-        interrupt_dialog: props.question.interrupt_dialog,
-        notify_telegram: props.question.notify_telegram,
-        files: [...props.question.files]
+watch(
+  () => props.open,
+  async (isOpen) => {
+    if (isOpen) {
+      isSyncingForm.value = true
+      baselinePayloadJson.value = ''
+      if (props.question) {
+        form.value = {
+          title: props.question.title,
+          search_title: props.question.search_title,
+          content: props.question.content,
+          tags: [...props.question.tags],
+          is_enabled: props.question.is_enabled,
+          interrupt_dialog: props.question.interrupt_dialog,
+          notify_telegram: props.question.notify_telegram,
+          files: [...props.question.files]
+        }
+        followupEnabled.value = props.question.followup?.enabled ?? false
+        followupContent.value = props.question.followup?.content ?? ''
+        followupDelay.value = props.question.followup?.delay_minutes ?? 60
+      } else {
+        form.value = {
+          title: '',
+          search_title: '',
+          content: '',
+          tags: [],
+          is_enabled: true,
+          interrupt_dialog: false,
+          notify_telegram: false,
+          files: []
+        }
+        followupEnabled.value = false
+        followupContent.value = ''
+        followupDelay.value = 60
       }
-      followupEnabled.value = props.question.followup?.enabled ?? false
-      followupContent.value = props.question.followup?.content ?? ''
-      followupDelay.value = props.question.followup?.delay_minutes ?? 60
+      tagInput.value = ''
+      hasManualSearchTitleEdit.value = false
+      isSyncingForm.value = false
+      activeTab.value = 'content'
+      await nextTick()
+      baselinePayloadJson.value = JSON.stringify(buildPayload())
+      if (!props.question?.search_title?.trim() && form.value.title.trim()) {
+        if (autoTranslateTimer) clearTimeout(autoTranslateTimer)
+        autoTranslateTimer = setTimeout(() => void generateSearchTitle({ force: false }), 350)
+      }
     } else {
-      form.value = {
-        title: '',
-        search_title: '',
-        content: '',
-        tags: [],
-        is_enabled: true,
-        interrupt_dialog: false,
-        notify_telegram: false,
-        files: []
+      baselinePayloadJson.value = ''
+      if (autoTranslateTimer) {
+        clearTimeout(autoTranslateTimer)
+        autoTranslateTimer = null
       }
-      followupEnabled.value = false
-      followupContent.value = ''
-      followupDelay.value = 60
     }
-    tagInput.value = ''
-    hasManualSearchTitleEdit.value = false
-    isSyncingForm.value = false
-    activeTab.value = 'content'
-    if (!props.question?.search_title?.trim() && form.value.title.trim()) {
-      if (autoTranslateTimer) clearTimeout(autoTranslateTimer)
-      autoTranslateTimer = setTimeout(() => void generateSearchTitle({ force: false }), 350)
-    }
-  } else if (autoTranslateTimer) {
-    clearTimeout(autoTranslateTimer)
-    autoTranslateTimer = null
   }
-})
+)
 
 watch(
   () => form.value.search_title,
@@ -380,6 +429,10 @@ const generateSearchTitle = async ({ force }: { force: boolean }) => {
       form.value.search_title = translated
       hasManualSearchTitleEdit.value = false
       isProgrammaticSearchTitleUpdate.value = false
+      if (props.open) {
+        await nextTick()
+        baselinePayloadJson.value = JSON.stringify(buildPayload())
+      }
     }
   } catch (err) {
     toastError('Не удалось перевести название для поиска')
@@ -450,16 +503,6 @@ const insertSystemTag = async () => {
 
 const handleSave = () => {
   if (!isValid.value) return
-  
-  const payload: CreateDirectQuestionPayload = {
-    ...form.value,
-    followup: {
-      enabled: followupEnabled.value,
-      content: followupContent.value,
-      delay_minutes: followupDelay.value
-    }
-  }
-  
-  emit('save', payload)
+  emit('save', buildPayload())
 }
 </script>

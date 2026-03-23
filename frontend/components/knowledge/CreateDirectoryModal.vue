@@ -9,6 +9,7 @@
     :submit-text="step === 'columns' || (step === 'details' && selectedTemplate !== 'custom') ? 'Создать' : 'Далее'"
     :size="step === 'columns' ? 'lg' : 'md'"
     @close="handleClose"
+    @cancel="handleClose"
     @back="handleBack"
     @submit="handleNext"
   >

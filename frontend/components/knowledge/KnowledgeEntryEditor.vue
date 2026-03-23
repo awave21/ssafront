@@ -8,6 +8,7 @@
     :submit-disabled="!isValid"
     size="lg"
     @close="$emit('close')"
+    @cancel="$emit('close')"
     @submit="handleSave"
   >
     <template #header-actions>

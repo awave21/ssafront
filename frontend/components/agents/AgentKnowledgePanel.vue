@@ -123,7 +123,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Database } from 'lucide-vue-next'
 import { navigateTo, useRoute, useRouter } from '#app'
@@ -160,9 +160,18 @@ const showDirectQuestionEditor = ref(false)
 const selectedDirectQuestion = ref<DirectQuestion | null>(null)
 const isSavingDirectQuestion = ref(false)
 
-const knowledgeComposable = computed(() => agent.value ? useKnowledge(agent.value.id) : null)
-const directQuestions = computed(() => knowledgeComposable.value?.directQuestions.value ?? [])
-const directQuestionsLoading = computed(() => knowledgeComposable.value?.isLoading.value ?? false)
+/** Один экземпляр на agentId — иначе `useKnowledge` в computed создавал бы новый state и список не обновлялся */
+const knowledgeApi = shallowRef<ReturnType<typeof useKnowledge> | null>(null)
+watch(
+  () => agent.value?.id,
+  (id) => {
+    knowledgeApi.value = id ? useKnowledge(id) : null
+  },
+  { immediate: true }
+)
+
+const directQuestions = computed(() => knowledgeApi.value?.directQuestions.value ?? [])
+const directQuestionsLoading = computed(() => knowledgeApi.value?.isLoading.value ?? false)
 
 const directories = computed(() => directoriesComposable.value?.directories ?? [])
 const directoriesLoading = computed(() => directoriesComposable.value?.isLoading ?? false)
@@ -218,8 +227,8 @@ const loadDirectories = async () => {
 }
 
 const loadDirectQuestions = async () => {
-  if (knowledgeComposable.value) {
-    await knowledgeComposable.value.fetchDirectQuestions()
+  if (knowledgeApi.value) {
+    await knowledgeApi.value.fetchDirectQuestions()
   }
 }
 
@@ -316,18 +325,20 @@ const handleSelectDirectQuestion = (q: DirectQuestion) => {
   showDirectQuestionEditor.value = true
 }
 
-const handleSaveDirectQuestion = async (data: any) => {
-  if (!knowledgeComposable.value) return
+const handleSaveDirectQuestion = async (data: CreateDirectQuestionPayload) => {
+  if (!knowledgeApi.value) return
   isSavingDirectQuestion.value = true
   try {
     if (selectedDirectQuestion.value) {
-      await knowledgeComposable.value.updateDirectQuestion(selectedDirectQuestion.value.id, data)
+      await knowledgeApi.value.updateDirectQuestion(selectedDirectQuestion.value.id, data)
       toastSuccess('Вопрос обновлен')
     } else {
-      await knowledgeComposable.value.createDirectQuestion(data)
+      await knowledgeApi.value.createDirectQuestion(data)
       toastSuccess('Вопрос создан')
     }
+    await loadDirectQuestions()
     showDirectQuestionEditor.value = false
+    selectedDirectQuestion.value = null
   } catch (err: any) {
     toastError(err.message || 'Не удалось сохранить вопрос')
   } finally {
@@ -336,9 +347,9 @@ const handleSaveDirectQuestion = async (data: any) => {
 }
 
 const handleToggleDirectQuestion = async (id: string, enabled: boolean) => {
-  if (!knowledgeComposable.value) return
+  if (!knowledgeApi.value) return
   try {
-    await knowledgeComposable.value.toggleDirectQuestion(id, enabled)
+    await knowledgeApi.value.toggleDirectQuestion(id, enabled)
     toastSuccess(enabled ? 'Вопрос включен' : 'Вопрос выключен')
   } catch (err: any) {
     toastError(err.message || 'Не удалось изменить статус')
@@ -346,10 +357,10 @@ const handleToggleDirectQuestion = async (id: string, enabled: boolean) => {
 }
 
 const handleDeleteDirectQuestion = async (id: string) => {
-  if (!knowledgeComposable.value) return
+  if (!knowledgeApi.value) return
   if (!confirm('Вы уверены, что хотите удалить этот вопрос?')) return
   try {
-    await knowledgeComposable.value.deleteDirectQuestion(id)
+    await knowledgeApi.value.deleteDirectQuestion(id)
     toastSuccess('Вопрос удален')
   } catch (err: any) {
     toastError(err.message || 'Не удалось удалить вопрос')
@@ -357,9 +368,9 @@ const handleDeleteDirectQuestion = async (id: string) => {
 }
 
 const handleReorderDirectQuestions = async (ids: string[]) => {
-  if (!knowledgeComposable.value) return
+  if (!knowledgeApi.value) return
   try {
-    await knowledgeComposable.value.reorderDirectQuestions(ids)
+    await knowledgeApi.value.reorderDirectQuestions(ids)
     await loadDirectQuestions()
   } catch (err: any) {
     toastError(err.message || 'Не удалось сохранить порядок прямых вопросов')
@@ -498,7 +509,7 @@ const createSearchTitleTranslator = () => {
     if (cached) return cached
 
     try {
-      const translated = (await knowledgeComposable.value?.translateSearchTitle(normalizedTitle))?.trim()
+      const translated = (await knowledgeApi.value?.translateSearchTitle(normalizedTitle))?.trim()
       const searchTitle = translated || normalizedTitle
       cache.set(normalizedTitle, searchTitle)
       return searchTitle
@@ -510,7 +521,7 @@ const createSearchTitleTranslator = () => {
 }
 
 const handleImportDirectQuestions = async (file: File) => {
-  if (!knowledgeComposable.value) return
+  if (!knowledgeApi.value) return
 
   try {
     const XLSX = await import('xlsx')
@@ -542,7 +553,7 @@ const handleImportDirectQuestions = async (file: File) => {
     for (const row of parsed) {
       try {
         const searchTitle = await resolveSearchTitle(row.title)
-        await knowledgeComposable.value.createDirectQuestion({
+        await knowledgeApi.value.createDirectQuestion({
           title: row.title,
           search_title: searchTitle,
           content: row.content,

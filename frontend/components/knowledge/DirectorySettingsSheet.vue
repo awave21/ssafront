@@ -7,6 +7,7 @@
     :submit-disabled="!isValid"
     size="lg"
     @close="handleClose"
+    @cancel="handleClose"
     @submit="handleSave"
   >
     <template #header-actions>
