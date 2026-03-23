@@ -109,6 +109,7 @@
       v-else-if="canReorder"
       v-model="orderedQuestionsState"
       item-key="id"
+      handle=".direct-question-drag-handle"
       class="grid max-w-full gap-4"
       ghost-class="opacity-40"
       chosen-class="z-10"
@@ -117,9 +118,10 @@
       @end="handleDragEnd"
     >
       <template #item="{ element }">
-        <div class="min-w-0 max-w-full cursor-move rounded-xl transition-colors">
+        <div class="min-w-0 max-w-full rounded-xl transition-colors">
           <DirectQuestionCard
             :question="element"
+            reorderable
             @click="$emit('select', element)"
             @toggle="(enabled: boolean) => $emit('toggle', element.id, enabled)"
             @delete="$emit('delete', element.id)"
@@ -133,6 +135,7 @@
         v-for="q in filteredQuestions"
         :key="q.id"
         :question="q"
+        :reorderable="false"
         @click="$emit('select', q)"
         @toggle="(enabled: boolean) => $emit('toggle', q.id, enabled)"
         @delete="$emit('delete', q.id)"

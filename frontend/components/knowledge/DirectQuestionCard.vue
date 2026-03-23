@@ -1,11 +1,22 @@
 <template>
   <div
-    class="group relative min-w-0 max-w-full cursor-pointer overflow-hidden rounded-3xl border border-slate-100 bg-white p-5 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-all duration-500 hover:-translate-y-1 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)]"
+    class="group relative min-w-0 max-w-full cursor-pointer overflow-hidden rounded-3xl border border-slate-100 bg-white p-5 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-shadow duration-300 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)]"
     @click="$emit('click')"
   >
-    <div class="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-indigo-500/5 transition-transform duration-700 group-hover:scale-150" />
+    <!-- Без scale/transform при hover: иначе карточка «прыгает» и клик по корзине промахивается -->
+    <div class="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-indigo-500/5" />
     <div class="flex items-center justify-between gap-4">
-      <div class="flex items-center gap-4 min-w-0 flex-1">
+      <div class="flex items-center gap-2 min-w-0 flex-1 sm:gap-4">
+        <button
+          v-if="reorderable"
+          type="button"
+          class="direct-question-drag-handle shrink-0 cursor-grab touch-none rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing"
+          aria-label="Перетащить вопрос"
+          title="Перетащить"
+          @click.stop
+        >
+          <GripVertical class="h-5 w-5" />
+        </button>
         <div class="h-11 w-11 flex-shrink-0 rounded-xl bg-indigo-50 flex items-center justify-center transition-colors group-hover:bg-indigo-100">
           <MessageSquare class="w-5 h-5 text-indigo-600" />
         </div>
@@ -26,7 +37,7 @@
         </div>
       </div>
 
-      <div class="flex items-center gap-3 shrink-0" @click.stop>
+      <div class="relative z-20 flex items-center gap-3 shrink-0" @click.stop>
         <!-- Indicators -->
         <div class="flex items-center gap-1.5 mr-2">
           <TooltipProvider :delay-duration="300">
@@ -83,9 +94,10 @@
         />
         
         <button
-          @click="$emit('delete')"
-          class="rounded-xl p-2 text-slate-400 opacity-0 transition-colors group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-600"
+          type="button"
+          class="rounded-xl p-2 text-slate-400 opacity-0 transition-opacity duration-150 hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100 group-focus-within:opacity-100 max-sm:opacity-100"
           title="Удалить"
+          @click.stop="$emit('delete')"
         >
           <Trash2 class="w-4 h-4" />
         </button>
@@ -95,14 +107,19 @@
 </template>
 
 <script setup lang="ts">
-import { MessageSquare, Octagon, Bell, Clock3, Trash2 } from 'lucide-vue-next'
+import { Bell, Clock3, GripVertical, MessageSquare, Octagon, Trash2 } from 'lucide-vue-next'
 import type { DirectQuestion } from '~/types/knowledge'
 import { Switch } from '~/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip'
 
-defineProps<{
-  question: DirectQuestion
-}>()
+withDefaults(
+  defineProps<{
+    question: DirectQuestion
+    /** Показать ручку drag-n-drop (только когда список в режиме сортировки) */
+    reorderable?: boolean
+  }>(),
+  { reorderable: false }
+)
 
 defineEmits<{
   (e: 'click'): void
