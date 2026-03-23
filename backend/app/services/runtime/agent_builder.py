@@ -43,10 +43,11 @@ def _build_agent(
     signature = inspect.signature(PydanticAgent.__init__)
     agent_kwargs: dict[str, Any] = {}
 
-    # Согласно документации pydantic-ai, instructions — предпочтительный параметр
-    # для агентов с message_history: старые инструкции из истории автоматически
-    # не включаются в новый запрос, в отличие от system_prompt.
-    # system_prompt используется только как фолбек для старых версий библиотеки.
+    # В pydantic-ai 1.x параметр instructions является предпочтительным:
+    # system_prompt (строка) добавляется как SystemPromptPart только при
+    # ПЕРВОМ сообщении (без истории). При наличии истории SystemPromptPart
+    # пропускается, а instructions встраивается в каждый ModelRequest через
+    # ModelRequest.instructions и гарантированно уходит в модель на каждом шаге.
     if "instructions" in signature.parameters:
         agent_kwargs["instructions"] = system_prompt
     elif "system_prompt" in signature.parameters:
