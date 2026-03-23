@@ -34,6 +34,7 @@ Goal:
 
 Rules:
 - Base each recommendation on evidence from dialog IDs.
+- For every topic in topics, set evidence_dialog_ids to 1–15 dialog_id values taken exactly from the analyzed batch (the dialog_id= lines in the prompt). Only use ids that appear in the batch; pick representative dialogs for that theme.
 - Be concise, practical and implementation-focused.
 - Never output secrets. Keep excerpts sanitized.
 - Recommendations must be reviewable by humans (no auto-apply language).
@@ -158,6 +159,15 @@ async def analyze_dialog_samples(
         output.topics = output.topics[:20]
         return output
 
+    def _sanitize_topic_evidence(
+        batch: AnalyzerBatchOutput, allowed_ids: set[str]
+    ) -> AnalyzerBatchOutput:
+        fixed = []
+        for topic in batch.topics:
+            ids = [x for x in topic.evidence_dialog_ids if x in allowed_ids][:15]
+            fixed.append(topic.model_copy(update={"evidence_dialog_ids": ids}))
+        return batch.model_copy(update={"topics": fixed})
+
     contexts = _build_context_payload(dialogs)
     prompt = _build_user_prompt(contexts)
 
@@ -169,6 +179,8 @@ async def analyze_dialog_samples(
         ),
     )
     output = result.output if hasattr(result, "output") else result.data
+    allowed_dialog_ids = {d.session_id for d in dialogs}
+    output = _sanitize_topic_evidence(output, allowed_dialog_ids)
 
     usage_obj = result.usage() if hasattr(result, "usage") and callable(result.usage) else None
     prompt_tokens = int(getattr(usage_obj, "input_tokens", 0) or 0)

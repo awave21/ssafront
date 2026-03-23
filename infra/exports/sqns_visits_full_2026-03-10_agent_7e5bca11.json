@@ -1,0 +1,662 @@
+{
+    "visits": [
+        {
+            "id": "60adc707-ea74-4f4f-824d-08598aa693bb",
+            "online": false,
+            "comment": "",
+            "deleted": false,
+            "agent_id": "7e5bca11-516a-417d-aefb-cd28c51de5d7",
+            "raw_data": {
+                "id": 6102,
+                "author": "Щелокова Елена Борисовна",
+                "client": 445,
+                "online": false,
+                "comment": "",
+                "deleted": false,
+                "datetime": "2026-03-10 10:00:00",
+                "services": [
+                    {
+                        "id": 536,
+                        "name": "А17.01.008 Радиочастотный лифтинг лица",
+                        "price": "12500.00",
+                        "amount": 1,
+                        "paySum": 12500,
+                        "discount": 0
+                    },
+                    {
+                        "id": 73,
+                        "name": "А11.02.002  Ботулинотерапия препаратом Диспорт от 20 ед.",
+                        "price": "280.00",
+                        "amount": 95,
+                        "paySum": 26600,
+                        "discount": 0
+                    },
+                    {
+                        "id": 788,
+                        "name": "Нанесение сыворотки крупная зона",
+                        "price": "7000.00",
+                        "amount": 1,
+                        "paySum": 7000,
+                        "discount": 0
+                    }
+                ],
+                "totalCost": "46100.00",
+                "attendance": 1,
+                "clientData": {
+                    "id": 445,
+                    "sex": 2,
+                    "name": "Кузнецова Ольга Анатольевна",
+                    "tags": [
+                        "Пригласить",
+                        "Ожидаем ответ"
+                    ],
+                    "type": "noGroup",
+                    "email": "landishou@gmail.com",
+                    "phone": "+7(916)557-42-51",
+                    "address": "г. Москва г, ул. Голованова, д. 13, кв. 55",
+                    "comment": null,
+                    "lastname": "Кузнецова",
+                    "birthDate": "31.10.1985",
+                    "firstname": "Ольга",
+                    "patronymic": "Анатольевна",
+                    "visitsCount": 10,
+                    "passportData": "Паспорт гражданина Российской Федерации",
+                    "totalArrival": "583135.00",
+                    "additionalPhone": ""
+                },
+                "resourceId": 1,
+                "totalPrice": "46100.00",
+                "commodities": [
+                ],
+                "create_date": "2026-02-27 18:29:06",
+                "update_date": "2026-03-10 11:25:36",
+                "certificates": [
+                ],
+                "organization": {
+                    "id": 23475,
+                    "name": "ФЕЙС-КЛИНИК"
+                },
+                "subscriptions": [
+                ],
+                "master_requested": true
+            },
+            "synced_at": "2026-03-17T08:09:57.053406+00:00",
+            "attendance": 1,
+            "created_at": "2026-03-17T08:09:57.053406+00:00",
+            "total_cost": 46100.00,
+            "updated_at": null,
+            "external_id": 6102,
+            "total_price": 46100.00,
+            "visit_datetime": "2026-03-10T10:00:00+00:00",
+            "client_external_id": null,
+            "resource_external_id": 1
+        },
+        {
+            "id": "310a594d-7d94-49fb-9163-9f48be662204",
+            "online": false,
+            "comment": "",
+            "deleted": false,
+            "agent_id": "7e5bca11-516a-417d-aefb-cd28c51de5d7",
+            "raw_data": {
+                "id": 6103,
+                "author": "Щелокова Елена Борисовна",
+                "client": 1207,
+                "online": false,
+                "comment": "",
+                "deleted": false,
+                "datetime": "2026-03-10 11:30:00",
+                "services": [
+                    {
+                        "id": 73,
+                        "name": "А11.02.002  Ботулинотерапия препаратом Диспорт от 20 ед.",
+                        "price": "280.00",
+                        "amount": 45,
+                        "paySum": 12600,
+                        "discount": 0
+                    },
+                    {
+                        "id": 88,
+                        "name": "А11.01.013 Контурная пластика (точечный лифтинг) лица",
+                        "price": "51000.00",
+                        "amount": 1,
+                        "paySum": 51000,
+                        "discount": 0
+                    },
+                    {
+                        "id": 524,
+                        "name": "A17.30.005 Безинъекционная биоревитализация (лицо)",
+                        "price": "13500.00",
+                        "amount": 1,
+                        "paySum": 13500,
+                        "discount": 0
+                    }
+                ],
+                "totalCost": "77100.00",
+                "attendance": 1,
+                "clientData": {
+                    "id": 1207,
+                    "sex": 1,
+                    "name": "Кузнецов Кирилл Александрович",
+                    "tags": [
+                    ],
+                    "type": "noGroup",
+                    "email": "",
+                    "phone": "+7(985)251-10-60",
+                    "address": "",
+                    "comment": "Приходил по сертификату. 100р закрыты сертификатом.   Должен на 06.03 52800р. На следующем приеме (10.03) снять",
+                    "lastname": "Кузнецов",
+                    "birthDate": "17.10.1984",
+                    "firstname": "Кирилл",
+                    "patronymic": "Александрович",
+                    "visitsCount": 2,
+                    "passportData": "",
+                    "totalArrival": "129900.00",
+                    "additionalPhone": ""
+                },
+                "resourceId": 1,
+                "totalPrice": "77100.00",
+                "commodities": [
+                ],
+                "create_date": "2026-02-27 18:29:26",
+                "update_date": "2026-03-10 14:02:34",
+                "certificates": [
+                ],
+                "organization": {
+                    "id": 23475,
+                    "name": "ФЕЙС-КЛИНИК"
+                },
+                "subscriptions": [
+                ],
+                "master_requested": true
+            },
+            "synced_at": "2026-03-17T08:09:57.053406+00:00",
+            "attendance": 1,
+            "created_at": "2026-03-17T08:09:57.053406+00:00",
+            "total_cost": 77100.00,
+            "updated_at": null,
+            "external_id": 6103,
+            "total_price": 77100.00,
+            "visit_datetime": "2026-03-10T11:30:00+00:00",
+            "client_external_id": null,
+            "resource_external_id": 1
+        },
+        {
+            "id": "11cfcf35-7247-4861-a2a3-6f0db7ffd091",
+            "online": false,
+            "comment": "",
+            "deleted": false,
+            "agent_id": "7e5bca11-516a-417d-aefb-cd28c51de5d7",
+            "raw_data": {
+                "id": 7154,
+                "author": "Никишкина Нина Сергеевна",
+                "client": 382,
+                "online": false,
+                "comment": "",
+                "deleted": false,
+                "datetime": "2026-03-10 13:00:00",
+                "services": [
+                ],
+                "totalCost": "14500.00",
+                "attendance": 1,
+                "clientData": {
+                    "id": 382,
+                    "sex": 2,
+                    "name": "Абузова Татьяна Сергеевна",
+                    "tags": [
+                    ],
+                    "type": "noGroup",
+                    "email": "",
+                    "phone": "+7(905)538-18-38",
+                    "address": "г. Москва г, ул. Удальцова, д. 73, кв. 275",
+                    "comment": null,
+                    "lastname": "Абузова",
+                    "birthDate": "03.08.1984",
+                    "firstname": "Татьяна",
+                    "patronymic": "Сергеевна",
+                    "visitsCount": 5,
+                    "passportData": "",
+                    "totalArrival": "167300.00",
+                    "additionalPhone": ""
+                },
+                "resourceId": 1,
+                "totalPrice": "14500.00",
+                "commodities": [
+                    {
+                        "id": 5,
+                        "name": "Регенерирующий базовый крем Synchro GERnetic, 50 мл.",
+                        "price": "14500.00",
+                        "amount": 1,
+                        "paySum": 14500,
+                        "discount": 0
+                    }
+                ],
+                "create_date": "2026-03-10 12:26:23",
+                "update_date": "2026-03-10 12:27:01",
+                "certificates": [
+                ],
+                "organization": {
+                    "id": 23475,
+                    "name": "ФЕЙС-КЛИНИК"
+                },
+                "subscriptions": [
+                ],
+                "master_requested": true
+            },
+            "synced_at": "2026-03-17T08:09:57.053406+00:00",
+            "attendance": 1,
+            "created_at": "2026-03-17T08:09:57.053406+00:00",
+            "total_cost": 14500.00,
+            "updated_at": null,
+            "external_id": 7154,
+            "total_price": 14500.00,
+            "visit_datetime": "2026-03-10T13:00:00+00:00",
+            "client_external_id": null,
+            "resource_external_id": 1
+        },
+        {
+            "id": "38b7b8cf-45d1-4d43-9bbf-21e28b5ac458",
+            "online": false,
+            "comment": "",
+            "deleted": false,
+            "agent_id": "7e5bca11-516a-417d-aefb-cd28c51de5d7",
+            "raw_data": {
+                "id": 7160,
+                "author": "Гудкова Анна Викторовна",
+                "client": 95,
+                "online": false,
+                "comment": "",
+                "deleted": false,
+                "datetime": "2026-03-10 13:45:00",
+                "services": [
+                    {
+                        "id": 72,
+                        "name": "А11.02.002 Ботулинотерапия препаратом Диспорт до 20 ед. (коррекция)",
+                        "price": "5500.00",
+                        "amount": 1,
+                        "paySum": 0,
+                        "discount": 100
+                    }
+                ],
+                "totalCost": "0.00",
+                "attendance": 1,
+                "clientData": {
+                    "id": 95,
+                    "sex": 2,
+                    "name": "Гузь Лариса Викторовна",
+                    "tags": [
+                        "Пригласить",
+                        "Ожидаем ответ"
+                    ],
+                    "type": "noGroup",
+                    "email": "",
+                    "phone": "+7(903)755-46-77",
+                    "address": "г. Москва г, ул. переулок Большой Казенный, д. 8, кв. 25",
+                    "comment": null,
+                    "lastname": "Гузь",
+                    "birthDate": "10.12.1971",
+                    "firstname": "Лариса",
+                    "patronymic": "Викторовна",
+                    "visitsCount": 58,
+                    "passportData": "Паспорт гражданина Российской Федерации",
+                    "totalArrival": "1081950.00",
+                    "additionalPhone": ""
+                },
+                "resourceId": 1,
+                "totalPrice": "5500.00",
+                "commodities": [
+                ],
+                "create_date": "2026-03-10 14:51:51",
+                "update_date": "2026-03-11 12:11:28",
+                "certificates": [
+                ],
+                "organization": {
+                    "id": 23475,
+                    "name": "ФЕЙС-КЛИНИК"
+                },
+                "subscriptions": [
+                ],
+                "master_requested": true
+            },
+            "synced_at": "2026-03-17T08:09:57.053406+00:00",
+            "attendance": 1,
+            "created_at": "2026-03-17T08:09:57.053406+00:00",
+            "total_cost": 0.00,
+            "updated_at": null,
+            "external_id": 7160,
+            "total_price": 5500.00,
+            "visit_datetime": "2026-03-10T13:45:00+00:00",
+            "client_external_id": null,
+            "resource_external_id": 1
+        },
+        {
+            "id": "73b65d5d-aaf0-4b56-ba14-fa69e1d70e8e",
+            "online": false,
+            "comment": "",
+            "deleted": false,
+            "agent_id": "7e5bca11-516a-417d-aefb-cd28c51de5d7",
+            "raw_data": {
+                "id": 7157,
+                "author": "Никишкина Нина Сергеевна",
+                "client": 67,
+                "online": false,
+                "comment": "",
+                "deleted": false,
+                "datetime": "2026-03-10 17:00:00",
+                "services": [
+                    {
+                        "id": 73,
+                        "name": "А11.02.002  Ботулинотерапия препаратом Диспорт от 20 ед.",
+                        "price": "280.00",
+                        "amount": 35,
+                        "paySum": 9800,
+                        "discount": 0
+                    },
+                    {
+                        "id": 100,
+                        "name": "А11.01.013 Контурная пластика лобно-височной области",
+                        "price": "67000.00",
+                        "amount": 1,
+                        "paySum": 67000,
+                        "discount": 0
+                    }
+                ],
+                "totalCost": "76800.00",
+                "attendance": 1,
+                "clientData": {
+                    "id": 67,
+                    "sex": 2,
+                    "name": "Павловская Ольга Николаевна",
+                    "tags": [
+                    ],
+                    "type": "noGroup",
+                    "email": "",
+                    "phone": "+7(919)212-00-87",
+                    "address": "г. Москва г, ул. Вавилова, д. 2, кв. 37",
+                    "comment": "Пригласить по согласованию",
+                    "lastname": "Павловская",
+                    "birthDate": "03.02.1959",
+                    "firstname": "Ольга",
+                    "patronymic": "Николаевна",
+                    "visitsCount": 14,
+                    "passportData": "Паспорт гражданина Российской Федерации",
+                    "totalArrival": "387850.00",
+                    "additionalPhone": ""
+                },
+                "resourceId": 1,
+                "totalPrice": "76800.00",
+                "commodities": [
+                ],
+                "create_date": "2026-03-10 13:07:46",
+                "update_date": "2026-03-10 21:23:39",
+                "certificates": [
+                ],
+                "organization": {
+                    "id": 23475,
+                    "name": "ФЕЙС-КЛИНИК"
+                },
+                "subscriptions": [
+                ],
+                "master_requested": true
+            },
+            "synced_at": "2026-03-17T08:09:57.053406+00:00",
+            "attendance": 1,
+            "created_at": "2026-03-17T08:09:57.053406+00:00",
+            "total_cost": 76800.00,
+            "updated_at": null,
+            "external_id": 7157,
+            "total_price": 76800.00,
+            "visit_datetime": "2026-03-10T17:00:00+00:00",
+            "client_external_id": null,
+            "resource_external_id": 1
+        },
+        {
+            "id": "27a996db-85d9-4b81-8289-dfe39db18f51",
+            "online": false,
+            "comment": "",
+            "deleted": false,
+            "agent_id": "7e5bca11-516a-417d-aefb-cd28c51de5d7",
+            "raw_data": {
+                "id": 6104,
+                "author": "Щелокова Елена Борисовна",
+                "client": 1307,
+                "online": false,
+                "comment": "",
+                "deleted": false,
+                "datetime": "2026-03-10 18:00:00",
+                "services": [
+                    {
+                        "id": 203,
+                        "name": "B01.008.003 Превентивный прием (осмотр, консультация) главного врача косметолога клиники (первичный)",
+                        "price": "15000.00",
+                        "amount": 1,
+                        "paySum": 15000,
+                        "discount": 0
+                    },
+                    {
+                        "id": 536,
+                        "name": "А17.01.008 Радиочастотный лифтинг лица",
+                        "price": "12500.00",
+                        "amount": 1,
+                        "paySum": 12500,
+                        "discount": 0
+                    },
+                    {
+                        "id": 527,
+                        "name": "A17.30.005 Безинъекционная биоревитализация (лицо и шея)",
+                        "price": "24500.00",
+                        "amount": 1,
+                        "paySum": 24500,
+                        "discount": 0
+                    }
+                ],
+                "totalCost": "52000.00",
+                "attendance": 1,
+                "clientData": {
+                    "id": 1307,
+                    "sex": 2,
+                    "name": "Матвеева Елена Викторовна",
+                    "tags": [
+                    ],
+                    "type": "noGroup",
+                    "email": "",
+                    "phone": "+7(903)725-87-60",
+                    "address": "инд. 125319, г. Москва, ул. Черняховского, д. 5, кв. 68",
+                    "comment": null,
+                    "lastname": "Матвеева",
+                    "birthDate": "12.01.1960",
+                    "firstname": "Елена",
+                    "patronymic": "Викторовна",
+                    "visitsCount": 2,
+                    "passportData": "",
+                    "totalArrival": "352000.00",
+                    "additionalPhone": ""
+                },
+                "resourceId": 1,
+                "totalPrice": "52000.00",
+                "commodities": [
+                ],
+                "create_date": "2026-02-27 18:30:48",
+                "update_date": "2026-03-10 21:28:16",
+                "certificates": [
+                ],
+                "organization": {
+                    "id": 23475,
+                    "name": "ФЕЙС-КЛИНИК"
+                },
+                "subscriptions": [
+                ],
+                "master_requested": true
+            },
+            "synced_at": "2026-03-17T08:09:57.053406+00:00",
+            "attendance": 1,
+            "created_at": "2026-03-17T08:09:57.053406+00:00",
+            "total_cost": 52000.00,
+            "updated_at": null,
+            "external_id": 6104,
+            "total_price": 52000.00,
+            "visit_datetime": "2026-03-10T18:00:00+00:00",
+            "client_external_id": null,
+            "resource_external_id": 1
+        },
+        {
+            "id": "3ba1a917-af8f-4e9f-a2df-fffcedc23c23",
+            "online": false,
+            "comment": "Внести все данные! пациентка с 2024г.",
+            "deleted": false,
+            "agent_id": "7e5bca11-516a-417d-aefb-cd28c51de5d7",
+            "raw_data": {
+                "id": 6252,
+                "author": "Никишкина Нина Сергеевна",
+                "client": 406,
+                "online": false,
+                "comment": "Внести все данные! пациентка с 2024г.",
+                "deleted": false,
+                "datetime": "2026-03-10 19:00:00",
+                "services": [
+                    {
+                        "id": 197,
+                        "name": "B01.008.003 Консультация врача косметолога по аппаратным, уходовым и инъекционным процедурам.",
+                        "price": "0.00",
+                        "amount": 1,
+                        "paySum": 0,
+                        "discount": 0
+                    }
+                ],
+                "totalCost": "0.00",
+                "attendance": 1,
+                "clientData": {
+                    "id": 406,
+                    "sex": 2,
+                    "name": "Демидова Екатерина Николаевна",
+                    "tags": [
+                    ],
+                    "type": "noGroup",
+                    "email": "",
+                    "phone": "+7(916)172-90-05",
+                    "address": "инд. 125047, г. Москва, ул. Чаянова, д. 18А, кв. 6",
+                    "comment": "Дублирующий пользователь имел следующую информацию:\nфамилия - Екатерина,\n19,\n09,\n1991,\nмед. карта - 1290\n",
+                    "lastname": "Демидова",
+                    "birthDate": "05.05.1980",
+                    "firstname": "Екатерина",
+                    "patronymic": "Николаевна",
+                    "visitsCount": 2,
+                    "passportData": "",
+                    "totalArrival": "0.00",
+                    "additionalPhone": ""
+                },
+                "resourceId": 7,
+                "totalPrice": "0.00",
+                "commodities": [
+                ],
+                "create_date": "2026-03-04 19:39:19",
+                "update_date": "2026-03-10 19:42:21",
+                "certificates": [
+                ],
+                "organization": {
+                    "id": 23475,
+                    "name": "ФЕЙС-КЛИНИК"
+                },
+                "subscriptions": [
+                ],
+                "master_requested": true
+            },
+            "synced_at": "2026-03-17T08:09:57.053406+00:00",
+            "attendance": 1,
+            "created_at": "2026-03-17T08:09:57.053406+00:00",
+            "total_cost": 0.00,
+            "updated_at": null,
+            "external_id": 6252,
+            "total_price": 0.00,
+            "visit_datetime": "2026-03-10T19:00:00+00:00",
+            "client_external_id": null,
+            "resource_external_id": 7
+        },
+        {
+            "id": "978c42b7-ba2b-4dc8-bc96-7477774922ef",
+            "online": false,
+            "comment": "",
+            "deleted": false,
+            "agent_id": "7e5bca11-516a-417d-aefb-cd28c51de5d7",
+            "raw_data": {
+                "id": 6358,
+                "author": "Никишкина Нина Сергеевна",
+                "client": 1658,
+                "online": false,
+                "comment": "",
+                "deleted": false,
+                "datetime": "2026-03-10 19:30:00",
+                "services": [
+                    {
+                        "id": 88,
+                        "name": "А11.01.013 Контурная пластика (точечный лифтинг) лица",
+                        "price": "51000.00",
+                        "amount": 1,
+                        "paySum": 51000,
+                        "discount": 0
+                    },
+                    {
+                        "id": 73,
+                        "name": "А11.02.002  Ботулинотерапия препаратом Диспорт от 20 ед.",
+                        "price": "280.00",
+                        "amount": 30,
+                        "paySum": 8400,
+                        "discount": 0
+                    }
+                ],
+                "totalCost": "59400.00",
+                "attendance": 1,
+                "clientData": {
+                    "id": 1658,
+                    "sex": 2,
+                    "name": "Хизева Евгения Сергеевна",
+                    "tags": [
+                    ],
+                    "type": "new",
+                    "email": "",
+                    "phone": "+7(965)328-57-31",
+                    "address": "",
+                    "comment": null,
+                    "lastname": "Хизева",
+                    "birthDate": "17.10.1985",
+                    "firstname": "Евгения",
+                    "patronymic": "Сергеевна",
+                    "visitsCount": 1,
+                    "passportData": "",
+                    "totalArrival": "59400.00",
+                    "additionalPhone": ""
+                },
+                "resourceId": 1,
+                "totalPrice": "59400.00",
+                "commodities": [
+                ],
+                "create_date": "2026-03-09 13:22:41",
+                "update_date": "2026-03-10 21:17:57",
+                "certificates": [
+                ],
+                "organization": {
+                    "id": 23475,
+                    "name": "ФЕЙС-КЛИНИК"
+                },
+                "subscriptions": [
+                ],
+                "master_requested": true
+            },
+            "synced_at": "2026-03-17T08:09:57.053406+00:00",
+            "attendance": 1,
+            "created_at": "2026-03-17T08:09:57.053406+00:00",
+            "total_cost": 59400.00,
+            "updated_at": null,
+            "external_id": 6358,
+            "total_price": 59400.00,
+            "visit_datetime": "2026-03-10T19:30:00+00:00",
+            "client_external_id": null,
+            "resource_external_id": 1
+        }
+    ],
+    "agent_id": "7e5bca11-516a-417d-aefb-cd28c51de5d7",
+    "date_local": "2026-03-10",
+    "count_visits": 8,
+    "count_deleted": 0,
+    "agent_timezone": "Europe/Moscow",
+    "generated_at_utc": "2026-03-20T13:08:51Z"
+}

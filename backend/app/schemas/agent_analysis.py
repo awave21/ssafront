@@ -72,6 +72,10 @@ class TopicSummary(BaseModel):
         ...,
         description="Оценка здоровья темы по качеству обработки.",
     )
+    evidence_dialog_ids: list[str] = Field(
+        default_factory=list,
+        description="Идентификаторы диалогов (сессий), в которых проявляется тема.",
+    )
 
 
 class RecommendationEvidence(BaseModel):
@@ -234,6 +238,7 @@ class AnalyzerTopicResult(BaseModel):
     dialogs_count: int = Field(..., ge=0)
     share: float = Field(..., ge=0, le=1)
     health: Literal["good", "warning", "critical"] = "warning"
+    evidence_dialog_ids: list[str] = Field(default_factory=list)
 
 
 class AnalyzerRecommendationResult(BaseModel):

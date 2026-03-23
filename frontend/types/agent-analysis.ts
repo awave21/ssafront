@@ -44,7 +44,10 @@ export type AnalysisTopic = {
   name: string
   share?: number | null
   dialogs_count?: number | null
-  health?: string | null
+  /** API: good | warning | critical (или число в старых отчётах) */
+  health?: string | number | null
+  /** ID диалогов (сессий), в которых проявляется тема — одна сессия ≈ одно обращение пользователя */
+  evidence_dialog_ids?: string[]
 }
 
 export type AnalysisReportKpis = {

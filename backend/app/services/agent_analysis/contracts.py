@@ -32,6 +32,10 @@ class AnalyzerTopic(BaseModel):
     dialogs_count: int = Field(..., ge=0)
     share: float = Field(..., ge=0, le=1)
     health: Literal["good", "warning", "critical"] = "warning"
+    evidence_dialog_ids: list[str] = Field(
+        default_factory=list,
+        description="dialog_id из анализируемой выборки, относящиеся к теме (до 15 шт.).",
+    )
 
 
 class AnalyzerRecommendationEvidence(BaseModel):
