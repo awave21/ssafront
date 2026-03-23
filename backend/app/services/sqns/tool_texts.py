@@ -1,53 +1,53 @@
 from __future__ import annotations
 
-# Единственный источник "текстов для LLM" по SQNS тулам.
+# Единственный источник "текстов для LLM" по SQNS тулам (язык: русский).
 # Эти описания должны быть одинаковыми для:
 # - Legacy tool definitions (schemas/agent.py)
 # - FastMCP toolset (services/sqns_mcp_server.py)
 
 SQNS_TOOL_DESCRIPTIONS: dict[str, str] = {
     "sqns_find_booking_options": (
-        "FIRST STEP BEFORE BOOKING. Use this tool to search for available services and staff. "
-        "IMPORTANT: If the knowledge base (search_knowledge_base) indicates that a service has subtypes, "
-        "clarify the client's choice first, then call this tool with the specific name. "
-        "Returns IDs needed for sqns_list_slots."
+        "Первый шаг перед записью: поиск доступных услуг и сотрудников. "
+        "Важно: если в базе знаний (search_knowledge_base) указано, что у услуги есть подтипы, "
+        "сначала уточни выбор клиента, затем вызови инструмент с конкретным названием. "
+        "Возвращает идентификаторы, нужные для sqns_list_slots."
     ),
     "sqns_list_resources": (
-        "Fallback: full list of staff members (resource_id, name, specialty). "
-        "Use only if sqns_find_booking_options does not fit the task."
+        "Резервный вариант: полный список сотрудников (resource_id, имя, специализация). "
+        "Используй только если sqns_find_booking_options не подходит для задачи."
     ),
     "sqns_list_services": (
-        "Fallback: full list of services (service_id, name, duration, price). "
-        "Use only if sqns_find_booking_options does not fit the task."
+        "Резервный вариант: полный список услуг (service_id, название, длительность, цена). "
+        "Используй только если sqns_find_booking_options не подходит для задачи."
     ),
     "sqns_find_client": (
-        "Search for a client by phone number to retrieve their name and contact details. "
-        "Use before creating a booking or when client data needs to be verified. "
-        "Do NOT use to search for bookings — use sqns_client_visits (preferred) or sqns_list_visits instead. "
-        "Returns an empty result if the client is not found."
+        "Поиск клиента по телефону: имя и контакты. "
+        "Вызывай перед созданием записи или когда нужно проверить данные клиента. "
+        "Не используй для поиска записей — для этого sqns_client_visits (предпочтительно) или sqns_list_visits. "
+        "Если клиента нет, вернётся пустой результат."
     ),
     "sqns_list_slots": (
-        "CHECK AVAILABILITY. Call ONLY after the client has confirmed their choice of service and staff member. "
-        "Offer the client 2-3 time options from the returned list. Do not suggest times at random."
+        "Проверка доступности. Вызывай только после того, как клиент подтвердил услугу и специалиста. "
+        "Предложи клиенту 2–3 варианта времени из возвращённого списка. Не предлагай время наугад."
     ),
     "sqns_create_visit": (
-        "FINALIZE BOOKING. Call only after the client has selected a specific slot and confirmed their details (name and phone). "
-        "Before calling, make sure you have answered all clarifying questions from the client using the knowledge base."
+        "Завершение записи. Вызывай только после выбора конкретного слота и подтверждения ФИО и телефона. "
+        "Перед вызовом убедись, что все уточняющие вопросы клиента закрыты с помощью базы знаний."
     ),
-    "sqns_update_visit": "Update a booking: reschedule, change comment, or update status.",
+    "sqns_update_visit": "Изменение записи: перенос времени, комментарий или статус.",
     "sqns_list_visits": (
-        "List of a client's bookings for a period, looked up by phone number. "
-        "This tool already verifies the client by phone, so sqns_find_client does NOT need to be called first. "
-        "Do not use to browse the general schedule."
+        "Список записей клиента за период по номеру телефона. "
+        "Клиент уже проверяется по телефону — sqns_find_client перед этим вызывать не нужно. "
+        "Не использовать для просмотра общего расписания."
     ),
     "sqns_client_visits": (
-        "PRIMARY tool for finding a client's booking by phone and date (or date range) in a compact format. "
-        "Use when you need to find a booking to reschedule or cancel without extra data. "
-        "sqns_find_client does NOT need to be called before this tool."
+        "Основной инструмент для поиска записи клиента по телефону и дате (или диапазону дат) в компактном виде. "
+        "Используй для переноса или отмены без лишних данных. "
+        "sqns_find_client перед этим вызывать не нужно."
     ),
     "sqns_delete_visit": (
-        "Delete (cancel) a booking by visit_id. "
-        "Before deleting, verify that the booking belongs to the client (by phone number)."
+        "Удаление (отмена) записи по visit_id. "
+        "Перед удалением убедись, что запись принадлежит клиенту (по номеру телефона)."
     ),
 }
 
