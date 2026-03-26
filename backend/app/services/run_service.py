@@ -29,11 +29,19 @@ from app.db.models.tool import Tool
 from app.db.models.tool_call_log import ToolCallLog
 from app.schemas.auth import AuthContext
 from app.services.runtime import AgentRunResult, messages_adapter, run_agent_with_tools
-from app.services.runtime.tools import build_direct_answer_tool, build_knowledge_search_tool
+from app.services.runtime.tools import (
+    build_direct_answer_tool,
+    build_direct_questions_search_tool,
+    build_knowledge_search_tool,
+)
 from app.core.config import get_settings
 from app.services.logfire_cost_reconcile import schedule_logfire_cost_reconcile
 from app.services.agent_user_state import is_agent_user_disabled_by_session, normalize_identity
-from app.services.direct_questions import build_direct_questions_block, schedule_direct_question_followup
+from app.services.direct_questions import schedule_direct_question_followup
+from app.services.direct_questions.router_context import (
+    build_injection_context_block,
+    eager_inject_direct_answer,
+)
 from app.services.direct_questions.safety import sanitize_direct_question_content, split_direct_question_content
 from app.services.tenant_llm_config import get_decrypted_api_key
 from app.services.tenant_balance import sync_run_balance_charge
@@ -184,7 +192,6 @@ async def _build_direct_question_tool_meta(
             "source": "direct_question_tool_call",
             "question_id": str(question.id),
             "title": question.title,
-            "search_title": question.search_title,
             "content": user_content,
             "system_instruction": system_instruction,
             "interrupt_dialog": question.interrupt_dialog,
@@ -595,25 +602,62 @@ async def execute_agent_run(
     direct_question_meta: dict[str, Any] | None = None
     system_prompt_override: str | None = None
     extra_runtime_tools = []
+    retrieval_decisions: list[dict[str, Any]] = []
 
     if openai_api_key is None:
         openai_api_key = await get_decrypted_api_key(db, run.tenant_id)
 
-    if settings.direct_questions_router_enabled:
+    if settings.direct_questions_retrieval_router_enabled:
         try:
-            dq_limit = getattr(agent, "direct_questions_limit", None) or settings.direct_questions_router_max_items
-            direct_answers_block = await build_direct_questions_block(
+            base_prompt = agent.system_prompt or ""
+
+            # Eager pre-retrieval: ищем подходящий прямой вопрос ДО запуска LLM.
+            # LLM получает готовый контент и тратит только 1 ход на форматирование.
+            injection = await eager_inject_direct_answer(
                 db,
                 tenant_id=run.tenant_id,
                 agent_id=agent.id,
-                max_items=dq_limit,
                 input_message=input_message,
                 openai_api_key=openai_api_key,
+                min_match_percent=settings.direct_questions_min_match_percent,
+                rerank=settings.direct_questions_rerank_enabled,
             )
-            if direct_answers_block:
-                base_prompt = agent.system_prompt or ""
-                system_prompt_override = (
-                    f"{base_prompt}\n\n{direct_answers_block}" if base_prompt else direct_answers_block
+
+            if injection:
+                # Нашли совпадение — инжектируем контент прямо в system prompt.
+                # Тулы search/get_direct_answer не нужны — LLM сразу видит ответ.
+                context_block = build_injection_context_block(injection)
+                parts = [p for p in [base_prompt, context_block] if p]
+                system_prompt_override = "\n\n".join(parts) if parts else None
+
+                retrieval_decisions.append({
+                    "pipeline_kind": "direct_question_eager",
+                    "query": input_message,
+                    "direct_question_id": injection["direct_question_id"],
+                    "title": injection["title"],
+                    "relevance": injection["relevance"],
+                })
+                logger.info(
+                    "direct_question_eager_injected",
+                    agent_id=str(agent.id),
+                    direct_question_id=injection["direct_question_id"],
+                    title=injection["title"],
+                    relevance=injection["relevance"],
+                )
+            else:
+                # Совпадений нет — добавляем тулы как fallback для уточняющих вопросов.
+                dq_limit = getattr(agent, "direct_questions_limit", None) or settings.direct_questions_max_results
+                extra_runtime_tools.append(
+                    build_direct_questions_search_tool(
+                        db=db,
+                        tenant_id=run.tenant_id,
+                        agent_id=agent.id,
+                        openai_api_key=openai_api_key,
+                        default_limit=dq_limit,
+                        min_match_percent=settings.direct_questions_min_match_percent,
+                        rerank=settings.direct_questions_rerank_enabled,
+                        analytics_sink=retrieval_decisions,
+                    )
                 )
                 extra_runtime_tools.append(
                     build_direct_answer_tool(
@@ -779,6 +823,8 @@ async def execute_agent_run(
     run.logfire_reconcile_status = "pending"
     run.logfire_reconcile_error = None
     run.tools_called = list(result.tools_called)
+    if retrieval_decisions:
+        run.knowledge_retrieval_decisions = retrieval_decisions
 
     # Build tool_call_logs for all tools invoked in this run.
     # DB-backed tools are captured via result.tool_call_events (has timing + payloads).

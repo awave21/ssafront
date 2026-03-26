@@ -27,6 +27,14 @@
         >
           <Settings class="w-4 h-4" />
         </button>
+        <button
+          type="button"
+          @click="$emit('delete')"
+          class="rounded-xl p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+          title="Удалить справочник"
+        >
+          <Trash2 class="w-4 h-4" />
+        </button>
         <Switch
           :model-value="directory.is_enabled"
           @update:model-value="(val: boolean) => $emit('toggle', val)"
@@ -45,7 +53,8 @@ import {
   Package, 
   Building2, 
   List,
-  Settings
+  Settings,
+  Trash2
 } from 'lucide-vue-next'
 import type { Directory } from '~/types/directories'
 import { Switch } from '~/components/ui/switch'
@@ -59,6 +68,7 @@ const emit = defineEmits<{
   (e: 'click'): void
   (e: 'toggle', enabled: boolean): void
   (e: 'settings'): void
+  (e: 'delete'): void
 }>()
 
 const templateIcon = computed(() => {

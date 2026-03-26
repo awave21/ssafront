@@ -42,6 +42,8 @@ const normalizeRole = (
 const normalizeType = (rawType: unknown): MessageType => {
   if (typeof rawType === 'string') {
     const value = rawType.toLowerCase()
+    if (value === 'tool_call') return 'tool_call'
+    if (value === 'tool_result') return 'tool_result'
     if (value.includes('image') || value.includes('photo') || value.includes('img')) return 'image'
     if (value.includes('voice') || value.includes('audio') || value.includes('wav') || value.includes('mp3')) return 'voice'
   }
@@ -62,12 +64,15 @@ const normalizeStatus = (rawStatus: unknown): MessageStatus => {
 // Roles that indicate internal/tool messages (should not be displayed in chat)
 const INTERNAL_ROLES = new Set([
   'tool', 'function', 'tool_result', 'function_result',
-  'tool_call', 'function_call', 'tool_use'
+  'function_call', 'tool_use'
 ])
 
-// Message types that indicate internal/tool usage
+// Message types that are treated as tool UI cards (not filtered out, rendered specially)
+const TOOL_TYPES = new Set(['tool_call', 'tool_result'])
+
+// Message types that indicate truly internal/system usage (filtered out completely)
 const INTERNAL_TYPES = new Set([
-  'tool_result', 'tool_call', 'function_call', 'function_result', 'tool_use'
+  'function_call', 'function_result', 'tool_use'
 ])
 
 /**
@@ -105,8 +110,9 @@ const normalizeMessage = (raw: any, fallbackDialogId: string): Message | null =>
     return null
   }
 
-  // 2) Skip by message type (tool_result, function_call, etc.)
+  // 2) Skip by message type for truly internal types
   const rawMsgType = raw?.type ?? raw?.message_type ?? raw?.content_type ?? raw?.kind
+  const isTool = typeof rawMsgType === 'string' && TOOL_TYPES.has(rawMsgType.toLowerCase())
   if (typeof rawMsgType === 'string' && INTERNAL_TYPES.has(rawMsgType.toLowerCase())) {
     return null
   }
@@ -114,15 +120,17 @@ const normalizeMessage = (raw: any, fallbackDialogId: string): Message | null =>
   // 3) Extract content early to check for raw data objects
   const contentValue = raw?.content ?? raw?.text ?? raw?.message ?? raw?.body ?? raw?.payload ?? raw?.data?.content ?? ''
 
-  // Skip when content is a raw object (not string) — likely tool/API response
-  if (typeof contentValue === 'object' && contentValue !== null) {
+  // For tool messages, allow object content — it will be JSON-serialized for display
+  if (!isTool && typeof contentValue === 'object' && contentValue !== null) {
     return null
   }
 
-  const content = typeof contentValue === 'string' ? contentValue : String(contentValue)
+  const content = typeof contentValue === 'string'
+    ? contentValue
+    : (typeof contentValue === 'object' ? JSON.stringify(contentValue) : String(contentValue))
 
-  // 4) Skip when content looks like serialized data (JSON / Python dict)
-  if (looksLikeRawData(content)) {
+  // 4) Skip when content looks like serialized data (JSON / Python dict) — only for non-tool messages
+  if (!isTool && looksLikeRawData(content)) {
     return null
   }
 
@@ -153,7 +161,11 @@ const normalizeMessage = (raw: any, fallbackDialogId: string): Message | null =>
     content,
     status,
     duration_seconds: durationValue,
-    created_at: String(createdAt)
+    created_at: String(createdAt),
+    tool_name: raw?.tool_name ?? undefined,
+    tool_call_id: raw?.tool_call_id ?? undefined,
+    args: raw?.args ?? undefined,
+    result: raw?.result ?? undefined,
   }
 }
 

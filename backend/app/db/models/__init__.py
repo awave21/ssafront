@@ -47,6 +47,7 @@ from app.db.models.tool_parameter import ToolParameter
 from app.db.models.direct_question import DirectQuestion, DirectQuestionFile
 from app.db.models.direct_question_followup_job import DirectQuestionFollowupJob
 from app.db.models.knowledge_file import KnowledgeFile
+from app.db.models.knowledge_file_chunk import KnowledgeFileChunk
 from app.db.models.knowledge_index_job import KnowledgeIndexJob
 
 __all__ = [
@@ -100,5 +101,6 @@ __all__ = [
     "DirectQuestionFile",
     "DirectQuestionFollowupJob",
     "KnowledgeFile",
+    "KnowledgeFileChunk",
     "KnowledgeIndexJob",
 ]

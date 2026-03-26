@@ -1,5 +1,60 @@
 <template>
+  <!-- Tool Call / Tool Result — compact inline card, full width -->
+  <div v-if="isToolMessage" class="flex justify-start w-full">
+    <div class="w-full max-w-[85%] sm:max-w-[70%] lg:max-w-[60%]">
+      <div
+        class="rounded-xl border text-xs font-mono overflow-hidden"
+        :class="message.type === 'tool_call'
+          ? 'border-amber-200 bg-amber-50'
+          : 'border-emerald-200 bg-emerald-50'"
+      >
+        <!-- Header -->
+        <div
+          class="flex items-center gap-2 px-3 py-1.5 border-b"
+          :class="message.type === 'tool_call'
+            ? 'border-amber-200 bg-amber-100/60'
+            : 'border-emerald-200 bg-emerald-100/60'"
+        >
+          <Wrench v-if="message.type === 'tool_call'" class="w-3 h-3 text-amber-600 shrink-0" />
+          <CheckSquare v-else class="w-3 h-3 text-emerald-600 shrink-0" />
+          <span
+            class="font-semibold text-[11px]"
+            :class="message.type === 'tool_call' ? 'text-amber-700' : 'text-emerald-700'"
+          >
+            {{ message.type === 'tool_call' ? 'Вызов функции' : 'Результат функции' }}
+          </span>
+          <span
+            v-if="message.tool_name"
+            class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide"
+            :class="message.type === 'tool_call'
+              ? 'bg-amber-200 text-amber-800'
+              : 'bg-emerald-200 text-emerald-800'"
+          >
+            {{ message.tool_name }}
+          </span>
+          <span class="ml-auto text-[10px] text-slate-400">{{ formattedTime }}</span>
+        </div>
+        <!-- Args / Result body -->
+        <div class="px-3 py-2 space-y-1.5">
+          <template v-if="message.type === 'tool_call' && message.args">
+            <div class="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Аргументы</div>
+            <pre class="whitespace-pre-wrap break-all text-slate-700 leading-relaxed">{{ formatJson(message.args) }}</pre>
+          </template>
+          <template v-else-if="message.type === 'tool_result'">
+            <div class="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Ответ</div>
+            <pre class="whitespace-pre-wrap break-all text-slate-700 leading-relaxed">{{ formatResultContent }}</pre>
+          </template>
+          <template v-else-if="message.content">
+            <pre class="whitespace-pre-wrap break-all text-slate-700 leading-relaxed">{{ message.content }}</pre>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Regular messages -->
   <div
+    v-else
     class="flex"
     :class="[
       isOutgoing ? 'justify-end' : 'justify-start'
@@ -148,7 +203,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Play, Pause, Check, Loader2, AlertCircle } from 'lucide-vue-next'
+import { Play, Pause, Check, Loader2, AlertCircle, Wrench, CheckSquare } from 'lucide-vue-next'
 import type { Message } from '../../types/dialogs'
 import { createSafeMarkdownRenderer } from '~/utils/safe-markdown'
 
@@ -176,6 +231,7 @@ const audioRef = ref<HTMLAudioElement | null>(null)
 const isAgent = computed(() => props.message.role === 'agent')
 const isManager = computed(() => props.message.role === 'manager')
 const isOutgoing = computed(() => isAgent.value || isManager.value)
+const isToolMessage = computed(() => props.message.type === 'tool_call' || props.message.type === 'tool_result')
 
 const bubbleClasses = computed(() => {
   if (isManager.value) return 'bg-emerald-600 text-white rounded-br-sm'
@@ -186,6 +242,21 @@ const bubbleClasses = computed(() => {
 const renderedContent = computed(() => {
   if (props.message.type !== 'text') return ''
   return md.render(props.message.content)
+})
+
+const formatJson = (value: unknown): string => {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+const formatResultContent = computed(() => {
+  if (props.message.result !== undefined && props.message.result !== null) {
+    return formatJson(props.message.result)
+  }
+  return props.message.content || '—'
 })
 
 const formattedTime = computed(() => {

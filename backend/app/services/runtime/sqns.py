@@ -505,7 +505,7 @@ async def _build_sqns_toolset(
     """
     # Ленивая загрузка, чтобы избежать циклических импортов.
     from app.db.session import async_session_factory
-    from app.api.routers.agents import _build_sqns_client
+    from app.services.sqns.client_factory import build_sqns_client_for_agent
 
     async with async_session_factory() as db:
         stmt = select(Agent).where(Agent.id == agent.id)
@@ -513,7 +513,11 @@ async def _build_sqns_toolset(
         if not fresh_agent:
             raise ToolExecutionError("Agent not found")
 
-        sqns_client = await _build_sqns_client(fresh_agent, db, user)
+        sqns_client = await build_sqns_client_for_agent(
+            db,
+            fresh_agent,
+            tenant_id=fresh_agent.tenant_id,
+        )
 
         if FASTMCP_AVAILABLE:
             logger.info(
@@ -571,7 +575,7 @@ def build_sqns_legacy_tools(agent: Agent, user: AuthContext) -> list[PydanticToo
         def make_sqns_tool(method_name: str, tool_name: str, description: str, schema: dict):
             async def _sqns_impl(**kwargs: Any) -> Any:
                 from app.db.session import async_session_factory
-                from app.api.routers.agents import _build_sqns_client
+                from app.services.sqns.client_factory import build_sqns_client_for_agent
 
                 async with async_session_factory() as db:
                     stmt = select(Agent).where(Agent.id == agent.id)
@@ -579,7 +583,11 @@ def build_sqns_legacy_tools(agent: Agent, user: AuthContext) -> list[PydanticToo
                     if not agent_obj:
                         raise ToolExecutionError("Agent not found")
 
-                    client = await _build_sqns_client(agent_obj, db, user)
+                    client = await build_sqns_client_for_agent(
+                        db,
+                        agent_obj,
+                        tenant_id=agent_obj.tenant_id,
+                    )
                     method = getattr(client, method_name, None)
                     if not method:
                         raise ToolExecutionError(f"SQNS client missing method {method_name}")

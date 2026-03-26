@@ -177,15 +177,50 @@ class Settings(BaseSettings):
         validation_alias="RUNTIME_STRIP_TOOL_MESSAGES_FROM_HISTORY",
         description="Удалять tool-call/tool-return из history перед запуском модели (можно включить для строгой совместимости).",
     )
-    direct_questions_router_enabled: bool = Field(
+    direct_questions_retrieval_router_enabled: bool = Field(
         default=True,
-        validation_alias="DIRECT_QUESTIONS_ROUTER_ENABLED",
+        validation_alias=AliasChoices(
+            "DIRECT_QUESTIONS_RETRIEVAL_ROUTER_ENABLED",
+            "DIRECT_QUESTIONS_ROUTER_ENABLED",
+        ),
     )
-    direct_questions_router_max_items: int = Field(
-        default=80,
+    direct_questions_max_results: int = Field(
+        default=5,
         ge=1,
-        le=500,
-        validation_alias="DIRECT_QUESTIONS_ROUTER_MAX_ITEMS",
+        le=20,
+        validation_alias="DIRECT_QUESTIONS_MAX_RESULTS",
+    )
+    direct_questions_min_match_percent: int = Field(
+        default=45,
+        ge=0,
+        le=100,
+        validation_alias="DIRECT_QUESTIONS_MIN_MATCH_PERCENT",
+    )
+    direct_questions_rerank_enabled: bool = Field(
+        default=True,
+        validation_alias="DIRECT_QUESTIONS_RERANK_ENABLED",
+        description="Гибридный rerank (вектор + лексика) для прямых вопросов.",
+    )
+
+    # Rerank для справочников: гибридный (вектор + лексика)
+    directory_rerank_enabled: bool = Field(
+        default=True,
+        validation_alias="DIRECTORY_RERANK_ENABLED",
+        description="Включить лёгкий гибридный rerank для семантического поиска в справочниках.",
+    )
+    directory_rerank_candidates_multiplier: int = Field(
+        default=4,
+        ge=2,
+        le=10,
+        validation_alias="DIRECTORY_RERANK_CANDIDATES_MULTIPLIER",
+        description="Множитель top-N для первичной выборки перед rerank (напр., limit=5 → выбираем 20).",
+    )
+    directory_rerank_vector_weight: float = Field(
+        default=0.65,
+        ge=0.0,
+        le=1.0,
+        validation_alias="DIRECTORY_RERANK_VECTOR_WEIGHT",
+        description="Вес векторного score в финальной оценке; (1-вес) идёт на лексический score.",
     )
 
     direct_questions_embedding_timeout_ms: int = Field(
@@ -221,24 +256,6 @@ class Settings(BaseSettings):
         ge=1,
         le=20,
         validation_alias="DIRECT_QUESTIONS_FOLLOWUP_MAX_ATTEMPTS",
-    )
-    yandex_translate_url: str = Field(
-        default="https://translate.api.cloud.yandex.net/translate/v2/translate",
-        validation_alias="YANDEX_TRANSLATE_URL",
-    )
-    yandex_translate_api_key: str | None = Field(
-        default=None,
-        validation_alias="YANDEX_TRANSLATE_API_KEY",
-    )
-    yandex_translate_folder_id: str | None = Field(
-        default=None,
-        validation_alias="YANDEX_TRANSLATE_FOLDER_ID",
-    )
-    yandex_translate_timeout_seconds: float = Field(
-        default=8.0,
-        ge=1.0,
-        le=60.0,
-        validation_alias="YANDEX_TRANSLATE_TIMEOUT_SECONDS",
     )
     analysis_reports_ttl_days: int = Field(
         default=30,

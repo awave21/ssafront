@@ -17,6 +17,7 @@ from app.db.models.agent import Agent
 from app.db.models.binding import AgentToolBinding
 from app.db.models.tool import Tool
 from app.schemas.auth import AuthContext
+from app.services.runtime.deps import AgentDeps
 from app.services.runtime.history_processors import create_history_processor
 from app.services.runtime.agent_builder import _build_agent
 from app.services.runtime.message_history import prepare_message_history
@@ -104,6 +105,27 @@ async def run_agent_with_tools(
         wrapped_tools.extend(sqns_tools)
     if extra_tools:
         wrapped_tools.extend(extra_tools)
+    if wrapped_tools:
+        deduped_tools: list[PydanticTool] = []
+        seen_tool_names: set[str] = set()
+        duplicate_tool_names: list[str] = []
+        for tool in wrapped_tools:
+            tool_name = getattr(tool, "name", "")
+            if not tool_name:
+                deduped_tools.append(tool)
+                continue
+            if tool_name in seen_tool_names:
+                duplicate_tool_names.append(tool_name)
+                continue
+            seen_tool_names.add(tool_name)
+            deduped_tools.append(tool)
+        if duplicate_tool_names:
+            logger.warning(
+                "runtime_tool_name_duplicates_dropped",
+                agent_id=str(agent.id),
+                duplicate_tool_names=sorted(set(duplicate_tool_names)),
+            )
+        wrapped_tools = deduped_tools
     
     # Определяем контекст для суммаризатора:
     # приоритет — кастомный summary_prompt агента,
@@ -212,6 +234,11 @@ async def run_agent_with_tools(
     # request_limit = tool_calls_limit + 1 (последний запрос для финального ответа)
     effective_request_limit = max(effective_tool_calls_limit + 1, settings.runtime_request_limit)
 
+    agent_deps = AgentDeps(
+        openai_api_key=openai_api_key,
+        tenant_id=getattr(agent, "tenant_id", None),
+    )
+
     with span_context:
         result = await pydantic_agent.run(
             input_message,
@@ -220,6 +247,7 @@ async def run_agent_with_tools(
                 tool_calls_limit=effective_tool_calls_limit,
                 request_limit=effective_request_limit,
             ),
+            deps=agent_deps,
         )
     output = getattr(result, "data", None)
     if output is None:

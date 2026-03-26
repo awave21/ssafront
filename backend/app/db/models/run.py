@@ -55,6 +55,7 @@ class Run(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     logfire_reconcile_error: Mapped[str | None] = mapped_column(Text)
     logfire_reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     tools_called: Mapped[list[dict] | None] = mapped_column(JSONB)
+    knowledge_retrieval_decisions: Mapped[list[dict] | None] = mapped_column(JSONB)
 
     agent: Mapped["Agent"] = relationship(back_populates="runs")
     session_messages: Mapped[list["SessionMessage"]] = relationship(

@@ -24,8 +24,11 @@ from app.db.models.directory import Directory, DirectoryItem
 from app.db.session import get_db
 from app.schemas.auth import AuthContext
 from app.schemas.directory import (
+    CATALOG_DIRECTORY_TEMPLATES,
     ColumnDefinition,
+    DEFAULT_DIRECTORY_TOOL_DESCRIPTION,
     DirectoryCreate,
+    DirectoryCreateResponse,
     DirectoryItemCreate,
     DirectoryItemRead,
     DirectoryItemsBulkCreate,
@@ -44,7 +47,14 @@ from app.schemas.directory import (
     ImportResponse,
     KnowledgeSearchResponse,
     KnowledgeSearchResultItem,
+    SINGLETON_DIRECTORY_TEMPLATES,
+    STANDARD_QA_DIRECTORY_COLUMNS,
     TEMPLATE_COLUMNS,
+)
+from app.services.directory.demo_seed import demo_rows_for_template
+from app.services.directory.persist_create import (
+    DemoItemValidationFailed,
+    persist_directory_with_demo_items,
 )
 from app.services.audit import write_audit
 
@@ -55,6 +65,209 @@ router = APIRouter()
 # === Лимиты ===
 MAX_DIRECTORIES_PER_AGENT = 20
 MAX_ITEMS_PER_DIRECTORY = 10_000
+
+TEMPLATE_TOOL_NAME_MAP: dict[str, str] = {
+    "qa": "get_question_answer",
+    "service_catalog": "get_service_info",
+    "product_catalog": "get_product_info",
+    "company_info": "get_company_info",
+    "theme_catalog": "get_topic_info",
+    "medical_course_catalog": "get_medical_course_info",
+    "clipboard_import": "get_clipboard_import",
+}
+
+
+def _catalog_tool_description(template: str, when_to_call: str) -> str:
+    """Пресет для поля tool_description: имя функции + когда вызывать + параметр query."""
+    fn = TEMPLATE_TOOL_NAME_MAP[template]
+    return (
+        f"Инструмент `{fn}`. {when_to_call} "
+        "Параметр `query` — формулировка вопроса пользователя или ключевые слова для поиска по справочнику."
+    )
+
+
+TEMPLATE_TOOL_DESCRIPTION_MAP: dict[str, str] = {
+    "qa": _catalog_tool_description(
+        "qa",
+        "Вызывай, когда нужен короткий точный ответ из базы FAQ (вопрос–ответ).",
+    ),
+    "service_catalog": _catalog_tool_description(
+        "service_catalog",
+        "Вызывай для вопросов об услугах: название, описание, стоимость.",
+    ),
+    "product_catalog": _catalog_tool_description(
+        "product_catalog",
+        "Вызывай для вопросов о товарах: название, характеристики, цена.",
+    ),
+    "company_info": _catalog_tool_description(
+        "company_info",
+        "Вызывай для вопросов о компании: контакты, адрес, доставка, правила, цены.",
+    ),
+    "theme_catalog": _catalog_tool_description(
+        "theme_catalog",
+        "Вызывай для вопросов по тематическому каталогу (тема, краткая информация, ссылки).",
+    ),
+    "medical_course_catalog": _catalog_tool_description(
+        "medical_course_catalog",
+        "Вызывай для вопросов о медицинских курсах: программа, длительность, стоимость.",
+    ),
+    "clipboard_import": _catalog_tool_description(
+        "clipboard_import",
+        "Вызывай для поиска по данным, импортированным из буфера обмена.",
+    ),
+}
+
+
+def _catalog_prompt_usage_line(template: str, when_clause: str) -> str:
+    """Одна строка для копирования в системный промпт: «Вызывай <fn>, когда …»."""
+    fn = TEMPLATE_TOOL_NAME_MAP[template]
+    return f"Вызывай {fn}, когда {when_clause}"
+
+
+# Примеры только для встраивания в промпт агента (не путать с tool_description).
+TEMPLATE_PROMPT_USAGE_SNIPPET_MAP: dict[str, str] = {
+    "qa": _catalog_prompt_usage_line(
+        "qa",
+        "пользователю нужен короткий ответ из базы типовых вопросов и ответов (FAQ).",
+    ),
+    "service_catalog": _catalog_prompt_usage_line(
+        "service_catalog",
+        "спрашивают об услугах: название, описание, стоимость или подбор услуги.",
+    ),
+    "product_catalog": _catalog_prompt_usage_line(
+        "product_catalog",
+        "спрашивают о товарах: название, характеристики, цена или наличие.",
+    ),
+    "company_info": _catalog_prompt_usage_line(
+        "company_info",
+        "спрашивают о клинике или компании: контакты, адрес, режим работы, доставка, правила.",
+    ),
+    "theme_catalog": _catalog_prompt_usage_line(
+        "theme_catalog",
+        "нужна информация по тематическому каталогу: тема, краткое содержание, ссылки.",
+    ),
+    "medical_course_catalog": _catalog_prompt_usage_line(
+        "medical_course_catalog",
+        "спрашивают о медицинских курсах: программа, длительность, стоимость, запись.",
+    ),
+    "clipboard_import": _catalog_prompt_usage_line(
+        "clipboard_import",
+        "нужно найти данные из справочника, импортированного из буфера обмена или файла.",
+    ),
+}
+
+
+def _default_prompt_usage_snippet_for_custom(tool_name: str) -> str:
+    return (
+        f"Вызывай {tool_name}, когда нужна информация из этого справочника "
+        "(уточни в промпте, по каким темам к нему обращаться)."
+    )
+
+
+def _resolve_prompt_usage_snippet(
+    payload: str | None,
+    *,
+    template: str,
+    tool_name: str,
+) -> str | None:
+    text = (payload or "").strip()
+    if text:
+        return text
+    preset = TEMPLATE_PROMPT_USAGE_SNIPPET_MAP.get(template)
+    if preset:
+        return preset
+    return _default_prompt_usage_snippet_for_custom(tool_name)
+
+
+def _qa_columns() -> list[dict[str, Any]]:
+    return [dict(col) for col in STANDARD_QA_DIRECTORY_COLUMNS]
+
+
+def _normalize_columns_data(columns: list[ColumnDefinition] | None, template: str) -> list[dict[str, Any]]:
+    if template in CATALOG_DIRECTORY_TEMPLATES:
+        return _qa_columns()
+    if columns is None:
+        raise ValueError("columns are required")
+    return [col.model_dump() for col in columns]
+
+
+def _pg_enum_to_str(value: Any) -> str:
+    """Строка для полей SQLAlchemy Enum / драйвера — в Pydantic уходит Literal."""
+    if isinstance(value, str):
+        return value
+    if value is not None:
+        inner = getattr(value, "value", None)
+        if isinstance(inner, str):
+            return inner
+    return str(value) if value is not None else ""
+
+
+def _build_directory_create_response(
+    directory: Directory,
+    columns_data: list[dict[str, Any]],
+    *,
+    seeded_demo_items_count: int,
+) -> DirectoryCreateResponse:
+    """
+    Ответ POST собираем из явных полей и columns_data (источник до round-trip JSONB).
+    Так клиент не получает 500 после успешного commit из‑за model_validate по ORM.
+    """
+    columns = [ColumnDefinition.model_validate(c) for c in columns_data]
+    template = _pg_enum_to_str(directory.template) or "custom"
+    response_mode = _pg_enum_to_str(directory.response_mode) or "function_result"
+    search_type = _pg_enum_to_str(directory.search_type) or "fuzzy"
+    return DirectoryCreateResponse.model_validate(
+        {
+            "id": directory.id,
+            "tenant_id": directory.tenant_id,
+            "agent_id": directory.agent_id,
+            "name": directory.name,
+            "slug": directory.slug,
+            "tool_name": directory.tool_name,
+            "tool_description": directory.tool_description,
+            "prompt_usage_snippet": directory.prompt_usage_snippet,
+            "template": template,
+            "columns": columns,
+            "response_mode": response_mode,
+            "search_type": search_type,
+            "is_enabled": directory.is_enabled,
+            "items_count": int(directory.items_count or 0),
+            "created_at": directory.created_at,
+            "updated_at": directory.updated_at,
+            "seeded_demo_items_count": seeded_demo_items_count,
+        }
+    )
+
+
+def _resolve_tool_name(payload_tool_name: str | None, *, template: str, name: str) -> str:
+    fixed = TEMPLATE_TOOL_NAME_MAP.get(template)
+    if fixed:
+        return fixed
+    if payload_tool_name:
+        return payload_tool_name
+    # Fallback for custom templates: keep deterministic generation from directory name.
+    return _generate_slug(name).replace("-", "_")
+
+
+def _resolve_tool_description(
+    payload_description: str | None,
+    *,
+    template: str,
+    tool_name: str | None = None,
+) -> str:
+    text = (payload_description or "").strip()
+    if text:
+        return text
+    preset = TEMPLATE_TOOL_DESCRIPTION_MAP.get(template)
+    if preset:
+        return preset
+    if tool_name:
+        return (
+            f"Инструмент `{tool_name}`. Поиск по этому справочнику. "
+            "Параметр `query` — формулировка вопроса пользователя или ключевые слова."
+        )
+    logger.info("directory_tool_description_fallback", template=template)
+    return DEFAULT_DIRECTORY_TOOL_DESCRIPTION
 
 
 def _generate_slug(name: str) -> str:
@@ -230,14 +443,14 @@ async def list_directories(
     return [DirectoryRead.model_validate(d) for d in directories]
 
 
-@router.post("", response_model=DirectoryRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=DirectoryCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_directory(
     agent_id: UUID,
     payload: DirectoryCreate,
     db: AsyncSession = Depends(get_db),
     user: AuthContext = Depends(require_scope("agents:write")),
-) -> DirectoryRead:
-    """Создать новый справочник."""
+) -> DirectoryCreateResponse:
+    """Создать новый справочник (опционально 3 демо-записи в той же транзакции)."""
     # Проверяем, что агент существует
     await get_agent_or_404(agent_id, db, user)
     
@@ -253,34 +466,76 @@ async def create_directory(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Maximum {MAX_DIRECTORIES_PER_AGENT} directories per agent allowed",
         )
-    
+
+    if payload.template in SINGLETON_DIRECTORY_TEMPLATES:
+        dup_stmt = (
+            select(Directory.id)
+            .where(
+                Directory.agent_id == agent_id,
+                Directory.tenant_id == user.tenant_id,
+                Directory.template == payload.template,
+                Directory.is_deleted.is_(False),
+            )
+            .limit(1)
+        )
+        if (await db.execute(dup_stmt)).scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A directory with this template already exists for this agent",
+            )
+
     # Генерируем slug
     slug = _generate_slug(payload.name)
     
     # Подготавливаем колонки
-    columns = payload.columns
-    if columns is None:
-        columns = [ColumnDefinition(**col) for col in TEMPLATE_COLUMNS.get(payload.template, [])]
-    
-    columns_data = [col.model_dump() for col in columns]
-    
+    columns_data = _normalize_columns_data(payload.columns, payload.template)
+    search_type = (
+        "semantic" if payload.template in CATALOG_DIRECTORY_TEMPLATES else payload.search_type
+    )
+
+    resolved_tool_name = _resolve_tool_name(payload.tool_name, template=payload.template, name=payload.name)
+    resolved_tool_description = _resolve_tool_description(
+        payload.tool_description,
+        template=payload.template,
+        tool_name=resolved_tool_name,
+    )
+    resolved_prompt_snippet = _resolve_prompt_usage_snippet(
+        payload.prompt_usage_snippet,
+        template=payload.template,
+        tool_name=resolved_tool_name,
+    )
     directory = Directory(
         tenant_id=user.tenant_id,
         agent_id=agent_id,
         name=payload.name,
         slug=slug,
-        tool_name=payload.tool_name,
-        tool_description=payload.tool_description,
+        tool_name=resolved_tool_name,
+        tool_description=resolved_tool_description,
+        prompt_usage_snippet=resolved_prompt_snippet,
         template=payload.template,
         columns=columns_data,
         response_mode=payload.response_mode,
-        search_type=payload.search_type,
+        search_type=search_type,
     )
-    
-    db.add(directory)
-    
+
+    demo_rows = demo_rows_for_template(payload.template) if payload.seed_demo_items else []
+    seeded_demo_items_count = 0
+
     try:
-        await db.commit()
+        await persist_directory_with_demo_items(
+            db,
+            directory=directory,
+            columns_data=columns_data,
+            demo_rows=demo_rows,
+            tenant_id=user.tenant_id,
+            validate_item_row=lambda d, cols, rn: _validate_item_data(d, cols, row_num=rn),
+        )
+        seeded_demo_items_count = len(demo_rows)
+    except DemoItemValidationFailed as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=exc.errors,
+        ) from exc
     except IntegrityError as exc:
         await db.rollback()
         if "uq_directories_agent_slug" in str(exc):
@@ -293,22 +548,52 @@ async def create_directory(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Directory with this tool_name already exists",
             ) from exc
+        if "uq_directories_agent_singleton_template" in str(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A directory with this template already exists for this agent",
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Directory already exists",
         ) from exc
-    
+
     await db.refresh(directory)
-    await write_audit(db, user, "directory.create", "directory", str(directory.id))
-    
+
+    # Каталожные справочники — semantic: без эмбеддингов поиск по вектору пустой (embedding IS NULL).
+    if _pg_enum_to_str(directory.search_type) == "semantic" and directory.items_count > 0:
+        from app.services.directory.service import update_directory_embeddings
+
+        await update_directory_embeddings(db, directory)
+
+    response = _build_directory_create_response(
+        directory,
+        columns_data,
+        seeded_demo_items_count=seeded_demo_items_count,
+    )
+
+    try:
+        await write_audit(db, user, "directory.create", "directory", str(directory.id))
+    except Exception as exc:
+        # Справочник уже закоммичен в persist_directory_with_demo_items; аудит не должен
+        # превращать успешное создание в 500 для клиента.
+        logger.error(
+            "directory_create_audit_failed",
+            directory_id=str(directory.id),
+            agent_id=str(agent_id),
+            error=str(exc),
+            exc_info=True,
+        )
+
     logger.info(
         "directory_created",
         directory_id=str(directory.id),
         agent_id=str(agent_id),
         template=payload.template,
+        seeded_demo_items_count=seeded_demo_items_count,
     )
-    
-    return DirectoryRead.model_validate(directory)
+
+    return response
 
 
 @router.get("/{directory_id}", response_model=DirectoryRead)
@@ -346,7 +631,44 @@ async def update_directory(
     # Если меняется имя — обновляем slug
     if "name" in update_data:
         update_data["slug"] = _generate_slug(update_data["name"])
+
+    tpl_key = _pg_enum_to_str(directory.template) or "custom"
+    fixed_tool_name = TEMPLATE_TOOL_NAME_MAP.get(tpl_key)
+    if fixed_tool_name:
+        # Template-based directories keep stable function name.
+        update_data["tool_name"] = fixed_tool_name
+        if "tool_description" in update_data and not str(update_data["tool_description"] or "").strip():
+            update_data["tool_description"] = (
+                TEMPLATE_TOOL_DESCRIPTION_MAP.get(tpl_key)
+                or DEFAULT_DIRECTORY_TOOL_DESCRIPTION
+            )
+    elif "tool_name" in update_data and not update_data["tool_name"]:
+        update_data["tool_name"] = _generate_slug(update_data.get("name", directory.name)).replace("-", "_")
+
+    if "prompt_usage_snippet" in update_data and not str(
+        update_data["prompt_usage_snippet"] or ""
+    ).strip():
+        tool_for_snippet = fixed_tool_name or update_data.get("tool_name", directory.tool_name)
+        update_data["prompt_usage_snippet"] = (
+            TEMPLATE_PROMPT_USAGE_SNIPPET_MAP.get(tpl_key)
+            or _default_prompt_usage_snippet_for_custom(str(tool_for_snippet))
+        )
     
+    if directory.template != "custom" and "columns" in update_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="columns are fixed for catalog directories",
+        )
+    if (
+        directory.template != "custom"
+        and "search_type" in update_data
+        and update_data["search_type"] != "semantic"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="search_type for catalog directories is fixed to semantic",
+        )
+
     # Если меняются колонки — нужно мигрировать данные
     if "columns" in update_data and update_data["columns"] is not None:
         old_columns = {col["name"]: col for col in directory.columns}
@@ -388,6 +710,11 @@ async def update_directory(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Directory with this tool_name already exists",
+            ) from exc
+        if "uq_directories_agent_singleton_template" in str(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A directory with this template already exists for this agent",
             ) from exc
         raise
     
@@ -591,6 +918,11 @@ async def create_directory_item(
     await db.refresh(item)
     
     # Триггер автоматически обновит items_count
+
+    if _pg_enum_to_str(directory.search_type) == "semantic":
+        from app.services.directory.service import update_item_embedding
+
+        await update_item_embedding(db, item, directory)
     
     return DirectoryItemRead.model_validate(item)
 
@@ -652,6 +984,11 @@ async def bulk_create_directory_items(
         created=created,
         errors=len(errors),
     )
+
+    if created > 0 and _pg_enum_to_str(directory.search_type) == "semantic":
+        from app.services.directory.service import update_directory_embeddings
+
+        await update_directory_embeddings(db, directory)
     
     return DirectoryItemsBulkCreateResponse(created=created, errors=errors)
 
@@ -693,6 +1030,11 @@ async def update_directory_item(
     item.data = payload.data
     await db.commit()
     await db.refresh(item)
+
+    if _pg_enum_to_str(directory.search_type) == "semantic":
+        from app.services.directory.service import update_item_embedding
+
+        await update_item_embedding(db, item, directory)
     
     return DirectoryItemRead.model_validate(item)
 
@@ -969,6 +1311,11 @@ async def import_directory(
         skipped=skipped,
         errors=len(errors),
     )
+
+    if created > 0 and _pg_enum_to_str(directory.search_type) == "semantic":
+        from app.services.directory.service import update_directory_embeddings
+
+        await update_directory_embeddings(db, directory)
     
     return ImportResponse(created=created, skipped=skipped, errors=errors)
 

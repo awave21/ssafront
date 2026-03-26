@@ -2,6 +2,7 @@ from app.services.direct_questions.crud import (
     create_direct_question,
     delete_direct_question,
     list_direct_questions,
+    reembed_agent_direct_questions,
     replace_direct_question_files,
     update_direct_question,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "create_direct_question",
     "delete_direct_question",
     "list_direct_questions",
+    "reembed_agent_direct_questions",
     "replace_direct_question_files",
     "update_direct_question",
     "build_direct_questions_block",

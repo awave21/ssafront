@@ -525,6 +525,18 @@ def _classify_visit_type(
     client: SqnsClientRecord | None,
     first_visit_at: datetime | None,
 ) -> tuple[bool, bool]:
+    if visit.is_primary_visit is True:
+        return True, False
+    if visit.is_primary_visit is False:
+        repeat_hint = _extract_visit_repeat_hint(visit)
+        if repeat_hint is True:
+            return False, True
+        if _is_after_first_visit(visit.visit_datetime, first_visit_at):
+            return False, True
+        if _is_repeat_client_profile(client):
+            return False, True
+        return False, False
+
     primary_hint = _extract_visit_primary_hint(visit)
     repeat_hint = _extract_visit_repeat_hint(visit)
 
@@ -655,9 +667,11 @@ class AgentAnalyticsService:
 
         visits_total = len(view.visit_contexts)
         arrived_total = sum(1 for item in view.visit_contexts if item.is_arrived)
-        arrived_primary = sum(1 for item in view.visit_contexts if item.is_arrived and item.is_primary)
+        primary_visits = sum(1 for item in view.visit_contexts if item.is_primary)
+        primary_arrived = sum(1 for item in view.visit_contexts if item.is_arrived and item.is_primary)
+        arrived_primary = primary_arrived
         repeat_total = sum(1 for item in view.visit_contexts if item.is_repeat)
-        bookings_from_primary = sum(1 for item in view.visit_contexts if item.is_primary)
+        bookings_from_primary = primary_visits
         bookings_from_existing = sum(1 for item in view.visit_contexts if item.is_existing)
 
         payment_amounts = [item.amount for item in view.payments if item.amount is not None]
@@ -665,10 +679,14 @@ class AgentAnalyticsService:
         revenue_total = sum(payment_amounts, start=Decimal("0"))
         avg_check = revenue_total / payments_total if payments_total else Decimal("0")
         conversion = (arrived_total / visits_total * 100) if visits_total else 0.0
+        primary_conversion = (primary_arrived / primary_visits * 100) if primary_visits else 0.0
 
         return AnalyticsOverviewResponse(
             visits_total=visits_total,
             arrived_total=arrived_total,
+            primary_visits=primary_visits,
+            primary_arrived=primary_arrived,
+            conversion_primary_arrived_pct=round(primary_conversion, 2),
             arrived_primary=arrived_primary,
             repeat_total=repeat_total,
             bookings_from_primary=bookings_from_primary,
@@ -695,7 +713,13 @@ class AgentAnalyticsService:
         view = self._build_view(dataset, period=period, channel=channel, client_tags=client_tags)
 
         metrics: dict[str, dict[str, Decimal | int]] = defaultdict(
-            lambda: {"visits_total": 0, "arrived_total": 0, "revenue_total": Decimal("0")}
+            lambda: {
+                "visits_total": 0,
+                "arrived_total": 0,
+                "primary_visits": 0,
+                "primary_arrived": 0,
+                "revenue_total": Decimal("0"),
+            }
         )
 
         for item in view.visit_contexts:
@@ -706,6 +730,10 @@ class AgentAnalyticsService:
             metrics[bucket_key]["visits_total"] = int(metrics[bucket_key]["visits_total"]) + 1
             if item.is_arrived:
                 metrics[bucket_key]["arrived_total"] = int(metrics[bucket_key]["arrived_total"]) + 1
+            if item.is_primary:
+                metrics[bucket_key]["primary_visits"] = int(metrics[bucket_key]["primary_visits"]) + 1
+                if item.is_arrived:
+                    metrics[bucket_key]["primary_arrived"] = int(metrics[bucket_key]["primary_arrived"]) + 1
 
         for payment in view.payments:
             local_dt = _to_local_datetime(payment.payment_date, period.tz)
@@ -718,13 +746,24 @@ class AgentAnalyticsService:
         points: list[AnalyticsTimeseriesPoint] = []
         for bucket in self._iterate_buckets(period, group_by):
             bucket_key = bucket.isoformat()
-            bucket_metrics = metrics.get(bucket_key, {"visits_total": 0, "arrived_total": 0, "revenue_total": Decimal("0")})
+            bucket_metrics = metrics.get(
+                bucket_key,
+                {
+                    "visits_total": 0,
+                    "arrived_total": 0,
+                    "primary_visits": 0,
+                    "primary_arrived": 0,
+                    "revenue_total": Decimal("0"),
+                },
+            )
             points.append(
                 AnalyticsTimeseriesPoint(
                     bucket=bucket_key,
                     label=self._bucket_label(bucket, group_by),
                     visits_total=int(bucket_metrics["visits_total"]),
                     arrived_total=int(bucket_metrics["arrived_total"]),
+                    primary_visits=int(bucket_metrics["primary_visits"]),
+                    primary_arrived=int(bucket_metrics["primary_arrived"]),
                     revenue_total=_round_money(Decimal(bucket_metrics["revenue_total"])),
                 )
             )

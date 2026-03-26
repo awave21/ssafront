@@ -64,11 +64,10 @@
     </div>
   </div>
 
-  <!-- Display Mode -->
+  <!-- Display Mode: клик всплывает к TableCell — открывается боковая панель записи -->
   <div 
     v-else
-    @click="$emit('startEdit')"
-    class="px-2 py-1.5 text-sm text-slate-700 rounded cursor-pointer hover:bg-slate-100/80 transition-colors min-h-[32px] flex items-center"
+    class="px-2 py-1.5 text-sm text-slate-700 rounded hover:bg-slate-100/80 transition-colors min-h-[32px] flex items-center"
     :class="{ 
       'font-mono': column.type === 'number',
       'text-slate-400 italic': displayValue === null || displayValue === undefined || displayValue === ''
@@ -109,7 +108,6 @@ const props = defineProps<{
 
 defineEmits<{
   (e: 'update:modelValue', value: any): void
-  (e: 'startEdit'): void
   (e: 'blur'): void
   (e: 'keydown', event: KeyboardEvent): void
   (e: 'save'): void

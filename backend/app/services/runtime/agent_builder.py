@@ -6,6 +6,7 @@ import inspect
 import structlog
 from pydantic_ai.tools import Tool as PydanticTool
 
+from app.services.runtime.deps import AgentDeps
 from app.services.runtime.model_resolver import resolve_model
 
 logger = structlog.get_logger("app.services.runtime")
@@ -82,6 +83,10 @@ def _build_agent(
         agent_kwargs_keys=list(agent_kwargs.keys()),
         system_prompt_preview=system_prompt[:50] if system_prompt else "",
     )
+
+    # deps_type даёт pydantic-ai знать тип ctx.deps и проверяет его при вызове.
+    if "deps_type" in signature.parameters:
+        agent_kwargs["deps_type"] = AgentDeps
 
     model = resolve_model(model_name, openai_api_key=openai_api_key)
     return PydanticAgent(model, **agent_kwargs)

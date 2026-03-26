@@ -30,12 +30,7 @@ class DirectQuestionFollowup(BaseModel):
 
 
 class DirectQuestionBase(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
-    search_title: str = Field(
-        min_length=1,
-        max_length=255,
-        description="Routing intent title used by LLM (autofilled in UI from translation, editable manually).",
-    )
+    title: str = Field(min_length=1, max_length=255)
     content: str = Field(min_length=1)
     tags: list[str] = Field(default_factory=list)
     is_enabled: bool = True
@@ -44,7 +39,7 @@ class DirectQuestionBase(BaseModel):
     files: list[DirectQuestionFilePayload] = Field(default_factory=list)
     followup: DirectQuestionFollowup | None = None
 
-    @field_validator("title", "search_title", "content")
+    @field_validator("title", "content")
     @classmethod
     def validate_non_blank(cls, value: str) -> str:
         if not value.strip():
@@ -79,8 +74,7 @@ class DirectQuestionCreate(DirectQuestionBase):
 
 
 class DirectQuestionUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=200)
-    search_title: str | None = Field(default=None, min_length=1, max_length=255)
+    title: str | None = Field(default=None, min_length=1, max_length=255)
     content: str | None = Field(default=None, min_length=1)
     tags: list[str] | None = None
     is_enabled: bool | None = None
@@ -89,7 +83,7 @@ class DirectQuestionUpdate(BaseModel):
     files: list[DirectQuestionFilePayload] | None = None
     followup: DirectQuestionFollowup | None = None
 
-    @field_validator("title", "search_title", "content")
+    @field_validator("title", "content")
     @classmethod
     def validate_optional_non_blank(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
@@ -140,7 +134,6 @@ class DirectQuestionRead(BaseModel):
     tenant_id: UUID
     agent_id: UUID
     title: str
-    search_title: str
     content: str
     tags: list[str]
     is_enabled: bool
@@ -156,21 +149,3 @@ class DirectQuestionToggle(BaseModel):
     is_enabled: bool
 
 
-class DirectQuestionTranslateRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=500)
-    source_language_code: str | None = Field(default=None, min_length=2, max_length=10)
-    target_language_code: str = Field(default="en", min_length=2, max_length=10)
-
-    @field_validator("text")
-    @classmethod
-    def validate_translate_text(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("text must not be empty")
-        return value
-
-
-class DirectQuestionTranslateResponse(BaseModel):
-    translated_text: str
-    source_text: str
-    source_language_code: str | None = None
-    target_language_code: str

@@ -1,5 +1,5 @@
 <template>
-  <div class="max-w-full space-y-6 overflow-hidden">
+  <div class="max-w-full space-y-6">
     <!-- Header with Create Button -->
     <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
       <div class="flex flex-wrap items-center gap-2">
@@ -12,7 +12,7 @@
         />
         <button
           @click="$emit('create')"
-          class="inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-indigo-600 px-5 text-sm font-bold text-white transition-colors hover:bg-indigo-700"
+          class="inline-flex h-10 shrink-0 self-start items-center gap-2 whitespace-nowrap rounded-xl bg-indigo-600 px-5 text-sm font-bold text-white transition-colors hover:bg-indigo-700"
         >
           <Plus class="w-4 h-4" />
           Добавить
@@ -110,7 +110,7 @@
       v-model="orderedQuestionsState"
       item-key="id"
       handle=".direct-question-drag-handle"
-      class="grid max-w-full gap-4"
+      class="w-full min-w-0 space-y-4"
       ghost-class="opacity-40"
       chosen-class="z-10"
       drag-class="rotate-[0.5deg]"
@@ -130,7 +130,7 @@
       </template>
     </Draggable>
 
-    <div v-else class="grid max-w-full gap-4">
+    <div v-else class="w-full min-w-0 space-y-4">
       <DirectQuestionCard
         v-for="q in filteredQuestions"
         :key="q.id"
@@ -202,7 +202,6 @@ const filteredQuestions = computed(() => {
   const query = searchQuery.value.toLowerCase()
   return orderedQuestionsState.value.filter(q => 
     q.title.toLowerCase().includes(query) ||
-    q.search_title.toLowerCase().includes(query) ||
     q.tags.some(t => t.toLowerCase().includes(query))
   )
 })

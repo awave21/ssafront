@@ -52,39 +52,6 @@
 
         <div>
           <label class="text-sm font-medium text-slate-700 flex items-center gap-1">
-            Название для поиска
-            <TooltipProvider :delay-duration="300">
-              <Tooltip>
-                <TooltipTrigger as-child>
-                  <HelpCircle class="w-3.5 h-3.5 text-slate-400 cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p class="text-xs">Ключевая фраза интента (EN). Автопереводится из названия, но поле можно редактировать вручную.</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </label>
-          <div class="relative mt-1.5">
-            <input
-              v-model="form.search_title"
-              type="text"
-              placeholder="Call the manager"
-              class="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-mono focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all duration-300 pr-10 outline-none"
-            />
-            <button 
-              @click="generateSearchTitle({ force: true })"
-              :disabled="isTranslatingSearchTitle"
-              class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Перевести заново"
-            >
-              <Loader2 v-if="isTranslatingSearchTitle" class="w-4 h-4 animate-spin" />
-              <RefreshCw v-else class="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        <div>
-          <label class="text-sm font-medium text-slate-700 flex items-center gap-1">
             Содержание файла
             <TooltipProvider :delay-duration="300">
               <Tooltip>
@@ -225,17 +192,14 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { 
   HelpCircle, 
-  RefreshCw, 
   Upload, 
   FileText, 
   X, 
   Clock,
-  Loader2,
 } from 'lucide-vue-next'
 import { Switch } from '~/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip'
 import type { DirectQuestion, CreateDirectQuestionPayload } from '~/types/knowledge'
-import { useApiFetch } from '~/composables/useApiFetch'
 import { useToast } from '~/composables/useToast'
 import KnowledgeSheetShell from './KnowledgeSheetShell.vue'
 
@@ -288,9 +252,7 @@ const onSheetOpenChange = (nextOpen: boolean) => {
   emit('close')
 }
 
-const apiFetch = useApiFetch()
-const { error: toastError, info: toastInfo } = useToast()
-const route = useRoute()
+const { info: toastInfo } = useToast()
 
 const activeTab = ref('content')
 const tabs = [
@@ -301,7 +263,6 @@ const tabs = [
 
 const form = ref<CreateDirectQuestionPayload>({
   title: '',
-  search_title: '',
   content: '',
   tags: [],
   is_enabled: true,
@@ -314,12 +275,8 @@ const followupEnabled = ref(false)
 const followupContent = ref('')
 const followupDelay = ref(60)
 const contentTextareaRef = ref<HTMLTextAreaElement | null>(null)
-const isTranslatingSearchTitle = ref(false)
-const hasManualSearchTitleEdit = ref(false)
-const isProgrammaticSearchTitleUpdate = ref(false)
 const isSyncingForm = ref(false)
 const tagInput = ref('')
-let autoTranslateTimer: ReturnType<typeof setTimeout> | null = null
 
 const isValid = computed(() => {
   return form.value.title.trim() && form.value.content.trim()
@@ -334,7 +291,6 @@ watch(
       if (props.question) {
         form.value = {
           title: props.question.title,
-          search_title: props.question.search_title,
           content: props.question.content,
           tags: [...props.question.tags],
           is_enabled: props.question.is_enabled,
@@ -348,7 +304,6 @@ watch(
       } else {
         form.value = {
           title: '',
-          search_title: '',
           content: '',
           tags: [],
           is_enabled: true,
@@ -361,85 +316,15 @@ watch(
         followupDelay.value = 60
       }
       tagInput.value = ''
-      hasManualSearchTitleEdit.value = false
       isSyncingForm.value = false
       activeTab.value = 'content'
       await nextTick()
       baselinePayloadJson.value = JSON.stringify(buildPayload())
-      if (!props.question?.search_title?.trim() && form.value.title.trim()) {
-        if (autoTranslateTimer) clearTimeout(autoTranslateTimer)
-        autoTranslateTimer = setTimeout(() => void generateSearchTitle({ force: false }), 350)
-      }
     } else {
       baselinePayloadJson.value = ''
-      if (autoTranslateTimer) {
-        clearTimeout(autoTranslateTimer)
-        autoTranslateTimer = null
-      }
     }
   }
 )
-
-watch(
-  () => form.value.search_title,
-  (nextValue, prevValue) => {
-    if (!props.open || isSyncingForm.value || isProgrammaticSearchTitleUpdate.value) return
-    if (nextValue === prevValue) return
-    hasManualSearchTitleEdit.value = true
-  }
-)
-
-watch(
-  () => form.value.title,
-  (title) => {
-    if (!props.open || isSyncingForm.value) return
-    if (!title.trim() || hasManualSearchTitleEdit.value) return
-    if (autoTranslateTimer) clearTimeout(autoTranslateTimer)
-    autoTranslateTimer = setTimeout(() => {
-      void generateSearchTitle({ force: false })
-    }, 700)
-  }
-)
-
-const generateSearchTitle = async ({ force }: { force: boolean }) => {
-  if (!form.value.title.trim() || isTranslatingSearchTitle.value) return
-  if (!force && hasManualSearchTitleEdit.value) return
-  const agentId = route.params.id as string | undefined
-  if (!agentId) {
-    toastError('Не удалось определить агента')
-    return
-  }
-
-  isTranslatingSearchTitle.value = true
-  try {
-    const response = await apiFetch<{
-      translated_text: string
-    }>(`/agents/${agentId}/knowledge/direct-questions/translate-search-title`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: {
-        text: form.value.title,
-        target_language_code: 'en'
-      }
-    })
-
-    const translated = response.translated_text?.trim()
-    if (translated) {
-      isProgrammaticSearchTitleUpdate.value = true
-      form.value.search_title = translated
-      hasManualSearchTitleEdit.value = false
-      isProgrammaticSearchTitleUpdate.value = false
-      if (props.open) {
-        await nextTick()
-        baselinePayloadJson.value = JSON.stringify(buildPayload())
-      }
-    }
-  } catch (err) {
-    toastError('Не удалось перевести название для поиска')
-  } finally {
-    isTranslatingSearchTitle.value = false
-  }
-}
 
 const normalizeTags = (raw: string): string[] => raw
   .split(/[\s,;]+/)

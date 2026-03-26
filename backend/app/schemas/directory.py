@@ -35,6 +35,9 @@ DirectoryTemplate = Literal[
     "service_catalog",
     "product_catalog",
     "company_info",
+    "theme_catalog",
+    "medical_course_catalog",
+    "clipboard_import",
     "custom",
 ]
 
@@ -42,30 +45,56 @@ ResponseMode = Literal["function_result", "direct_message"]
 
 SearchType = Literal["exact", "fuzzy", "semantic"]
 
+# Единый контракт «справочника»: две колонки (кроме template=custom).
+STANDARD_QA_DIRECTORY_COLUMNS: list[dict[str, Any]] = [
+    {"name": "question", "label": "Вопрос", "type": "text", "required": True, "searchable": True},
+    {"name": "answer", "label": "Ответ", "type": "text", "required": True, "searchable": False},
+]
 
-# Предустановленные колонки по шаблонам
+CATALOG_DIRECTORY_TEMPLATES: frozenset[str] = frozenset(
+    {
+        "qa",
+        "service_catalog",
+        "product_catalog",
+        "company_info",
+        "theme_catalog",
+        "medical_course_catalog",
+        "clipboard_import",
+    }
+)
+
+# Не более одного активного справочника на агента на шаблон (те же шаблоны, что и каталожные).
+SINGLETON_DIRECTORY_TEMPLATES: frozenset[str] = CATALOG_DIRECTORY_TEMPLATES
+
+DEFAULT_DIRECTORY_TOOL_DESCRIPTION = (
+    "Поиск по справочнику. В параметре `query` передавай формулировку вопроса или ключевые слова."
+)
+
+
+def _columns_match_standard_qa(columns: list[ColumnDefinition]) -> bool:
+    """Для custom + seed_demo_items: только стандартные question/answer."""
+    if len(columns) != 2:
+        return False
+    expected = [ColumnDefinition(**d) for d in STANDARD_QA_DIRECTORY_COLUMNS]
+    by_name = {c.name: c for c in columns}
+    for exp in expected:
+        got = by_name.get(exp.name)
+        if got is None:
+            return False
+        if (
+            got.type != exp.type
+            or got.required != exp.required
+            or got.searchable != exp.searchable
+        ):
+            return False
+    return True
+
+
+# Предустановленные колонки по шаблонам (каталожные шаблоны — строго question/answer).
 TEMPLATE_COLUMNS: dict[str, list[dict[str, Any]]] = {
-    "qa": [
-        {"name": "question", "label": "Вопрос", "type": "text", "required": True, "searchable": True},
-        {"name": "answer", "label": "Ответ", "type": "text", "required": True, "searchable": False},
-    ],
-    "service_catalog": [
-        {"name": "name", "label": "Название", "type": "text", "required": True, "searchable": True},
-        {"name": "description", "label": "Описание", "type": "text", "required": False, "searchable": True},
-        {"name": "price", "label": "Цена", "type": "number", "required": False, "searchable": False},
-    ],
-    "product_catalog": [
-        {"name": "name", "label": "Название", "type": "text", "required": True, "searchable": True},
-        {"name": "description", "label": "Описание", "type": "text", "required": False, "searchable": True},
-        {"name": "price", "label": "Цена", "type": "number", "required": False, "searchable": False},
-        {"name": "specs", "label": "Характеристики", "type": "text", "required": False, "searchable": True},
-    ],
-    "company_info": [
-        {"name": "topic", "label": "Тема", "type": "text", "required": True, "searchable": True},
-        {"name": "info", "label": "Информация", "type": "text", "required": True, "searchable": True},
-    ],
-    "custom": [],
+    t: STANDARD_QA_DIRECTORY_COLUMNS for t in CATALOG_DIRECTORY_TEMPLATES
 }
+TEMPLATE_COLUMNS["custom"] = []
 
 
 class ColumnDefinition(BaseModel):
@@ -151,6 +180,11 @@ class DirectoryBase(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     tool_name: str | None = Field(default=None, max_length=100)
     tool_description: str | None = Field(default=None, max_length=500)
+    prompt_usage_snippet: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Текст для системного промпта агента.",
+    )
     template: DirectoryTemplate = "custom"
     columns: list[ColumnDefinition] | None = None
     response_mode: ResponseMode = "function_result"
@@ -169,6 +203,15 @@ class DirectoryBase(BaseModel):
 class DirectoryCreate(DirectoryBase):
     """Схема создания справочника."""
 
+    seed_demo_items: bool = Field(
+        default=True,
+        description=(
+            "Если true (по умолчанию, в т.ч. когда поле не передано), после создания справочника "
+            "в той же транзакции добавляются 3 демо-записи с полями question/answer. "
+            "Если false — демо-строки не создаются."
+        ),
+    )
+
     @model_validator(mode="after")
     def validate_and_generate(self) -> "DirectoryCreate":
         """Валидация и автогенерация полей."""
@@ -180,12 +223,20 @@ class DirectoryCreate(DirectoryBase):
         if not re.match(r"^[a-z][a-z0-9_]*$", self.tool_name):
             # Если всё ещё невалиден, генерируем fallback
             self.tool_name = "directory"
-        
-        # Заполнить колонки из шаблона, если не переданы
-        if self.columns is None:
-            if self.template == "custom":
-                raise ValueError("columns are required when template is 'custom'")
-            self.columns = [ColumnDefinition(**col) for col in TEMPLATE_COLUMNS[self.template]]
+
+        if self.template in CATALOG_DIRECTORY_TEMPLATES:
+            # Клиентский набор колонок для каталожных шаблонов игнорируем — нормализация на сервере.
+            self.columns = [ColumnDefinition(**d) for d in STANDARD_QA_DIRECTORY_COLUMNS]
+        elif self.columns is None:
+            raise ValueError("columns are required when template is 'custom'")
+
+        if self.template == "custom" and self.seed_demo_items:
+            if not _columns_match_standard_qa(self.columns):
+                raise ValueError(
+                    "seed_demo_items for custom template requires standard question/answer columns "
+                    "(text, question required+searchable, answer required, not searchable), "
+                    "or set seed_demo_items to false"
+                )
         
         # Проверки
         if len(self.columns) < 1:
@@ -207,6 +258,11 @@ class DirectoryUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     tool_name: str | None = Field(default=None, max_length=100)
     tool_description: str | None = Field(default=None, max_length=500)
+    prompt_usage_snippet: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Текст для системного промпта агента.",
+    )
     columns: list[ColumnDefinition] | None = None
     response_mode: ResponseMode | None = None
     search_type: SearchType | None = None
@@ -246,6 +302,7 @@ class DirectoryRead(BaseModel):
     slug: str
     tool_name: str
     tool_description: str | None
+    prompt_usage_snippet: str | None = None
     template: DirectoryTemplate
     columns: list[ColumnDefinition]
     response_mode: ResponseMode
@@ -254,6 +311,17 @@ class DirectoryRead(BaseModel):
     items_count: int
     created_at: datetime
     updated_at: datetime | None = None
+
+
+class DirectoryCreateResponse(DirectoryRead):
+    """Ответ POST /directories: справочник + сколько демо-строк создано."""
+
+    seeded_demo_items_count: int = Field(
+        0,
+        ge=0,
+        le=3,
+        description="Число демо-записей, созданных вместе со справочником (0 или 3).",
+    )
 
 
 class DirectoryToggle(BaseModel):

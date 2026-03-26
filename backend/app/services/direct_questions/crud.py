@@ -31,15 +31,28 @@ async def list_direct_questions(
     return (await db.execute(stmt)).scalars().all()
 
 
-async def _embed_search_title(
+def _build_embedding_text(title: str) -> str:
+    """
+    Расширяем заголовок до поискового текста.
+
+    Одно слово ("Адрес", "Цена", "Режим работы") даёт слабый вектор —
+    пользователь спрашивает развёрнутыми фразами. Добавляем вопросительную
+    форму, чтобы семантически покрыть типичные запросы.
+    """
+    title_clean = title.strip().rstrip("?.,!")
+    return f"{title_clean}. {title_clean}?"
+
+
+async def _embed_title(
     db: AsyncSession,
     *,
     tenant_id: UUID,
-    search_title: str,
+    title: str,
 ) -> tuple[list[float] | None, str, datetime | None, str | None]:
     openai_api_key = await get_decrypted_api_key(db, tenant_id)
+    embedding_text = _build_embedding_text(title)
     embedding = await create_direct_question_embedding(
-        search_title,
+        embedding_text,
         db=db,
         tenant_id=tenant_id,
         charge_source_type="embedding.direct_question_title",
@@ -87,17 +100,16 @@ async def create_direct_question(
     agent_id: UUID,
     payload: DirectQuestionCreate,
 ) -> DirectQuestion:
-    embedding, embedding_status, embedding_retry_at, embedding_error = await _embed_search_title(
+    embedding, embedding_status, embedding_retry_at, embedding_error = await _embed_title(
         db,
         tenant_id=tenant_id,
-        search_title=payload.search_title,
+        title=payload.title,
     )
 
     question = DirectQuestion(
         tenant_id=tenant_id,
         agent_id=agent_id,
         title=payload.title,
-        search_title=payload.search_title,
         content=payload.content,
         tags=payload.tags,
         is_enabled=payload.is_enabled,
@@ -136,7 +148,7 @@ async def update_direct_question(
     payload: DirectQuestionUpdate,
 ) -> DirectQuestion:
     update_data = payload.model_dump(exclude_unset=True)
-    search_title_changed = "search_title" in update_data and update_data["search_title"] != question.search_title
+    title_changed = "title" in update_data and update_data["title"] != question.title
 
     for key, value in update_data.items():
         if key in {"files", "followup"}:
@@ -146,11 +158,11 @@ async def update_direct_question(
     if "followup" in update_data:
         question.followup = payload.followup.model_dump(mode="json") if payload.followup else None
 
-    if search_title_changed:
-        embedding, status, retry_at, embedding_error = await _embed_search_title(
+    if title_changed:
+        embedding, status, retry_at, embedding_error = await _embed_title(
             db,
             tenant_id=tenant_id,
-            search_title=question.search_title,
+            title=question.title,
         )
         question.embedding = embedding
         question.embedding_status = status
@@ -179,3 +191,51 @@ async def update_direct_question(
 async def delete_direct_question(db: AsyncSession, *, question: DirectQuestion) -> None:
     await db.delete(question)
     await db.commit()
+
+
+async def reembed_agent_direct_questions(
+    db: AsyncSession,
+    *,
+    tenant_id: UUID,
+    agent_id: UUID,
+) -> dict[str, int]:
+    """
+    Принудительно пересчитывает embeddings для всех активных прямых вопросов агента.
+
+    Полезно после изменения логики построения embedding-текста
+    (например, с title → title + title?).
+
+    Возвращает {"updated": N, "failed": M}.
+    """
+    stmt = select(DirectQuestion).where(
+        DirectQuestion.tenant_id == tenant_id,
+        DirectQuestion.agent_id == agent_id,
+    )
+    questions = (await db.execute(stmt)).scalars().all()
+    if not questions:
+        return {"updated": 0, "failed": 0}
+
+    openai_api_key = await get_decrypted_api_key(db, tenant_id)
+    updated = 0
+    failed = 0
+    for question in questions:
+        embedding_text = _build_embedding_text(question.title)
+        new_embedding = await create_direct_question_embedding(
+            embedding_text,
+            db=db,
+            tenant_id=tenant_id,
+            charge_source_type="embedding.direct_question_reembed",
+            charge_source_id=str(question.id),
+            openai_api_key=openai_api_key,
+        )
+        if new_embedding is None:
+            failed += 1
+            continue
+        question.embedding = new_embedding
+        question.embedding_status = "ready"
+        question.embedding_retry_at = None
+        question.embedding_error = None
+        updated += 1
+
+    await db.commit()
+    return {"updated": updated, "failed": failed}

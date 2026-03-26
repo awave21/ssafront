@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -23,6 +23,18 @@ class Directory(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     __table_args__ = (
         UniqueConstraint("agent_id", "slug", name="uq_directories_agent_slug"),
         UniqueConstraint("agent_id", "tool_name", name="uq_directories_agent_tool_name"),
+        Index(
+            "uq_directories_agent_singleton_template",
+            "agent_id",
+            "template",
+            unique=True,
+            postgresql_where=text(
+                "is_deleted = false AND template IN ("
+                "'qa', 'service_catalog', 'product_catalog', 'company_info', "
+                "'theme_catalog', 'medical_course_catalog', 'clipboard_import'"
+                ")"
+            ),
+        ),
     )
 
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), index=True, nullable=False)
@@ -38,6 +50,7 @@ class Directory(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     slug: Mapped[str] = mapped_column(String(200), nullable=False)
     tool_name: Mapped[str] = mapped_column(String(100), nullable=False)
     tool_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_usage_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Шаблон и структура
     template: Mapped[str] = mapped_column(
@@ -46,6 +59,9 @@ class Directory(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
             "service_catalog",
             "product_catalog",
             "company_info",
+            "theme_catalog",
+            "medical_course_catalog",
+            "clipboard_import",
             "custom",
             name="directory_template",
         ),

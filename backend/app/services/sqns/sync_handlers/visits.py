@@ -1,18 +1,55 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.sqns_service import SqnsVisit
 from app.services.sqns.client import SQNSClient
+from app.services.sqns.primary_visit_recalculator import PrimaryVisitRecalculator
 from app.services.sqns.sync_handlers.common import parse_bool, parse_datetime, parse_decimal, parse_int
 
 logger = structlog.get_logger(__name__)
+_EXTERNAL_IDS_BATCH_SIZE = 1000
+
+
+def _chunked(values: list[int], size: int) -> Iterable[list[int]]:
+    for idx in range(0, len(values), size):
+        yield values[idx : idx + size]
+
+
+def _extract_client_external_id(visit: dict[str, Any]) -> int | None:
+    direct_client_value = parse_int(
+        visit.get("clientId")
+        or visit.get("client_id")
+        or visit.get("client")
+        or visit.get("patientId")
+        or visit.get("patient_id")
+    )
+    if direct_client_value is not None:
+        return direct_client_value
+
+    nested_candidates = (visit.get("clientData"), visit.get("client"))
+    for candidate in nested_candidates:
+        if not isinstance(candidate, dict):
+            continue
+        nested_value = parse_int(
+            candidate.get("id")
+            or candidate.get("clientId")
+            or candidate.get("client_id")
+            or candidate.get("patientId")
+            or candidate.get("patient_id")
+        )
+        if nested_value is not None:
+            return nested_value
+
+    return None
 
 
 class SqnsVisitsSyncHandler:
@@ -36,6 +73,7 @@ class SqnsVisitsSyncHandler:
             modificate=modificate,
         )
         visits_synced = 0
+        parsed_visits: list[tuple[dict[str, Any], int]] = []
 
         for visit in visits:
             if not isinstance(visit, dict):
@@ -43,13 +81,40 @@ class SqnsVisitsSyncHandler:
             external_id = parse_int(visit.get("id"))
             if external_id is None:
                 continue
+            parsed_visits.append((visit, external_id))
+
+        existing_client_by_visit_external_id: dict[int, int] = {}
+        if parsed_visits:
+            parsed_external_ids = [external_id for _, external_id in parsed_visits]
+            for ids_chunk in _chunked(parsed_external_ids, _EXTERNAL_IDS_BATCH_SIZE):
+                existing_stmt = select(
+                    SqnsVisit.external_id,
+                    SqnsVisit.client_external_id,
+                ).where(
+                    SqnsVisit.agent_id == self.agent_id,
+                    SqnsVisit.external_id.in_(ids_chunk),
+                )
+                existing_rows = (await self.db.execute(existing_stmt)).all()
+                for row in existing_rows:
+                    if row[1] is None:
+                        continue
+                    existing_client_by_visit_external_id[int(row[0])] = int(row[1])
+
+        affected_client_external_ids: set[int] = set()
+        for visit, external_id in parsed_visits:
+            client_external_id = _extract_client_external_id(visit)
+            previous_client_id = existing_client_by_visit_external_id.get(external_id)
+            if previous_client_id is not None:
+                affected_client_external_ids.add(previous_client_id)
+            if client_external_id is not None:
+                affected_client_external_ids.add(client_external_id)
 
             stmt = insert(SqnsVisit).values(
                 id=uuid4(),
                 agent_id=self.agent_id,
                 external_id=external_id,
                 resource_external_id=parse_int(visit.get("resourceId")),
-                client_external_id=parse_int(visit.get("clientId")),
+                client_external_id=client_external_id,
                 visit_datetime=parse_datetime(visit.get("datetime")),
                 attendance=parse_int(visit.get("attendance")),
                 deleted=parse_bool(visit.get("deleted"), default=False),
@@ -81,12 +146,21 @@ class SqnsVisitsSyncHandler:
             await self.db.execute(stmt)
             visits_synced += 1
 
+        primary_clients_recalculated = 0
+        if affected_client_external_ids:
+            recalculator = PrimaryVisitRecalculator(self.db, self.agent_id)
+            primary_clients_recalculated = await recalculator.recalculate_for_clients(affected_client_external_ids)
+
         logger.info(
             "sqns_sync_visits_completed",
             agent_id=str(self.agent_id),
             visits_synced=visits_synced,
+            primary_clients_recalculated=primary_clients_recalculated,
             modificate=modificate,
             date_from=date_from,
             date_till=date_till,
         )
-        return {"visits_synced": visits_synced}
+        return {
+            "visits_synced": visits_synced,
+            "primary_clients_recalculated": primary_clients_recalculated,
+        }

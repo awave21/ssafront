@@ -17,29 +17,37 @@ export type { DirectoryColumn, Directory, DirectoryItem, CreateDirectoryPayload,
 // Поддерживаемые типы колонок: text, number, date, bool
 // Предустановленные колонки по шаблонам
 const TEMPLATE_COLUMNS: Record<string, DirectoryColumn[]> = {
+  directory_qa: [
+    { name: 'question', label: 'Вопрос', type: 'text', required: true, searchable: true },
+    { name: 'answer', label: 'Ответ', type: 'text', required: true, searchable: false },
+  ],
   qa: [
     { name: 'question', label: 'Вопрос', type: 'text', required: true, searchable: true },
     { name: 'answer', label: 'Ответ', type: 'text', required: true, searchable: false },
   ],
   service_catalog: [
-    { name: 'name', label: 'Название', type: 'text', required: true, searchable: true },
-    { name: 'description', label: 'Описание', type: 'text', required: false, searchable: true },
-    { name: 'price', label: 'Цена', type: 'number', required: false, searchable: false },
-    { name: 'is_active', label: 'Активна', type: 'bool', required: false, searchable: false },
+    { name: 'question', label: 'Вопрос', type: 'text', required: true, searchable: true },
+    { name: 'answer', label: 'Ответ', type: 'text', required: true, searchable: false },
   ],
   product_catalog: [
-    { name: 'name', label: 'Название', type: 'text', required: true, searchable: true },
-    { name: 'description', label: 'Описание', type: 'text', required: false, searchable: true },
-    { name: 'price', label: 'Цена', type: 'number', required: false, searchable: false },
-    { name: 'in_stock', label: 'В наличии', type: 'bool', required: false, searchable: false },
+    { name: 'question', label: 'Вопрос', type: 'text', required: true, searchable: true },
+    { name: 'answer', label: 'Ответ', type: 'text', required: true, searchable: false },
   ],
   company_info: [
-    { name: 'topic', label: 'Тема', type: 'text', required: true, searchable: true },
-    { name: 'info', label: 'Информация', type: 'text', required: true, searchable: true },
+    { name: 'question', label: 'Вопрос', type: 'text', required: true, searchable: true },
+    { name: 'answer', label: 'Ответ', type: 'text', required: true, searchable: false },
+  ],
+  theme_catalog: [
+    { name: 'question', label: 'Вопрос', type: 'text', required: true, searchable: true },
+    { name: 'answer', label: 'Ответ', type: 'text', required: true, searchable: false },
+  ],
+  medical_course_catalog: [
+    { name: 'question', label: 'Вопрос', type: 'text', required: true, searchable: true },
+    { name: 'answer', label: 'Ответ', type: 'text', required: true, searchable: false },
   ],
   custom: [
-    { name: 'field1', label: 'Поле 1', type: 'text', required: true, searchable: true },
-    { name: 'field2', label: 'Поле 2', type: 'text', required: false, searchable: false },
+    { name: 'question', label: 'Вопрос', type: 'text', required: true, searchable: true },
+    { name: 'answer', label: 'Ответ', type: 'text', required: true, searchable: false },
   ],
 }
 
@@ -60,6 +68,17 @@ export const useDirectories = (agentId: string) => {
   // Получение колонок по шаблону
   const getTemplateColumns = (template: string): DirectoryColumn[] => {
     return TEMPLATE_COLUMNS[template] || TEMPLATE_COLUMNS.custom
+  }
+
+  const resolveFixedToolName = (template: string): string | undefined => {
+    if (template === 'qa') return 'get_question_answer'
+    if (template === 'service_catalog') return 'get_service_info'
+    if (template === 'product_catalog') return 'get_product_info'
+    if (template === 'company_info') return 'get_company_info'
+    if (template === 'theme_catalog') return 'get_topic_info'
+    if (template === 'medical_course_catalog') return 'get_medical_course_info'
+    if (template === 'clipboard_import') return 'get_clipboard_import'
+    return undefined
   }
 
   // Загрузка списка справочников
@@ -94,12 +113,19 @@ export const useDirectories = (agentId: string) => {
   // Создание справочника
   const createDirectory = async (payload: CreateDirectoryPayload): Promise<Directory | null> => {
     try {
-      // Добавляем колонки из шаблона если не указаны
+      const fixedToolName = resolveFixedToolName(payload.template)
+      const isQaTemplate = payload.template === 'qa'
+      const columns =
+        payload.columns && payload.columns.length > 0
+          ? payload.columns
+          : getTemplateColumns(payload.template)
       const data = {
         ...payload,
-        columns: payload.columns || getTemplateColumns(payload.template),
+        tool_name: fixedToolName || payload.tool_name,
+        columns,
         response_mode: payload.response_mode || 'function_result',
-        search_type: payload.search_type || 'fuzzy'
+        search_type: payload.search_type || 'semantic',
+        create_tool: payload.create_tool ?? isQaTemplate,
       }
       
       console.log('📝 Creating directory:', data.name)
@@ -127,7 +153,13 @@ export const useDirectories = (agentId: string) => {
       console.error('❌ Failed to create directory:', err)
       
       if (status === 409) {
-        throw new Error('Справочник с таким именем уже существует')
+        const msg = getReadableErrorMessage(err, '')
+        if (msg.toLowerCase().includes('template')) {
+          throw new Error(
+            'Для этого агента уже есть справочник этого типа. Удалите существующий или выберите другой шаблон.'
+          )
+        }
+        throw new Error(msg || 'Справочник с таким именем или функцией уже существует')
       }
       
       throw new Error(getReadableErrorMessage(err, 'Не удалось создать справочник'))
@@ -239,8 +271,12 @@ export const useDirectories = (agentId: string) => {
           body: { data }
         }
       )
-      
-      items.value.push(created)
+
+      if (!created?.id) {
+        throw new Error('Сервер не вернул созданную запись')
+      }
+
+      items.value = [...items.value, created]
       
       // Обновляем счётчик
       const dirIndex = directories.value.findIndex(d => d.id === directoryId)

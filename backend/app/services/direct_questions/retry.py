@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.direct_question import DirectQuestion
+from app.services.direct_questions.crud import _build_embedding_text
 from app.services.direct_questions.embedding import create_direct_question_embedding
 from app.services.tenant_llm_config import get_decrypted_api_key
 
@@ -37,7 +38,7 @@ async def retry_pending_direct_question_embeddings(
     for question in questions:
         openai_api_key = await get_decrypted_api_key(db, question.tenant_id)
         embedding = await create_direct_question_embedding(
-            question.search_title,
+            _build_embedding_text(question.title),
             db=db,
             tenant_id=question.tenant_id,
             charge_source_type="embedding.direct_question_retry",

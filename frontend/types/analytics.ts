@@ -5,6 +5,9 @@ export type AnalyticsPeriodPreset = '7d' | '30d' | '90d' | 'custom'
 export type AnalyticsOverview = {
   visits_total: number
   arrived_total: number
+  primary_visits: number
+  primary_arrived: number
+  conversion_primary_arrived_pct: number
   arrived_primary: number
   repeat_total: number
   bookings_from_primary: number
@@ -24,6 +27,8 @@ export type AnalyticsTimeseriesPoint = {
   label: string
   visits_total: number
   arrived_total: number
+  primary_visits: number
+  primary_arrived: number
   revenue_total: number
 }
 

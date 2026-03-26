@@ -13,6 +13,8 @@ export type Directory = {
   slug?: string
   tool_name: string
   tool_description?: string
+  /** Текст для системного промпта агента */
+  prompt_usage_snippet?: string | null
   template: string
   columns: DirectoryColumn[]
   response_mode?: 'function_result' | 'direct_message'
@@ -33,18 +35,21 @@ export type DirectoryItem = {
 
 export type CreateDirectoryPayload = {
   name: string
-  tool_name: string
+  tool_name?: string
   tool_description: string
+  prompt_usage_snippet?: string
   template: string
   columns?: DirectoryColumn[]
   response_mode?: string
   search_type?: string
+  create_tool?: boolean
 }
 
 export type UpdateDirectoryPayload = Partial<{
   name: string
   tool_name: string
   tool_description: string
+  prompt_usage_snippet: string
   response_mode: string
   search_type: string
   is_enabled: boolean

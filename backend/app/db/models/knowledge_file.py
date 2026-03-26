@@ -47,6 +47,11 @@ class KnowledgeFile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         server_default="not_indexed",
     )
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    # Chunking settings are used for chunk-level RAG.
+    # For folders, these values act as defaults inherited by descendant files.
+    # For files, they may be left NULL and resolved from nearest parent folder.
+    chunk_size_chars: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chunk_overlap_chars: Mapped[int | None] = mapped_column(Integer, nullable=True)
     embedding: Mapped[list | None] = mapped_column(Vector(1536), nullable=True)
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     index_error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -60,5 +65,12 @@ class KnowledgeFile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     children: Mapped[list["KnowledgeFile"]] = relationship(
         "KnowledgeFile",
         back_populates="parent",
+        cascade="all, delete-orphan",
+    )
+
+    # Chunk-level RAG entries. Populated by knowledge indexing jobs.
+    chunks: Mapped[list["KnowledgeFileChunk"]] = relationship(
+        "KnowledgeFileChunk",
+        back_populates="file",
         cascade="all, delete-orphan",
     )

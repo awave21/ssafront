@@ -17,6 +17,7 @@ from app.db.session import async_session_factory
 from app.schemas.auth import AuthContext
 from app.services.credentials import decrypt_config
 from app.services.direct_questions.safety import sanitize_direct_question_content, split_direct_question_content
+from app.services.direct_questions.retrieval import search_direct_question_candidates
 from app.services.knowledge_files import search_indexed_knowledge_files
 from app.services.function_rules_runtime import run_rules_for_phase
 from app.services.tool_executor import ToolExecutionError, execute_tool_call, transform_response
@@ -26,8 +27,9 @@ from app.services.runtime.utils import _safe_identifier
 logger = structlog.get_logger("app.services.runtime")
 
 DEFAULT_KNOWLEDGE_SEARCH_TOOL_DESCRIPTION = (
-    "Search uploaded knowledge files and return relevant fragments for RAG answers. "
-    "Use when user asks factual questions covered by documentation, policies, prices, or instructions."
+    "Search uploaded knowledge files and return relevant text fragments for RAG. "
+    "Each result includes chunk_id, file_id, chunk_index, title, and excerpt — cite these when answering. "
+    "Use for factual questions covered by documentation, policies, prices, or instructions."
 )
 
 
@@ -396,7 +398,6 @@ def build_direct_answer_tool(
             "status": "ok",
             "direct_question_id": str(question.id),
             "title": question.title,
-            "search_title": question.search_title,
             "interrupt_dialog": bool(question.interrupt_dialog),
             "notify_telegram": bool(question.notify_telegram),
             "content": user_content,
@@ -410,7 +411,7 @@ def build_direct_answer_tool(
         name="get_direct_answer",
         description=(
             "Retrieve a prepared answer from the knowledge base by topic UUID. "
-            "CALL when the user's request clearly matches a topic in the 'Knowledge base' list — match by meaning, not just keywords. "
+            "CALL after search_direct_questions returns chosen_candidate_id. "
             "DO NOT call if no topic clearly matches. "
             "After status=ok: use `content` as factual base, preserve exact data (numbers, addresses, prices, URLs). "
             "If `system_instruction` is present — apply it as a behavioral directive for tone, format, or follow-up actions. "
@@ -425,6 +426,61 @@ def build_direct_answer_tool(
                 }
             },
             "required": ["direct_question_id"],
+            "additionalProperties": False,
+        },
+        takes_ctx=False,
+    )
+
+
+def build_direct_questions_search_tool(
+    *,
+    db: AsyncSession,
+    tenant_id: UUID,
+    agent_id: UUID,
+    openai_api_key: str | None,
+    default_limit: int,
+    min_match_percent: int,
+    rerank: bool = True,
+    analytics_sink: list[dict[str, Any]] | None = None,
+) -> PydanticTool:
+    async def _search_direct_questions(query: str, limit: int | None = None) -> dict[str, Any]:
+        normalized_limit = int(limit) if isinstance(limit, int) else int(default_limit)
+        result = await search_direct_question_candidates(
+            db,
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            query=query,
+            openai_api_key=openai_api_key,
+            limit=max(1, min(normalized_limit, 20)),
+            min_match_percent=min_match_percent,
+            rerank=rerank,
+        )
+        if analytics_sink is not None:
+            analytics_sink.append(
+                {
+                    "pipeline_kind": "direct_question",
+                    "query": query,
+                    "result": result,
+                }
+            )
+        return result
+
+    _search_direct_questions.__name__ = "search_direct_questions"
+    return PydanticTool.from_schema(
+        function=_search_direct_questions,
+        name="search_direct_questions",
+        description=(
+            "Search direct questions semantically and return best candidate UUIDs with relevance scores. "
+            "ALWAYS call this first for FAQ-like/user-policy questions. "
+            "If status=ok and chosen_candidate_id is present, call get_direct_answer with that UUID."
+        ),
+        json_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "User intent in natural language."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": default_limit},
+            },
+            "required": ["query"],
             "additionalProperties": False,
         },
         takes_ctx=False,
@@ -465,9 +521,13 @@ async def build_knowledge_search_tool(
             excerpt = content[:900]
             if len(content) > 900:
                 excerpt += "..."
+            chunk_id = row.get("id")
             results.append(
                 {
-                    "id": row.get("id"),
+                    "chunk_id": chunk_id,
+                    "file_id": row.get("file_id"),
+                    "chunk_index": row.get("chunk_index"),
+                    "id": chunk_id,
                     "title": row.get("title"),
                     "meta_tags": row.get("meta_tags") or [],
                     "relevance": row.get("relevance"),
@@ -514,6 +574,7 @@ async def build_directory_tools(agent_id: UUID) -> list[PydanticTool]:
                 db=db,
                 agent_id=agent_id,
                 db_session_factory=async_session_factory,
+                only_catalog_templates=True,
             )
 
             tools: list[PydanticTool] = []
@@ -528,10 +589,11 @@ async def build_directory_tools(agent_id: UUID) -> list[PydanticTool]:
                         "properties": {
                             "query": {
                                 "type": "string",
-                                "description": "Поисковый запрос для поиска по справочнику",
+                                "description": "Поисковый запрос — точная формулировка вопроса пользователя или ключевые слова",
                             }
                         },
-                        "required": [],
+                        "required": ["query"],
+                        "additionalProperties": False,
                     },
                     takes_ctx=True,
                 )

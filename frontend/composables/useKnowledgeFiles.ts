@@ -7,13 +7,26 @@ import {
   type CreateKnowledgeFilePayload,
   type CreateKnowledgeTextPayload,
   type KnowledgeFileItem,
+  type KnowledgeFileIndexStatusResponse,
   type KnowledgeIndexJobStateResponse,
   type KnowledgeIndexJobStatus,
   type KnowledgeIndexStartResponse
 } from '~/types/knowledge'
 
+const getHttpErrorStatus = (e: unknown): number => {
+  const err = e as { status?: number; statusCode?: number; response?: { status?: number } }
+  return err?.status ?? err?.statusCode ?? err?.response?.status ?? 0
+}
+
 type KnowledgeFilesStorage = {
   items: KnowledgeFileItem[]
+}
+
+export type KnowledgeUploadBatchItemResult = {
+  fileName: string
+  ok: boolean
+  id?: string
+  error?: string
 }
 
 const ensureClient = () => typeof window !== 'undefined'
@@ -32,6 +45,9 @@ const sortItems = (items: KnowledgeFileItem[]) => {
   })
 }
 
+const DEFAULT_CHUNK_SIZE_CHARS = 6000
+const DEFAULT_CHUNK_OVERLAP_CHARS = 1000
+
 const normalizeIncomingItem = (
   source: Partial<KnowledgeFileItem>,
   fallback: KnowledgeFileItem
@@ -49,7 +65,25 @@ const normalizeIncomingItem = (
   content: typeof source.content === 'string' ? source.content : fallback.content,
   is_enabled: typeof source.is_enabled === 'boolean' ? source.is_enabled : fallback.is_enabled,
   vector_status: source.vector_status ?? fallback.vector_status,
+  chunk_size_chars:
+    typeof source.chunk_size_chars === 'number'
+      ? source.chunk_size_chars
+      : fallback.chunk_size_chars ?? null,
+  chunk_overlap_chars:
+    typeof source.chunk_overlap_chars === 'number'
+      ? source.chunk_overlap_chars
+      : fallback.chunk_overlap_chars ?? null,
   order_index: typeof source.order_index === 'number' ? source.order_index : fallback.order_index,
+  chunks_count:
+    typeof source.chunks_count === 'number'
+      ? source.chunks_count
+      : (fallback.chunks_count ?? null),
+  indexed_at:
+    typeof source.indexed_at === 'string'
+      ? source.indexed_at
+      : source.indexed_at === null
+        ? null
+        : (fallback.indexed_at ?? null),
   created_at: source.created_at ?? fallback.created_at,
   updated_at: source.updated_at ?? fallback.updated_at
 })
@@ -63,6 +97,7 @@ export const useKnowledgeFiles = (agentId: string) => {
   const storageKey = computed(() => `knowledge-files:${agentId}`)
   const baseEndpoint = computed(() => `/agents/${agentId}/knowledge/files`)
   const itemEndpoint = (id: string) => `${baseEndpoint.value}/${id}`
+  const uploadEndpoint = computed(() => `${baseEndpoint.value}/upload`)
   const fileIndexEndpoint = (id: string) => `${baseEndpoint.value}/${id}/index`
   const fileIndexStatusEndpoint = (id: string) => `${baseEndpoint.value}/${id}/index-status`
   const indexJobEndpoint = (jobId: string) => `/agents/${agentId}/knowledge/index-jobs/${jobId}`
@@ -119,16 +154,21 @@ export const useKnowledgeFiles = (agentId: string) => {
     pollTimers.delete(fileId)
   }
   const setIndexState = (fileId: string, status: KnowledgeIndexJobStatus, progress?: number) => {
-    indexStateByItem.value[fileId] = status
-    const nextProgress = typeof progress === 'number'
-      ? toProgress(progress, status === knowledgeIndexJobStatus.indexed ? 100 : 0)
-      : (
-        status === knowledgeIndexJobStatus.queued ? 5 :
-        status === knowledgeIndexJobStatus.indexing ? Math.max(indexProgressByItem.value[fileId] ?? 0, 10) :
-        status === knowledgeIndexJobStatus.indexed ? 100 :
-        indexProgressByItem.value[fileId] ?? 0
-      )
-    indexProgressByItem.value[fileId] = nextProgress
+    const prevProg = indexProgressByItem.value[fileId] ?? 0
+    let nextProgress: number
+    if (typeof progress === 'number' && Number.isFinite(progress)) {
+      nextProgress = toProgress(progress, status === knowledgeIndexJobStatus.indexed ? 100 : 0)
+    } else if (status === knowledgeIndexJobStatus.indexed) {
+      nextProgress = 100
+    } else if (status === knowledgeIndexJobStatus.failed) {
+      nextProgress = prevProg
+    } else {
+      // queued / indexing без числа от API — не показываем фиктивные 5% / 10%
+      nextProgress = 0
+    }
+    // Новые объекты — чтобы дочерние компоненты гарантированно увидели обновление прогресса
+    indexStateByItem.value = { ...indexStateByItem.value, [fileId]: status }
+    indexProgressByItem.value = { ...indexProgressByItem.value, [fileId]: nextProgress }
   }
 
   const pollJobStatus = (fileId: string, jobId: string, attempt = 0) => {
@@ -144,16 +184,48 @@ export const useKnowledgeFiles = (agentId: string) => {
         const status = result?.status ?? knowledgeIndexJobStatus.indexing
         setIndexState(fileId, status, result?.progress)
         syncItemVectorStatus(fileId, status)
+        if (isTerminalStatus(status)) {
+          const row = findItem(fileId)
+          if (
+            row
+            && row.type === knowledgeItemType.file
+            && status === knowledgeIndexJobStatus.indexed
+            && typeof result?.chunks_total === 'number'
+            && result.chunks_total >= 0
+          ) {
+            row.chunks_count = result.chunks_total
+          }
+          if (
+            row
+            && row.type === knowledgeItemType.file
+            && status === knowledgeIndexJobStatus.indexed
+            && typeof result?.indexed_at === 'string'
+          ) {
+            row.indexed_at = result.indexed_at
+          }
+          writeStorage()
+          return
+        }
         writeStorage()
-
-        if (isTerminalStatus(status)) return
 
         const timer = setTimeout(() => {
           void pollJobStatus(fileId, jobId, attempt + 1)
         }, POLL_MS)
         pollTimers.set(fileId, timer)
       } catch (apiError: any) {
-        if ([404, 405, 501].includes(apiError?.status ?? 0)) {
+        const httpStatus = getHttpErrorStatus(apiError)
+        if (httpStatus === 404 && attempt < 8) {
+          const timer = setTimeout(() => {
+            void pollJobStatus(fileId, jobId, attempt + 1)
+          }, POLL_MS)
+          pollTimers.set(fileId, timer)
+          return
+        }
+        if (httpStatus === 404) {
+          pollFileIndexStatus(fileId, 0)
+          return
+        }
+        if ([405, 501].includes(httpStatus)) {
           return
         }
         if (attempt >= MAX_ATTEMPTS) {
@@ -186,22 +258,54 @@ export const useKnowledgeFiles = (agentId: string) => {
 
     const run = async () => {
       try {
-        const result = await apiFetch<KnowledgeIndexJobStateResponse>(fileIndexStatusEndpoint(fileId), {
+        const result = await apiFetch<KnowledgeFileIndexStatusResponse>(fileIndexStatusEndpoint(fileId), {
           method: 'GET'
         })
-        const status = result?.status ?? knowledgeIndexJobStatus.indexing
-        setIndexState(fileId, status, result?.progress)
-        syncItemVectorStatus(fileId, status)
-        writeStorage()
+        const row = findItem(fileId)
+        if (row && row.type === knowledgeItemType.file) {
+          if (typeof result?.chunks_count === 'number') {
+            row.chunks_count = result.chunks_count
+          }
+          if (typeof result?.indexed_at === 'string') {
+            row.indexed_at = result.indexed_at
+          }
+          if (result?.indexed_at === null) {
+            row.indexed_at = null
+          }
+        }
+        const rawVs = result?.vector_status
+        const vs =
+          rawVs === knowledgeVectorStatus.notIndexed
+            ? knowledgeVectorStatus.indexing
+            : (rawVs ?? knowledgeVectorStatus.indexing)
+        const progress = toProgress(
+          result?.progress,
+          vs === knowledgeVectorStatus.indexed ? 100 : 0
+        )
 
-        if (isTerminalStatus(status)) return
+        if (vs === knowledgeVectorStatus.indexed) {
+          setIndexState(fileId, knowledgeIndexJobStatus.indexed, progress)
+          syncItemVectorStatus(fileId, knowledgeIndexJobStatus.indexed)
+          writeStorage()
+          return
+        }
+        if (vs === knowledgeVectorStatus.failed) {
+          setIndexState(fileId, knowledgeIndexJobStatus.failed, progress)
+          syncItemVectorStatus(fileId, knowledgeIndexJobStatus.failed)
+          writeStorage()
+          return
+        }
+
+        setIndexState(fileId, knowledgeIndexJobStatus.indexing, progress)
+        syncItemVectorStatus(fileId, knowledgeIndexJobStatus.indexing)
+        writeStorage()
 
         const timer = setTimeout(() => {
           void pollFileIndexStatus(fileId, attempt + 1)
         }, POLL_MS)
         pollTimers.set(fileId, timer)
       } catch (apiError: any) {
-        if ([404, 405, 501].includes(apiError?.status ?? 0)) return
+        if ([404, 405, 501].includes(getHttpErrorStatus(apiError))) return
         if (attempt >= MAX_ATTEMPTS) {
           setIndexState(fileId, knowledgeIndexJobStatus.failed)
           syncItemVectorStatus(fileId, knowledgeIndexJobStatus.failed)
@@ -235,7 +339,16 @@ export const useKnowledgeFiles = (agentId: string) => {
                 type: item.type === knowledgeItemType.folder ? knowledgeItemType.folder : knowledgeItemType.file,
                 meta_tags: Array.isArray(item.meta_tags) ? item.meta_tags : [],
                 content: item.content ?? '',
-                vector_status: item.vector_status ?? knowledgeVectorStatus.notIndexed
+                vector_status: item.vector_status ?? knowledgeVectorStatus.notIndexed,
+                chunk_size_chars: typeof item.chunk_size_chars === 'number' ? item.chunk_size_chars : null,
+                chunk_overlap_chars: typeof item.chunk_overlap_chars === 'number' ? item.chunk_overlap_chars : null,
+                chunks_count: typeof item.chunks_count === 'number' ? item.chunks_count : null,
+                indexed_at:
+                  typeof item.indexed_at === 'string'
+                    ? item.indexed_at
+                    : item.indexed_at === null
+                      ? null
+                      : undefined
               }))
           )
           writeStorage()
@@ -244,7 +357,7 @@ export const useKnowledgeFiles = (agentId: string) => {
       } catch (apiError: any) {
         // Backend may not yet support this endpoint in all envs.
         // Fallback keeps UI fully functional.
-        if (![404, 405, 501].includes(apiError?.status ?? 0)) {
+        if (![404, 405, 501].includes(getHttpErrorStatus(apiError))) {
           throw apiError
         }
       }
@@ -273,6 +386,8 @@ export const useKnowledgeFiles = (agentId: string) => {
       content: '',
       is_enabled: true,
       vector_status: knowledgeVectorStatus.notIndexed,
+      chunk_size_chars: DEFAULT_CHUNK_SIZE_CHARS,
+      chunk_overlap_chars: DEFAULT_CHUNK_OVERLAP_CHARS,
       order_index: nextOrderIndex(parentId),
       created_at: now,
       updated_at: now
@@ -292,7 +407,7 @@ export const useKnowledgeFiles = (agentId: string) => {
         items.value.push(folder)
       }
     } catch (apiError: any) {
-      if (![404, 405, 501].includes(apiError?.status ?? 0)) throw apiError
+      if (![404, 405, 501].includes(getHttpErrorStatus(apiError))) throw apiError
       items.value.push(folder)
     }
     normalizeParentOrder(parentId)
@@ -314,6 +429,10 @@ export const useKnowledgeFiles = (agentId: string) => {
       content: payload.content ?? '',
       is_enabled: payload.is_enabled ?? true,
       vector_status: payload.vector_status ?? knowledgeVectorStatus.notIndexed,
+      chunk_size_chars: null,
+      chunk_overlap_chars: null,
+      chunks_count: 0,
+      indexed_at: null,
       order_index: nextOrderIndex(parentId),
       created_at: now,
       updated_at: now
@@ -338,13 +457,77 @@ export const useKnowledgeFiles = (agentId: string) => {
         items.value.push(file)
       }
     } catch (apiError: any) {
-      if (![404, 405, 501].includes(apiError?.status ?? 0)) throw apiError
+      if (![404, 405, 501].includes(getHttpErrorStatus(apiError))) throw apiError
       items.value.push(file)
     }
     normalizeParentOrder(parentId)
     items.value = sortItems(items.value)
     writeStorage()
     return persistedFile
+  }
+
+  const uploadDocument = async (file: File) => {
+    const parentId = currentFolderId.value ?? null
+    const formData = new FormData()
+    formData.append('file', file)
+    if (parentId) formData.append('parent_id', parentId)
+
+    const created = await apiFetch<KnowledgeFileItem>(uploadEndpoint.value, {
+      method: 'POST',
+      body: formData
+    })
+
+    if (created?.id) {
+      items.value.push(normalizeIncomingItem(created, created))
+      items.value = sortItems(items.value)
+      writeStorage()
+    }
+
+    return created
+  }
+
+  /**
+   * Несколько файлов через тот же POST /upload, с ограничением параллелизма (по умолчанию 3).
+   */
+  const uploadDocumentsBatch = async (
+    files: File[],
+    concurrency = 3
+  ): Promise<KnowledgeUploadBatchItemResult[]> => {
+    const allowed = files.filter(Boolean)
+    if (!allowed.length) return []
+
+    const results: KnowledgeUploadBatchItemResult[] = new Array(allowed.length)
+    let nextIndex = 0
+    const limit = Math.max(1, Math.min(concurrency, 8))
+
+    const worker = async () => {
+      while (true) {
+        const i = nextIndex
+        nextIndex += 1
+        if (i >= allowed.length) return
+        const file = allowed[i]
+        try {
+          const created = await uploadDocument(file)
+          if (created?.id) {
+            results[i] = { fileName: file.name, ok: true, id: created.id }
+          } else {
+            results[i] = { fileName: file.name, ok: false, error: 'Пустой ответ сервера' }
+          }
+        } catch (e: any) {
+          const detail = e?.data?.detail
+          const msg =
+            typeof detail === 'string'
+              ? detail
+              : Array.isArray(detail)
+                ? detail.map((x: { msg?: string }) => x?.msg).filter(Boolean).join('; ')
+                : e?.message || 'Ошибка загрузки'
+          results[i] = { fileName: file.name, ok: false, error: msg }
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(limit, allowed.length) }, () => worker()))
+    return results
   }
 
   const updateFile = async (id: string, payload: Partial<CreateKnowledgeTextPayload>) => {
@@ -358,22 +541,61 @@ export const useKnowledgeFiles = (agentId: string) => {
     if (payload.vector_status) item.vector_status = payload.vector_status
     item.updated_at = new Date().toISOString()
     try {
-      await apiFetch<KnowledgeFileItem>(itemEndpoint(id), {
+      // vector_status на файлах меняет только бэкенд (индексация); в PATCH его нельзя — будет 400.
+      const updated = await apiFetch<KnowledgeFileItem>(itemEndpoint(id), {
         method: 'PATCH',
         body: {
           title: item.title,
           meta_tags: item.meta_tags,
           content: item.content,
-          is_enabled: item.is_enabled,
-          vector_status: item.vector_status
+          is_enabled: item.is_enabled
         }
       })
+      if (updated && typeof updated.chunks_count === 'number') {
+        item.chunks_count = updated.chunks_count
+      }
+      if (updated && typeof updated.indexed_at === 'string') {
+        item.indexed_at = updated.indexed_at
+      }
+      if (updated && updated.indexed_at === null) {
+        item.indexed_at = null
+      }
     } catch (apiError: any) {
-      if (![404, 405, 501].includes(apiError?.status ?? 0)) {
+      if (![404, 405, 501].includes(getHttpErrorStatus(apiError))) {
         Object.assign(item, snapshot)
         throw apiError
       }
     }
+    items.value = sortItems(items.value)
+    writeStorage()
+    return item
+  }
+
+  const updateFolderChunkingSettings = async (
+    folderId: string,
+    settings: { chunk_size_chars: number | null; chunk_overlap_chars: number | null }
+  ) => {
+    const item = findItem(folderId)
+    if (!item || item.type !== knowledgeItemType.folder) return null
+    const snapshot = { ...item }
+
+    item.chunk_size_chars = settings.chunk_size_chars
+    item.chunk_overlap_chars = settings.chunk_overlap_chars
+    item.updated_at = new Date().toISOString()
+
+    try {
+      await apiFetch<KnowledgeFileItem>(itemEndpoint(folderId), {
+        method: 'PATCH',
+        body: {
+          chunk_size_chars: item.chunk_size_chars,
+          chunk_overlap_chars: item.chunk_overlap_chars
+        }
+      })
+    } catch (apiError: any) {
+      Object.assign(item, snapshot)
+      throw apiError
+    }
+
     items.value = sortItems(items.value)
     writeStorage()
     return item
@@ -391,7 +613,7 @@ export const useKnowledgeFiles = (agentId: string) => {
         body: { title: item.title }
       })
     } catch (apiError: any) {
-      if (![404, 405, 501].includes(apiError?.status ?? 0)) {
+      if (![404, 405, 501].includes(getHttpErrorStatus(apiError))) {
         item.title = previousTitle
         throw apiError
       }
@@ -444,7 +666,7 @@ export const useKnowledgeFiles = (agentId: string) => {
         }
       })
     } catch (apiError: any) {
-      if (![404, 405, 501].includes(apiError?.status ?? 0)) {
+      if (![404, 405, 501].includes(getHttpErrorStatus(apiError))) {
         item.parent_id = snapshotParent
         item.order_index = snapshotOrder
         normalizeParentOrder(previousParent)
@@ -466,7 +688,7 @@ export const useKnowledgeFiles = (agentId: string) => {
       try {
         await apiFetch(itemEndpoint(id), { method: 'DELETE' })
       } catch (apiError: any) {
-        if (![404, 405, 501].includes(apiError?.status ?? 0)) {
+        if (![404, 405, 501].includes(getHttpErrorStatus(apiError))) {
           items.value = snapshot
           throw apiError
         }
@@ -482,7 +704,7 @@ export const useKnowledgeFiles = (agentId: string) => {
     try {
       await apiFetch(itemEndpoint(id), { method: 'DELETE' })
     } catch (apiError: any) {
-      if (![404, 405, 501].includes(apiError?.status ?? 0)) {
+      if (![404, 405, 501].includes(getHttpErrorStatus(apiError))) {
         items.value = snapshot
         throw apiError
       }
@@ -494,7 +716,7 @@ export const useKnowledgeFiles = (agentId: string) => {
     const item = findItem(id)
     if (!item || item.type !== knowledgeItemType.file) return
     item.vector_status = knowledgeVectorStatus.indexing
-    setIndexState(id, knowledgeIndexJobStatus.indexing, 5)
+    setIndexState(id, knowledgeIndexJobStatus.queued, 0)
     writeStorage()
     try {
       const result = await apiFetch<KnowledgeIndexStartResponse>(fileIndexEndpoint(id), {
@@ -503,7 +725,8 @@ export const useKnowledgeFiles = (agentId: string) => {
 
       if (result?.job_id) {
         const startStatus = result.status ?? knowledgeIndexJobStatus.queued
-        setIndexState(id, startStatus, result.progress)
+        const startProgress = typeof result.progress === 'number' ? result.progress : 0
+        setIndexState(id, startStatus, startProgress)
         syncItemVectorStatus(id, startStatus)
         writeStorage()
         pollJobStatus(id, result.job_id)
@@ -530,9 +753,9 @@ export const useKnowledgeFiles = (agentId: string) => {
 
       pollFileIndexStatus(id)
     } catch (apiError: any) {
-      if ([404, 405, 501].includes(apiError?.status ?? 0)) {
+      if ([404, 405, 501].includes(getHttpErrorStatus(apiError))) {
         // If indexing endpoint is unavailable, keep UI in "indexing" as draft status.
-        setIndexState(id, knowledgeIndexJobStatus.indexing, Math.max(indexProgressByItem.value[id] ?? 0, 10))
+        setIndexState(id, knowledgeIndexJobStatus.indexing, indexProgressByItem.value[id] ?? 0)
         item.vector_status = knowledgeVectorStatus.indexing
       } else {
         setIndexState(id, knowledgeIndexJobStatus.failed, indexProgressByItem.value[id] ?? 0)
@@ -604,6 +827,9 @@ export const useKnowledgeFiles = (agentId: string) => {
     moveItem,
     deleteItem,
     getMoveTargets,
-    reindexFile
+    reindexFile,
+    updateFolderChunkingSettings,
+    uploadDocument,
+    uploadDocumentsBatch
   }
 }

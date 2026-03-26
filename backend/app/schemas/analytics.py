@@ -24,6 +24,9 @@ AnalyticsServicesTableSortBy = Literal[
 class AnalyticsOverviewResponse(BaseModel):
     visits_total: int = Field(default=0, ge=0)
     arrived_total: int = Field(default=0, ge=0)
+    primary_visits: int = Field(default=0, ge=0)
+    primary_arrived: int = Field(default=0, ge=0)
+    conversion_primary_arrived_pct: float = Field(default=0, ge=0, le=100)
     arrived_primary: int = Field(default=0, ge=0)
     repeat_total: int = Field(default=0, ge=0)
     bookings_from_primary: int = Field(default=0, ge=0)
@@ -43,6 +46,8 @@ class AnalyticsTimeseriesPoint(BaseModel):
     label: str = Field(..., description="Короткая подпись для графика")
     visits_total: int = Field(default=0, ge=0)
     arrived_total: int = Field(default=0, ge=0)
+    primary_visits: int = Field(default=0, ge=0)
+    primary_arrived: int = Field(default=0, ge=0)
     revenue_total: float = Field(default=0)
 
 

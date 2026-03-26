@@ -3,7 +3,7 @@
     :open="isOpen"
     title="Настройки справочника"
     :subtitle="directory?.name"
-    :loading="isSaving"
+    :loading="isSaving || isDeleting"
     :submit-disabled="!isValid"
     size="lg"
     @close="handleClose"
@@ -35,6 +35,8 @@
             type="text"
             class="mt-1.5 w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 font-mono focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all duration-300 outline-none"
             :class="{ 'border-yellow-300 bg-yellow-50': toolNameChanged }"
+            :readonly="isToolNameReadonly"
+            :disabled="isToolNameReadonly"
           />
           <p v-if="toolNameChanged" class="mt-1 text-xs text-yellow-600">
             Изменение повлияет на промпт агента
@@ -52,8 +54,28 @@
         ></textarea>
       </div>
 
-      <!-- Columns Section -->
-      <div class="border-t border-slate-100 pt-5">
+      <div>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <label class="text-sm font-medium text-slate-700">Текст для системного промпта</label>
+          <button
+            type="button"
+            class="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            @click="copyPromptSnippet"
+          >
+            <ClipboardCopy class="w-3.5 h-3.5" />
+            {{ promptSnippetCopied ? 'Скопировано' : 'Копировать' }}
+          </button>
+        </div>
+        <textarea
+          v-model.trim="form.prompt_usage_snippet"
+          rows="2"
+          class="mt-1.5 w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all duration-300 outline-none resize-none"
+          :placeholder="promptUsageLinePlaceholder"
+        ></textarea>
+      </div>
+
+      <!-- Columns (only when editable: custom / clipboard_import) -->
+      <div v-if="canEditColumns" class="border-t border-slate-100 pt-5">
         <div class="flex items-center justify-between mb-3">
           <label class="text-sm font-medium text-slate-700">Колонки справочника</label>
           <span v-if="hasColumnsChanges" class="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded-lg">
@@ -71,36 +93,20 @@
         </p>
       </div>
 
-      <!-- Settings Columns -->
+      <!-- Settings -->
       <div class="border-t border-slate-100 pt-5">
-        <div class="flex items-start gap-6">
-          <!-- Response Mode -->
-          <div class="flex-1">
-            <label class="text-xs font-medium text-slate-500 mb-1.5 block">Режим ответа</label>
-            <select
-              v-model="form.response_mode"
-              class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all duration-300 outline-none"
-            >
-              <option value="function_result">Результат функции</option>
-              <option value="direct_message">Прямое сообщение</option>
-            </select>
-            <p class="mt-1 text-xs text-slate-400">
-              {{ form.response_mode === 'function_result' ? 'Агент сформулирует ответ сам' : 'Без обработки агентом' }}
-            </p>
-          </div>
-
-          <!-- Search Type -->
-          <div class="flex-1">
-            <label class="text-xs font-medium text-slate-500 mb-1.5 block">Тип поиска</label>
-            <select
-              v-model="form.search_type"
-              class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all duration-300 outline-none"
-            >
-              <option value="exact">Точный</option>
-              <option value="fuzzy">Нечёткий</option>
-              <option value="semantic">Семантический</option>
-            </select>
-          </div>
+        <div>
+          <label class="text-xs font-medium text-slate-500 mb-1.5 block">Режим ответа</label>
+          <select
+            v-model="form.response_mode"
+            class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all duration-300 outline-none"
+          >
+            <option value="function_result">Результат функции</option>
+            <option value="direct_message">Прямое сообщение</option>
+          </select>
+          <p class="mt-1 text-xs text-slate-400">
+            {{ form.response_mode === 'function_result' ? 'Агент сформулирует ответ сам' : 'Без обработки агентом' }}
+          </p>
         </div>
       </div>
 
@@ -164,8 +170,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { Loader2 } from 'lucide-vue-next'
+import { ref, computed, watch, nextTick } from 'vue'
+import { Loader2, ClipboardCopy } from 'lucide-vue-next'
 import type { Directory, DirectoryColumn } from '~/types/directories'
 import { Switch } from '~/components/ui/switch'
 import {
@@ -195,8 +201,8 @@ const form = ref({
   name: '',
   tool_name: '',
   tool_description: '',
+  prompt_usage_snippet: '',
   response_mode: 'function_result' as 'function_result' | 'direct_message',
-  search_type: 'fuzzy' as 'exact' | 'fuzzy' | 'semantic',
   is_enabled: true,
   columns: [] as DirectoryColumn[]
 })
@@ -212,6 +218,55 @@ const originalColumns = ref<DirectoryColumn[]>([])
 
 const toolNameChanged = computed(() => {
   return form.value.tool_name !== originalToolName.value
+})
+
+const fixedToolNameByTemplate: Record<string, string> = {
+  qa: 'get_question_answer',
+  service_catalog: 'get_service_info',
+  product_catalog: 'get_product_info',
+  company_info: 'get_company_info',
+  theme_catalog: 'get_topic_info',
+  medical_course_catalog: 'get_medical_course_info',
+  clipboard_import: 'get_clipboard_import',
+}
+
+const canEditColumns = computed(() => {
+  const t = props.directory?.template ?? ''
+  return t === 'custom' || t === 'clipboard_import'
+})
+
+const promptUsageLinePlaceholder = computed(() => {
+  const fn = form.value.tool_name?.trim() || '…'
+  return `Вызывай ${fn}, когда нужна информация из этого справочника.`
+})
+
+const displayPromptSnippet = computed(() => {
+  const s = form.value.prompt_usage_snippet?.trim()
+  if (s) return s
+  return promptUsageLinePlaceholder.value
+})
+
+const promptSnippetCopied = ref(false)
+let promptSnippetCopiedTimer: ReturnType<typeof setTimeout> | null = null
+
+const copyPromptSnippet = async () => {
+  const text = displayPromptSnippet.value
+  try {
+    await navigator.clipboard.writeText(text)
+    if (promptSnippetCopiedTimer) clearTimeout(promptSnippetCopiedTimer)
+    promptSnippetCopied.value = true
+    promptSnippetCopiedTimer = setTimeout(() => {
+      promptSnippetCopied.value = false
+      promptSnippetCopiedTimer = null
+    }, 2000)
+  } catch {
+    error.value = 'Не удалось скопировать в буфер обмена'
+  }
+}
+const isToolNameReadonly = computed(() => {
+  const template = props.directory?.template
+  if (!template) return false
+  return template !== 'custom' || template in fixedToolNameByTemplate
 })
 
 const hasColumnsChanges = computed(() => {
@@ -263,19 +318,28 @@ const initForm = () => {
     
     form.value = {
       name: props.directory.name,
-      tool_name: props.directory.tool_name,
+      tool_name: fixedToolNameByTemplate[props.directory.template] || props.directory.tool_name,
       tool_description: props.directory.tool_description || '',
+      prompt_usage_snippet: props.directory.prompt_usage_snippet || '',
       response_mode: props.directory.response_mode || 'function_result',
-      search_type: props.directory.search_type || 'fuzzy',
       is_enabled: props.directory.is_enabled,
-      columns: cols
+      columns: props.directory.template === 'qa'
+        ? [
+            { name: 'question', label: 'Вопрос', type: 'text', required: true, searchable: true },
+            { name: 'answer', label: 'Ответ', type: 'text', required: true, searchable: false },
+          ]
+        : cols
     }
-    originalToolName.value = props.directory.tool_name
+    originalToolName.value = fixedToolNameByTemplate[props.directory.template] || props.directory.tool_name
     originalColumns.value = JSON.parse(JSON.stringify(cols))
   }
 }
 
 const checkToolName = () => {
+  if (isToolNameReadonly.value) {
+    toolNameError.value = ''
+    return
+  }
   toolNameError.value = validateToolName(
     form.value.tool_name,
     props.existingToolNames || [],
@@ -317,18 +381,23 @@ const handleSave = () => {
   emit('save', {
     id: props.directory.id,
     name: form.value.name,
-    tool_name: form.value.tool_name,
+    tool_name: isToolNameReadonly.value ? undefined : form.value.tool_name,
     tool_description: form.value.tool_description,
+    prompt_usage_snippet: form.value.prompt_usage_snippet,
     response_mode: form.value.response_mode,
-    search_type: form.value.search_type,
+    search_type: 'semantic',
     is_enabled: form.value.is_enabled,
-    columns: form.value.columns
+    columns: canEditColumns.value ? form.value.columns : undefined
   })
 }
 
-const handleDelete = () => {
+const handleDelete = async () => {
   if (!props.directory) return
   isDeleting.value = true
+  // Закрыть вложенный Dialog до запроса удаления: иначе портал reka-ui (z выше Sheet)
+  // может остаться и блокировать клики после закрытия шита (radix-vue + reka-ui).
+  showDeleteConfirm.value = false
+  await nextTick()
   emit('delete', props.directory.id)
 }
 

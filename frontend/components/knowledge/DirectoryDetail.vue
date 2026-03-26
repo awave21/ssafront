@@ -42,26 +42,10 @@
       @update:search-query="globalFilter = $event"
     />
 
-    <!-- Hint bar: shortcuts + undo/redo + hidden columns -->
+    <!-- Hint bar + hidden columns -->
     <div v-if="items.length > 0" class="flex items-center justify-between gap-4 flex-wrap">
-      <p class="text-xs text-slate-400 flex items-center gap-1.5">
-        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-100 rounded text-slate-500">
-          <MousePointer class="w-3 h-3" />
-          Клик
-        </span>
-        редактирование
-        <span class="mx-0.5">•</span>
-        <span class="px-1.5 py-0.5 bg-slate-100 rounded text-slate-500 font-mono text-[10px]">Tab</span>
-        далее
-        <span class="mx-0.5">•</span>
-        <span class="px-1.5 py-0.5 bg-slate-100 rounded text-slate-500 font-mono text-[10px]">Enter</span>
-        сохранить
-        <span class="mx-0.5">•</span>
-        <span class="px-1.5 py-0.5 bg-slate-100 rounded text-slate-500 font-mono text-[10px]">Esc</span>
-        отмена
-        <span class="mx-0.5">•</span>
-        <span class="px-1.5 py-0.5 bg-slate-100 rounded text-slate-500 font-mono text-[10px]">ПКМ</span>
-        меню
+      <p class="text-xs text-slate-400">
+        Клик по ячейке открывает запись в боковой панели.
       </p>
       <div class="flex items-center gap-2">
         <!-- Hidden columns badge -->
@@ -74,37 +58,6 @@
           {{ hiddenColumnNames.size }} скрыто
           <X class="w-3 h-3 ml-0.5" />
         </button>
-        <!-- Undo / Redo -->
-        <TooltipProvider :delay-duration="300">
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <button
-                @click="undo"
-                :disabled="!canUndo"
-                class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <Undo2 class="w-3.5 h-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p class="text-xs">Отменить <kbd class="ml-1 px-1 py-0.5 bg-slate-700 rounded text-[10px]">Ctrl+Z</kbd></p>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <button
-                @click="redo"
-                :disabled="!canRedo"
-                class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <Redo2 class="w-3.5 h-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p class="text-xs">Повторить <kbd class="ml-1 px-1 py-0.5 bg-slate-700 rounded text-[10px]">Ctrl+Shift+Z</kbd></p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
       </div>
     </div>
 
@@ -118,7 +71,7 @@
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead class="w-12"></TableHead>
+            <TableHead class="w-10 min-w-10 max-w-10"></TableHead>
             <TableHead
               v-for="col in orderedColumns"
               :key="col.name"
@@ -161,13 +114,16 @@
 
     <!-- Table with TanStack -->
     <div v-else-if="table.getRowModel().rows.length > 0" class="shadow-sm">
-        <Table :style="{ width: `${table.getTotalSize() + 56}px`, minWidth: '100%' }">
+        <Table
+          :style="{
+            width: `${table.getTotalSize() + selectAndActionsChromeWidth}px`,
+            minWidth: '100%',
+          }"
+        >
           <TableHeader>
             <TableRow>
-              <TableHead class-name="w-14 !px-0">
-                <div class="flex items-center justify-center gap-1 h-full">
-                  <!-- Невидимый spacer под размер кнопки "развернуть" в строках -->
-                  <span class="w-[26px] shrink-0"></span>
+              <TableHead class-name="w-10 min-w-10 max-w-10 !px-0">
+                <div class="flex items-center justify-center h-full py-2">
                   <input
                     type="checkbox"
                     :checked="table.getIsAllPageRowsSelected()"
@@ -181,14 +137,22 @@
                 v-for="header in table.getHeaderGroups()[0].headers.filter(h => h.id !== 'select' && h.id !== 'actions')" 
                 :key="header.id"
                 @dragover.prevent="handleDragOver($event, header.index - 1)"
-                @dragenter.prevent="dragOverIndex = header.index - 1"
+                @dragenter.prevent="onDragEnterHeader(header.index - 1)"
                 @dragleave="handleDragLeave"
                 @drop="handleDrop($event, header.index - 1)"
                 @dragend="handleDragEnd"
-                :class-name="`relative select-none ${dragOverIndex === header.index - 1 && dragIndex !== header.index - 1 ? 'bg-indigo-100' : ''} ${dragIndex === header.index - 1 ? 'opacity-50' : ''}`"
+                :class-name="`relative select-none ${!isColumnStructureLocked && dragOverIndex === header.index - 1 && dragIndex !== header.index - 1 ? 'bg-indigo-100' : ''} ${!isColumnStructureLocked && dragIndex === header.index - 1 ? 'opacity-50' : ''}`"
                 :style="{ width: `${header.getSize()}px` }"
               >
+                <template v-if="isColumnStructureLocked">
+                  <div class="flex items-center px-2 py-1 min-h-[36px]">
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wide truncate">
+                      {{ (header.column.columnDef.meta as DirectoryColumn).label }}
+                    </span>
+                  </div>
+                </template>
                 <ColumnHeaderDropdown
+                  v-else
                   :column="header.column.columnDef.meta as any"
                   :is-only-column="columns.length <= 1"
                   @dragstart="handleDragStart($event, header.index - 1)"
@@ -205,8 +169,8 @@
                   :class="header.column.getIsResizing() ? 'bg-indigo-400' : 'hover:bg-indigo-300'"
                 />
               </TableHead>
-              <!-- Add Column Button → opens settings sheet -->
-              <TableHead class-name="w-40">
+              <!-- Add column: только для custom / clipboard_import -->
+              <TableHead v-if="!isColumnStructureLocked" class-name="w-40">
                 <div class="flex justify-center">
                   <button
                     @click="$emit('settings')"
@@ -230,20 +194,9 @@
               @duplicate="duplicateRow(row.original)"
               @delete="$emit('delete', row.original.id)"
             >
-              <TableRow 
-                class="group cursor-pointer"
-                :class="{ 'bg-indigo-50/30': editingCell?.itemId === row.original.id }"
-                @click="openEditRowSheet(row.original)"
-              >
-                <TableCell class-name="w-14 !px-0">
-                  <div class="flex items-center justify-center gap-1 h-full">
-                    <button
-                      @click.stop="openEditRowSheet(row.original)"
-                      class="p-1 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors opacity-0 group-hover:opacity-100"
-                      title="Развернуть"
-                    >
-                      <Maximize2 class="w-3.5 h-3.5" />
-                    </button>
+              <TableRow class="group">
+                <TableCell class-name="w-10 min-w-10 max-w-10 !px-0">
+                  <div class="flex items-center justify-center h-full py-2">
                     <input
                       type="checkbox"
                       :checked="row.getIsSelected()"
@@ -256,24 +209,18 @@
                 <TableCell 
                   v-for="col in orderedColumns" 
                   :key="col.name"
-                  class-name="px-1 py-1"
+                  class-name="px-1 py-1 cursor-pointer"
                   :style="{ width: `${getColSize(col.name)}px` }"
+                  @click.stop="openEditRowSheet(row.original)"
                 >
                   <EditableCell
                     :column="col"
                     :display-value="row.original.data[col.name]"
-                    :model-value="editingCell?.itemId === row.original.id && editingCell?.colName === col.name ? editValue : row.original.data[col.name]"
-                    :editing="isEditing(row.original.id, col.name)"
-                    :saving="isSaving && isEditing(row.original.id, col.name)"
-                    @update:model-value="editValue = $event"
-                    @start-edit="startEdit(row.original, col)"
-                    @blur="handleBlur"
-                    @keydown="(e) => handleKeydown(e, row.original, col, row.index, orderedColumns.indexOf(col))"
-                    @save="saveEdit(true)"
+                    :model-value="row.original.data[col.name]"
+                    :editing="false"
                   />
                 </TableCell>
-                <!-- Empty cell for add column -->
-                <TableCell class-name="px-2 py-2 w-40"></TableCell>
+                <TableCell v-if="!isColumnStructureLocked" class-name="px-2 py-2 w-40"></TableCell>
                 <TableCell class-name="px-4 py-2 w-16">
                   <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
@@ -332,8 +279,8 @@
       :open="isAddRowSheetOpen"
       :columns="orderedColumns"
       :saving="isSavingNewRow"
+      :row-save="handleSheetSave"
       @update:open="isAddRowSheetOpen = $event"
-      @save="handleSheetSave"
     />
 
     <!-- Edit Row Side Panel -->
@@ -349,7 +296,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import {
   useVueTable,
   getCoreRowModel,
@@ -364,18 +311,13 @@ import {
   FileText,
   ChevronLeft,
   ChevronRight,
-  MousePointer,
   Trash2,
-  Undo2,
-  Redo2,
   EyeOff,
   X,
-  Maximize2,
   Plus,
 } from 'lucide-vue-next'
 import type { Directory, DirectoryItem, DirectoryColumn } from '~/types/directories'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '~/components/ui/table'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip'
 import { pluralize } from '~/utils/pluralize'
 import { getColumnWidth as getColWidth, isLongTextField } from '~/utils/directory-helpers'
 
@@ -391,6 +333,7 @@ const props = defineProps<{
   items: DirectoryItem[]
   loading?: boolean
   onUpdateItem?: (itemId: string, data: Record<string, any>) => Promise<void>
+  onCreateItem?: (data: Record<string, any>) => Promise<void>
 }>()
 
 const emit = defineEmits<{
@@ -406,26 +349,6 @@ const emit = defineEmits<{
   (e: 'deleteColumn', columnName: string): void
   (e: 'updateColumns', columns: DirectoryColumn[]): void
 }>()
-
-// --- Inline editing state ---
-const editingCell = ref<{ itemId: string; colName: string } | null>(null)
-const editValue = ref<any>('')
-const originalValue = ref<any>('')
-const isSaving = ref(false)
-const blurTimeoutId = ref<ReturnType<typeof setTimeout> | null>(null)
-
-
-// --- Undo/Redo history ---
-type EditHistoryEntry = {
-  itemId: string
-  colName: string
-  oldValue: any
-  newValue: any
-  timestamp: number
-}
-const editHistory = ref<EditHistoryEntry[]>([])
-const redoStack = ref<EditHistoryEntry[]>([])
-const MAX_HISTORY = 50
 
 // --- Hidden columns ---
 const hiddenColumnNames = ref<Set<string>>(new Set())
@@ -444,6 +367,17 @@ const globalFilter = ref('')
 const rowSelection = ref<Record<string, boolean>>({})
 
 const columns = computed(() => props.directory.columns || [])
+
+/** Во вкладке «Справочники» только шаблон custom уходит на «Таблицы» с редактируемыми колонками; остальное — фиксированные столбцы без меню в заголовке */
+const isColumnStructureLocked = computed(() => props.directory.template !== 'custom')
+
+/** Ширина колонок вне TanStack: чекбокс + опционально «Столбец» + колонка действий */
+const selectAndActionsChromeWidth = computed(() => {
+  const selectCol = 40 // w-10
+  const actionsCol = 64 // w-16
+  const addColumnCol = isColumnStructureLocked.value ? 0 : 160 // w-40
+  return selectCol + actionsCol + addColumnCol
+})
 
 const visibleColumns = computed(() =>
   columns.value.filter(c => !hiddenColumnNames.value.has(c.name))
@@ -565,6 +499,7 @@ const visiblePages = computed(() => {
 
 // --- Drag & Drop ---
 const handleDragStart = (event: DragEvent, index: number) => {
+  if (isColumnStructureLocked.value) return
   dragIndex.value = index
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move'
@@ -572,7 +507,13 @@ const handleDragStart = (event: DragEvent, index: number) => {
   }
 }
 
+const onDragEnterHeader = (index: number) => {
+  if (isColumnStructureLocked.value) return
+  dragOverIndex.value = index
+}
+
 const handleDragOver = (event: DragEvent, _index: number) => {
+  if (isColumnStructureLocked.value) return
   event.preventDefault()
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = 'move'
@@ -582,6 +523,7 @@ const handleDragOver = (event: DragEvent, _index: number) => {
 const handleDragLeave = () => {}
 
 const handleDrop = (event: DragEvent, targetIndex: number) => {
+  if (isColumnStructureLocked.value) return
   event.preventDefault()
   if (dragIndex.value === null || dragIndex.value === targetIndex) {
     handleDragEnd()
@@ -601,7 +543,6 @@ const handleDragEnd = () => {
 
 // --- Add Row Sheet ---
 const openAddRowSheet = () => {
-  if (editingCell.value) cancelEdit()
   isAddRowSheetOpen.value = true
 }
 
@@ -609,8 +550,11 @@ const handleSheetSave = async (data: Record<string, any>) => {
   if (isSavingNewRow.value) return
   isSavingNewRow.value = true
   try {
-    emit('create', data)
-    await new Promise(resolve => setTimeout(resolve, 200))
+    if (props.onCreateItem) {
+      await props.onCreateItem(data)
+    } else {
+      emit('create', data)
+    }
   } finally {
     isSavingNewRow.value = false
   }
@@ -618,7 +562,6 @@ const handleSheetSave = async (data: Record<string, any>) => {
 
 // --- Edit Row Sheet ---
 const openEditRowSheet = (item: DirectoryItem) => {
-  if (editingCell.value) cancelEdit()
   editRowSheetItem.value = item
   isEditRowSheetOpen.value = true
 }
@@ -637,142 +580,13 @@ const handleEditRowSave = async (itemId: string, data: Record<string, any>) => {
   }
 }
 
-// --- Inline Editing ---
-const isEditing = (itemId: string, colName: string) =>
-  editingCell.value?.itemId === itemId && editingCell.value?.colName === colName
-
-const startEdit = (item: DirectoryItem, col: DirectoryColumn) => {
-  // Cancel pending blur timeout to prevent it from cancelling the new edit
-  if (blurTimeoutId.value) {
-    clearTimeout(blurTimeoutId.value)
-    blurTimeoutId.value = null
-  }
-  // Save and close previous cell if it has changes
-  if (editingCell.value) {
-    saveEdit(true)
-  }
-  editingCell.value = { itemId: item.id, colName: col.name }
-  const rawValue = item.data[col.name]
-  editValue.value = rawValue ?? ''
-  originalValue.value = rawValue ?? ''
-}
-
-const cancelEdit = () => {
-  editingCell.value = null
-  editValue.value = ''
-  originalValue.value = ''
-}
-
-const saveEdit = async (shouldClose = false) => {
-  if (!editingCell.value || isSaving.value) return
-  const { itemId, colName } = editingCell.value
-  const newValue = editValue.value
-  
-  if (newValue === originalValue.value) { 
-    if (shouldClose) cancelEdit()
-    return 
-  }
-  
-  const item = props.items.find(i => i.id === itemId)
-  if (!item) { 
-    if (shouldClose) cancelEdit()
-    return 
-  }
-  
-  const cleanValue = newValue === '' ? null : newValue
-  const updatedData = { ...item.data, [colName]: cleanValue }
-  const prevOriginal = originalValue.value
-
-  // 1. Показать индикатор сохранения
-  isSaving.value = true
-
-  try {
-    // 2. Отправить на сервер и дождаться ответа
-    if (props.onUpdateItem) {
-      await props.onUpdateItem(itemId, updatedData)
-    } else {
-      emit('update', itemId, updatedData)
-    }
-
-    // 3. Записать в undo-историю
-    pushHistory({
-      itemId,
-      colName,
-      oldValue: prevOriginal,
-      newValue: cleanValue,
-      timestamp: Date.now(),
-    })
-  } finally {
-    isSaving.value = false
-  }
-
-  // 4. Закрыть редактирование после успешного сохранения
-  if (shouldClose) {
-    cancelEdit()
-  }
-}
-
-const handleBlur = () => {
-  if (blurTimeoutId.value) clearTimeout(blurTimeoutId.value)
-  // Capture which cell is blurring
-  const blurringCell = editingCell.value ? { ...editingCell.value } : null
-  blurTimeoutId.value = setTimeout(() => {
-    blurTimeoutId.value = null
-    // Only save if the same cell is still being edited
-    if (
-      editingCell.value && blurringCell &&
-      editingCell.value.itemId === blurringCell.itemId &&
-      editingCell.value.colName === blurringCell.colName
-    ) {
-      saveEdit(true) // Закрыть редактирование при blur
-    }
-  }, 150)
-}
-
-const handleKeydown = async (
-  event: KeyboardEvent, 
-  item: DirectoryItem, 
-  col: DirectoryColumn, 
-  rowIndex: number, 
-  colIndex: number
-) => {
-  if (event.key === 'Escape') { event.preventDefault(); cancelEdit(); return }
-  
-  if (event.key === 'Enter' && !event.shiftKey) { 
-    event.preventDefault()
-    await saveEdit(true)
-    return 
-  }
-  
-  if (event.key === 'Tab') {
-    event.preventDefault()
-    await saveEdit(true)
-    
-    nextTick(() => {
-      const cols = orderedColumns.value
-      const rows = table.getRowModel().rows
-      
-      let nextColIndex = event.shiftKey ? colIndex - 1 : colIndex + 1
-      let nextRowIndex = rowIndex
-      
-      if (nextColIndex >= cols.length) { nextColIndex = 0; nextRowIndex = rowIndex + 1 }
-      else if (nextColIndex < 0) { nextColIndex = cols.length - 1; nextRowIndex = rowIndex - 1 }
-      
-      if (nextRowIndex >= 0 && nextRowIndex < rows.length) {
-        const nextItem = rows[nextRowIndex].original
-        const nextCol = cols[nextColIndex]
-        if (nextItem && nextCol) startEdit(nextItem, nextCol)
-      }
-    })
-  }
-}
-
 // --- Column Actions ---
 const openColumnSettings = (_column: DirectoryColumn) => {
   emit('settings')
 }
 
 const hideColumn = (column: DirectoryColumn) => {
+  if (isColumnStructureLocked.value) return
   hiddenColumnNames.value.add(column.name)
 }
 
@@ -781,76 +595,37 @@ const showAllColumns = () => {
 }
 
 const deleteColumn = (column: DirectoryColumn) => {
+  if (isColumnStructureLocked.value) return
   if (columns.value.length <= 1) return
   emit('deleteColumn', column.name)
 }
 
-// --- Undo / Redo ---
-const pushHistory = (entry: EditHistoryEntry) => {
-  editHistory.value.push(entry)
-  if (editHistory.value.length > MAX_HISTORY) editHistory.value.shift()
-  redoStack.value = []
-}
-
-const canUndo = computed(() => editHistory.value.length > 0)
-const canRedo = computed(() => redoStack.value.length > 0)
-
-const undo = async () => {
-  const entry = editHistory.value.pop()
-  if (!entry) return
-  redoStack.value.push(entry)
-  const item = props.items.find(i => i.id === entry.itemId)
-  if (!item) return
-  const restoredData = { ...item.data, [entry.colName]: entry.oldValue }
-  if (props.onUpdateItem) {
-    await props.onUpdateItem(entry.itemId, restoredData)
-  } else {
-    emit('update', entry.itemId, restoredData)
-  }
-}
-
-const redo = async () => {
-  const entry = redoStack.value.pop()
-  if (!entry) return
-  editHistory.value.push(entry)
-  const item = props.items.find(i => i.id === entry.itemId)
-  if (!item) return
-  const reappliedData = { ...item.data, [entry.colName]: entry.newValue }
-  if (props.onUpdateItem) {
-    await props.onUpdateItem(entry.itemId, reappliedData)
-  } else {
-    emit('update', entry.itemId, reappliedData)
-  }
-}
-
 // --- Row Actions ---
-const duplicateRow = (item: DirectoryItem) => {
-  emit('create', { ...item.data })
+const duplicateRow = async (item: DirectoryItem) => {
+  const data = { ...item.data }
+  if (props.onCreateItem) {
+    await props.onCreateItem(data)
+  } else {
+    emit('create', data)
+  }
 }
 
 // --- Global hotkeys ---
 const handleGlobalKeydown = (e: KeyboardEvent) => {
   const isMod = e.ctrlKey || e.metaKey
+  const sheetOrModalOpen = isAddRowSheetOpen.value || isEditRowSheetOpen.value
 
-  // Ctrl+Z → undo
-  if (isMod && e.key === 'z' && !e.shiftKey) {
-    if (canUndo.value) { e.preventDefault(); undo() }
+  if (isMod && e.key === 'n' && !sheetOrModalOpen) {
+    e.preventDefault()
+    openAddRowSheet()
     return
   }
-  // Ctrl+Shift+Z or Ctrl+Y → redo
-  if ((isMod && e.key === 'z' && e.shiftKey) || (isMod && e.key === 'y')) {
-    if (canRedo.value) { e.preventDefault(); redo() }
-    return
-  }
-  // Ctrl+N → new row  (only when table is focused, not in input)
-  if (isMod && e.key === 'n' && !isAddRowSheetOpen.value && !editingCell.value) {
-    e.preventDefault(); openAddRowSheet()
-    return
-  }
-  // Delete / Backspace on selected rows
-  if ((e.key === 'Delete' || e.key === 'Backspace') && !editingCell.value && !isAddRowSheetOpen.value) {
+  if ((e.key === 'Delete' || e.key === 'Backspace') && !sheetOrModalOpen) {
     const ids = selectedRowIds.value
-    if (ids.length > 0) { e.preventDefault(); emit('deleteSelected', ids) }
+    if (ids.length > 0) {
+      e.preventDefault()
+      emit('deleteSelected', ids)
+    }
   }
 }
 
@@ -860,7 +635,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
-  if (blurTimeoutId.value) clearTimeout(blurTimeoutId.value)
 })
 
 // Reset selection when items change
@@ -868,6 +642,4 @@ watch(() => props.items, () => {
   rowSelection.value = {}
 }, { deep: true })
 
-// Cancel edit when page changes
-watch(() => table.getState().pagination.pageIndex, () => { cancelEdit() })
 </script>

@@ -16,7 +16,6 @@ export type DirectQuestion = {
   id: string
   agent_id: string
   title: string
-  search_title: string
   content: string
   order_index?: number
   tags: string[]
@@ -112,10 +111,16 @@ export type KnowledgeFileItem = {
   type: KnowledgeItemType
   title: string
   meta_tags: string[]
+  chunk_size_chars?: number | null
+  chunk_overlap_chars?: number | null
+  /** Только для файлов: число чанков в векторном индексе (0 до/после переиндексации). */
+  chunks_count?: number | null
   content: string
   is_enabled: boolean
   vector_status: KnowledgeVectorStatus
   order_index: number
+  /** ISO-8601: когда последний раз успешно построили векторный индекс (файлы). */
+  indexed_at?: string | null
   created_at?: string
   updated_at?: string
 }
@@ -157,6 +162,21 @@ export type KnowledgeIndexJobStateResponse = {
   status: KnowledgeIndexJobStatus
   progress?: number
   stage?: string
+  chunks_total?: number | null
+  chunks_done?: number | null
+  indexed_at?: string | null
   error?: string | null
   vector_status?: KnowledgeVectorStatus
+}
+
+/** GET /knowledge/files/{file_id}/index-status — без поля status, зато есть vector_status файла */
+export type KnowledgeFileIndexStatusResponse = {
+  file_id: string
+  vector_status: KnowledgeVectorStatus
+  progress: number
+  chunks_count?: number
+  indexed_at?: string | null
+  job_id?: string | null
+  stage?: string | null
+  error?: string | null
 }

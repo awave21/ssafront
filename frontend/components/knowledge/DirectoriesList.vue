@@ -4,7 +4,7 @@
     <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
       <button
         @click="$emit('create')"
-        class="inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-indigo-600 px-5 text-sm font-bold text-white transition-colors hover:bg-indigo-700"
+        class="inline-flex h-10 shrink-0 self-start items-center gap-2 whitespace-nowrap rounded-xl bg-indigo-600 px-5 text-sm font-bold text-white transition-colors hover:bg-indigo-700"
       >
         <Plus class="w-4 h-4" />
         Добавить
@@ -59,15 +59,9 @@
           <BookOpen class="h-8 w-8 text-slate-400" />
         </div>
         <h3 class="text-lg font-bold text-slate-900">Справочников пока нет</h3>
-        <p class="text-slate-500 mt-2 mb-6">
-          Создайте справочник для хранения FAQ, каталога услуг или другой структурированной информации
+        <p class="text-slate-500 mt-2">
+          Создайте справочник для хранения FAQ, каталога услуг или другой структурированной информации.
         </p>
-        <button
-          @click="$emit('create')"
-          class="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-bold text-white transition-colors hover:bg-indigo-700"
-        >
-          Добавить
-        </button>
       </div>
     </div>
 
@@ -80,7 +74,7 @@
     </div>
 
     <!-- Directories Grid -->
-    <div v-else class="grid max-w-full gap-4">
+    <div v-else class="flex w-full min-w-0 flex-col gap-4">
       <DirectoryCard
         v-for="dir in filteredDirectories"
         :key="dir.id"
@@ -88,6 +82,7 @@
         @click="$emit('select', dir)"
         @toggle="(enabled) => $emit('toggle', dir.id, enabled)"
         @settings="$emit('settings', dir)"
+        @delete="$emit('delete', dir)"
       />
     </div>
   </div>
@@ -110,6 +105,7 @@ defineEmits<{
   (e: 'select', directory: Directory): void
   (e: 'toggle', id: string, enabled: boolean): void
   (e: 'settings', directory: Directory): void
+  (e: 'delete', directory: Directory): void
   (e: 'retry'): void
 }>()
 

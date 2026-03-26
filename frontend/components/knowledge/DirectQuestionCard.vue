@@ -1,10 +1,12 @@
 <template>
   <div
-    class="group relative min-w-0 max-w-full cursor-pointer overflow-hidden rounded-3xl border border-slate-100 bg-white p-5 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-shadow duration-300 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)]"
+    class="group relative min-w-0 max-w-full cursor-pointer overflow-hidden rounded-3xl border border-slate-100 bg-white p-5 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-shadow duration-500 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)]"
     @click="$emit('click')"
   >
-    <!-- Без scale/transform при hover: иначе карточка «прыгает» и клик по корзине промахивается -->
-    <div class="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-indigo-500/5" />
+    <!-- Только фон масштабируется; без translate у карточки — клик по корзине не промахивается -->
+    <div
+      class="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-indigo-500/5 transition-transform duration-700 group-hover:scale-150"
+    />
     <div class="flex items-center justify-between gap-4">
       <div class="flex items-center gap-2 min-w-0 flex-1 sm:gap-4">
         <button

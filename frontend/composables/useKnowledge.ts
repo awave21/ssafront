@@ -189,31 +189,6 @@ export const useKnowledge = (agentId: string) => {
     }
   }
 
-  const translateSearchTitle = async (text: string): Promise<string> => {
-    const sourceText = text.trim()
-    if (!sourceText) return ''
-
-    try {
-      const response = await apiFetch<{ translated_text: string }>(
-        `/agents/${agentId}/knowledge/direct-questions/translate-search-title`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token.value}`,
-            'Content-Type': 'application/json'
-          },
-          body: {
-            text: sourceText,
-            target_language_code: 'en'
-          }
-        }
-      )
-      return String(response?.translated_text || '').trim()
-    } catch (err: any) {
-      throw new Error(getReadableErrorMessage(err, 'Не удалось сгенерировать search_title'))
-    }
-  }
-
   const importDirectQuestions = async (
     file: File,
     options: DirectQuestionsImportOptions = {}
@@ -251,7 +226,6 @@ export const useKnowledge = (agentId: string) => {
     deleteDirectQuestion,
     toggleDirectQuestion,
     reorderDirectQuestions,
-    translateSearchTitle,
     importDirectQuestions
   }
 }

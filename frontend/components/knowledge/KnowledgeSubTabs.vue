@@ -3,12 +3,14 @@
     <button
       v-for="tab in tabs"
       :key="tab.id"
-      @click="$emit('update:modelValue', tab.id)"
+      @click="!tab.disabled && $emit('update:modelValue', tab.id)"
+      :disabled="tab.disabled"
       class="px-4 py-2.5 text-sm font-medium transition-all relative"
       :class="[
         modelValue === tab.id
           ? 'text-indigo-600'
-          : 'text-slate-500 hover:text-slate-700'
+          : 'text-slate-500 hover:text-slate-700',
+        tab.disabled ? 'opacity-50 cursor-not-allowed hover:text-slate-500' : ''
       ]"
     >
       <span class="flex items-center gap-2">
@@ -38,6 +40,7 @@ type SubTab = {
   id: string
   label: string
   count?: number
+  disabled?: boolean
 }
 
 defineProps<{

@@ -129,6 +129,8 @@ const props = defineProps<{
   open: boolean
   columns: DirectoryColumn[]
   saving?: boolean
+  /** Если задан — вызывается с await (сохранение на сервер); иначе emit('save') */
+  rowSave?: (data: Record<string, any>) => void | Promise<void>
 }>()
 
 const emit = defineEmits<{
@@ -167,7 +169,7 @@ const focusFirst = () => {
   })
 }
 
-const save = () => {
+const save = async () => {
   if (!hasData.value || props.saving) return
 
   const cleanData: Record<string, any> = {}
@@ -177,10 +179,18 @@ const save = () => {
     }
   })
 
-  emit('save', cleanData)
-  savedCount.value++
-  resetForm()
-  focusFirst()
+  try {
+    if (props.rowSave) {
+      await props.rowSave(cleanData)
+    } else {
+      emit('save', cleanData)
+    }
+    savedCount.value++
+    resetForm()
+    focusFirst()
+  } catch {
+    // Ошибку показывает родитель (toast)
+  }
 }
 
 const close = () => {

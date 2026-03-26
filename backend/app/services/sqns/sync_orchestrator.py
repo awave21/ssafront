@@ -23,6 +23,10 @@ from app.services.sqns.sync_handlers import (
 )
 
 logger = structlog.get_logger(__name__)
+_VISITS_HISTORY_STATE_KEY = "history_backfill"
+_VISITS_HISTORY_START_DATE = date(1970, 1, 1)
+_VISITS_HISTORY_CHUNK_DAYS = 90
+_VISITS_RECENT_WINDOW_SYNC_STATE_KEY = "recent_window_resynced"
 
 
 class SqnsSyncOrchestrator:
@@ -110,20 +114,32 @@ class SqnsSyncOrchestrator:
             )
             await self.db.commit()
 
-            visits_modificate = await self.cursor_store.get_modificate("visits")
-            visits_date_from, visits_date_till = self._resolve_visits_range()
+            visits_cursor = await self.cursor_store.get("visits")
+            visits_cursor_state = visits_cursor.state if visits_cursor is not None and isinstance(visits_cursor.state, dict) else {}
+            visits_modificate = visits_cursor.modificate_value if visits_cursor is not None else None
+            visits_date_from, visits_date_till = self._resolve_visits_incremental_range()
+            # После релизов с изменением парсинга визитов делаем один полный ресинк текущего окна,
+            # чтобы обновить ранее сохраненные записи, которые могли не попадать в modificate-режим.
+            force_recent_window_resync = not bool(visits_cursor_state.get(_VISITS_RECENT_WINDOW_SYNC_STATE_KEY))
             visits_result = await visits_handler.sync(
                 date_from=visits_date_from.isoformat(),
                 date_till=visits_date_till.isoformat(),
-                modificate=visits_modificate,
+                modificate=None if force_recent_window_resync else visits_modificate,
             )
-            counters["visits_synced"] = int(visits_result.get("visits_synced", 0))
+            visits_backfill_synced, visits_state = await self._sync_visits_history_backfill(
+                visits_handler=visits_handler,
+                visits_cursor_state=visits_cursor_state,
+                recent_date_from=visits_date_from,
+            )
+            visits_state[_VISITS_RECENT_WINDOW_SYNC_STATE_KEY] = True
+            counters["visits_synced"] = int(visits_result.get("visits_synced", 0)) + visits_backfill_synced
             await self.cursor_store.upsert(
                 entity="visits",
                 modificate_value=int(started_at.timestamp()),
                 date_from=visits_date_from,
                 date_till=visits_date_till,
                 last_success_at=started_at,
+                state=visits_state,
             )
             await self.db.commit()
 
@@ -247,8 +263,98 @@ class SqnsSyncOrchestrator:
         await self.db.execute(stmt)
         await self.db.commit()
 
+    async def _sync_visits_history_backfill(
+        self,
+        *,
+        visits_handler: SqnsVisitsSyncHandler,
+        visits_cursor_state: dict[str, Any] | None,
+        recent_date_from: date,
+    ) -> tuple[int, dict[str, Any]]:
+        state: dict[str, Any] = dict(visits_cursor_state or {})
+        history_state = state.get(_VISITS_HISTORY_STATE_KEY)
+        if not isinstance(history_state, dict):
+            history_state = {}
+
+        history_status = str(history_state.get("status") or "in_progress")
+        if history_status == "completed":
+            return 0, state
+
+        history_start_date = self._resolve_visits_history_start_date()
+        chunk_days = self._resolve_visits_history_chunk_days()
+        next_date_till = self._parse_state_date(history_state.get("next_date_till")) or recent_date_from
+
+        if next_date_till <= history_start_date:
+            history_state.update(
+                status="completed",
+                next_date_till=history_start_date.isoformat(),
+                history_start_date=history_start_date.isoformat(),
+                chunk_days=chunk_days,
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            state[_VISITS_HISTORY_STATE_KEY] = history_state
+            return 0, state
+
+        backfill_date_from = max(history_start_date, next_date_till - timedelta(days=chunk_days))
+        backfill_date_till = next_date_till
+
+        logger.info(
+            "sqns_sync_visits_history_backfill_started",
+            agent_id=str(self.agent_id),
+            date_from=backfill_date_from.isoformat(),
+            date_till=backfill_date_till.isoformat(),
+            chunk_days=chunk_days,
+            history_start_date=history_start_date.isoformat(),
+        )
+        backfill_result = await visits_handler.sync(
+            date_from=backfill_date_from.isoformat(),
+            date_till=backfill_date_till.isoformat(),
+            modificate=None,
+        )
+        visits_synced = int(backfill_result.get("visits_synced", 0))
+        next_backfill_date_till = backfill_date_from
+        is_completed = next_backfill_date_till <= history_start_date
+
+        history_state.update(
+            status="completed" if is_completed else "in_progress",
+            next_date_till=next_backfill_date_till.isoformat(),
+            history_start_date=history_start_date.isoformat(),
+            chunk_days=chunk_days,
+            last_range_from=backfill_date_from.isoformat(),
+            last_range_till=backfill_date_till.isoformat(),
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        state[_VISITS_HISTORY_STATE_KEY] = history_state
+
+        logger.info(
+            "sqns_sync_visits_history_backfill_completed",
+            agent_id=str(self.agent_id),
+            visits_synced=visits_synced,
+            next_date_till=next_backfill_date_till.isoformat(),
+            status=history_state["status"],
+        )
+        return visits_synced, state
+
     @staticmethod
-    def _resolve_visits_range() -> tuple[date, date]:
+    def _parse_state_date(value: Any) -> date | None:
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return date.fromisoformat(value)
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _resolve_visits_history_start_date() -> date:
+        return _VISITS_HISTORY_START_DATE
+
+    @staticmethod
+    def _resolve_visits_history_chunk_days() -> int:
+        return _VISITS_HISTORY_CHUNK_DAYS
+
+    @staticmethod
+    def _resolve_visits_incremental_range() -> tuple[date, date]:
         settings = get_settings()
         window_days = min(max(settings.sqns_sync_visits_window_days, 1), 365)
         today = datetime.now(timezone.utc).date()

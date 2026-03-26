@@ -33,11 +33,11 @@
         :chart-options="lossChartOptions"
       />
       <ChartCard
-        title="Доходность на 1 запись"
-        subtitle="Средняя выручка на каждую созданную запись"
+        title="Конверсия первичных"
+        subtitle="Доля дошедших среди первичных записей"
         :icon="Zap"
         chart-type="line"
-        :chart-data="revenuePerBookingChartData"
+        :chart-data="primaryConversionChartData"
       />
     </div>
 
@@ -166,16 +166,16 @@ const lossChartOptions = {
   }
 }
 
-const revenuePerBookingChartData = computed(() => {
+const primaryConversionChartData = computed(() => {
   const points = props.timeseries?.points || []
   return {
     labels: labels.value,
     datasets: [
       {
-        label: 'Выручка на запись, ₽',
+        label: 'Конверсия первичных, %',
         data: points.map(point => {
-          if (point.visits_total === 0) return 0
-          return Math.round(point.revenue_total / point.visits_total)
+          if (point.primary_visits === 0) return 0
+          return Math.round((point.primary_arrived / point.primary_visits) * 1000) / 10
         }),
         borderColor: '#8b5cf6', // Violet 500
         backgroundColor: 'rgba(139, 92, 246, 0.1)',

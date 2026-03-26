@@ -25,8 +25,8 @@
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" class="space-y-10 outline-none">
-          <AnalyticsFiltersBar
+        <TabsContent value="overview" class="outline-none">
+          <AnalyticsDashboardSection
             :filters="filters"
             :agents="agentOptions"
             :channels="availableChannels"
@@ -35,17 +35,18 @@
             @update-filters="updateFilters"
             @refresh="refresh"
             @reset="resetFilters"
-          />
-          <AnalyticsKpiGrid 
-            :overview="overview" 
-            :previous-overview="previousOverview" 
-            :timeseries="timeseries"
-            :loading="pending" 
-          />
+          >
+            <AnalyticsKpiGrid
+              :overview="overview"
+              :previous-overview="previousOverview"
+              :timeseries="timeseries"
+              :loading="pending"
+            />
+          </AnalyticsDashboardSection>
         </TabsContent>
 
-        <TabsContent value="dynamics" class="space-y-10 outline-none">
-          <AnalyticsFiltersBar
+        <TabsContent value="dynamics" class="outline-none">
+          <AnalyticsDashboardSection
             :filters="filters"
             :agents="agentOptions"
             :channels="availableChannels"
@@ -54,12 +55,13 @@
             @update-filters="updateFilters"
             @refresh="refresh"
             @reset="resetFilters"
-          />
-          <AnalyticsTimeseries :timeseries="timeseries" :loading="pending" />
+          >
+            <AnalyticsTimeseries :timeseries="timeseries" :loading="pending" />
+          </AnalyticsDashboardSection>
         </TabsContent>
 
-        <TabsContent value="breakdown" class="space-y-10 outline-none">
-          <AnalyticsFiltersBar
+        <TabsContent value="breakdown" class="outline-none">
+          <AnalyticsDashboardSection
             :filters="filters"
             :agents="agentOptions"
             :channels="availableChannels"
@@ -68,13 +70,14 @@
             @update-filters="updateFilters"
             @refresh="refresh"
             @reset="resetFilters"
-          />
-          <AnalyticsBreakdown
-            :channel-breakdown="channelBreakdown"
-            :tag-breakdown="tagBreakdown"
-            :overview="overview"
-            :loading="pending"
-          />
+          >
+            <AnalyticsBreakdown
+              :channel-breakdown="channelBreakdown"
+              :tag-breakdown="tagBreakdown"
+              :overview="overview"
+              :loading="pending"
+            />
+          </AnalyticsDashboardSection>
         </TabsContent>
 
         <TabsContent value="services" class="space-y-10 outline-none">
@@ -149,7 +152,7 @@ definePageMeta({
 
 import { computed, onMounted, ref } from 'vue'
 import AnalyticsBreakdown from '~/components/analytics/AnalyticsBreakdown.vue'
-import AnalyticsFiltersBar from '~/components/analytics/AnalyticsFiltersBar.vue'
+import AnalyticsDashboardSection from '~/components/analytics/AnalyticsDashboardSection.vue'
 import AnalyticsKpiGrid from '~/components/analytics/AnalyticsKpiGrid.vue'
 import ServicesFilters from '~/components/analytics/ServicesFilters.vue'
 import ServicesMetricsTable from '~/components/analytics/ServicesMetricsTable.vue'

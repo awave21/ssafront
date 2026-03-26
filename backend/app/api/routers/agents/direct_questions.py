@@ -15,8 +15,6 @@ from app.schemas.auth import AuthContext
 from app.schemas.direct_question import (
     DirectQuestionCreate,
     DirectQuestionRead,
-    DirectQuestionTranslateRequest,
-    DirectQuestionTranslateResponse,
     DirectQuestionToggle,
     DirectQuestionUpdate,
 )
@@ -24,9 +22,9 @@ from app.services.direct_questions import (
     create_direct_question,
     delete_direct_question,
     list_direct_questions,
+    reembed_agent_direct_questions,
     update_direct_question,
 )
-from app.services.yandex_translate import YandexTranslateError, translate_text
 
 router = APIRouter()
 
@@ -130,6 +128,22 @@ async def remove_direct_question(
     await delete_direct_question(db, question=question)
 
 
+@router.post("/reembed", status_code=status.HTTP_200_OK)
+async def post_reembed_direct_questions(
+    agent_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Принудительно пересчитать embeddings для всех прямых вопросов агента."""
+    await get_agent_or_404(agent_id, db, user)
+    result = await reembed_agent_direct_questions(
+        db,
+        tenant_id=user.tenant_id,
+        agent_id=agent_id,
+    )
+    return result
+
+
 @router.patch("/{direct_question_id}/toggle", response_model=DirectQuestionRead)
 async def patch_direct_question_toggle(
     agent_id: UUID,
@@ -151,25 +165,3 @@ async def patch_direct_question_toggle(
     return DirectQuestionRead.model_validate(question)
 
 
-@router.post("/translate-search-title", response_model=DirectQuestionTranslateResponse)
-async def translate_search_title(
-    agent_id: UUID,
-    payload: DirectQuestionTranslateRequest,
-    db: AsyncSession = Depends(get_db),
-    user: AuthContext = Depends(require_scope("agents:write")),
-) -> DirectQuestionTranslateResponse:
-    await get_agent_or_404(agent_id, db, user)
-    try:
-        translated = await translate_text(
-            text=payload.text,
-            source_language_code=payload.source_language_code,
-            target_language_code=payload.target_language_code,
-        )
-    except YandexTranslateError as exc:
-        raise _api_error("translation_error", str(exc), status.HTTP_502_BAD_GATEWAY) from exc
-    return DirectQuestionTranslateResponse(
-        translated_text=translated.text,
-        source_text=payload.text,
-        source_language_code=translated.detected_language_code or payload.source_language_code,
-        target_language_code=payload.target_language_code,
-    )

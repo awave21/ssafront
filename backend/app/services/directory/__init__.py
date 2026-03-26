@@ -7,6 +7,7 @@ Re-exports для обратной совместимости:
 
 from app.services.directory.service import (
     get_agent_directory_tools,
+    rerank_results,
     search_directory_items,
     update_directory_embeddings,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "get_agent_directory_tools",
     "import_file_data",
     "parse_file_preview",
+    "rerank_results",
     "search_directory_items",
     "suggest_column_mapping",
     "update_directory_embeddings",

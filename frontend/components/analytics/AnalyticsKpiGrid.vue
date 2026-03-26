@@ -164,13 +164,22 @@ const cards = computed(() => {
       icon: UserCheck
     },
     {
-      id: 'arrived_primary',
-      title: 'Первичные',
-      value: formatInt(value.arrived_primary),
-      diff: calculateDiff(value.arrived_primary, prev?.arrived_primary),
-      sparklineData: [],
-      description: 'Первичные пациенты, которые пришли',
+      id: 'primary_visits',
+      title: 'Первичные записи',
+      value: formatInt(value.primary_visits),
+      diff: calculateDiff(value.primary_visits, prev?.primary_visits),
+      sparklineData: sparklinePoints.value.map(p => p.primary_visits),
+      description: 'Первичные обращения в клинику',
       icon: UserPlus
+    },
+    {
+      id: 'primary_arrived',
+      title: 'Первичные дошедшие',
+      value: formatInt(value.primary_arrived),
+      diff: calculateDiff(value.primary_arrived, prev?.primary_arrived),
+      sparklineData: sparklinePoints.value.map(p => p.primary_arrived),
+      description: 'Первичные пациенты, которые дошли',
+      icon: Users
     },
     {
       id: 'repeat_total',
@@ -182,15 +191,6 @@ const cards = computed(() => {
       icon: RefreshCw
     },
     {
-      id: 'bookings_from_primary',
-      title: 'От первичных',
-      value: formatInt(value.bookings_from_primary),
-      diff: calculateDiff(value.bookings_from_primary, prev?.bookings_from_primary),
-      sparklineData: [],
-      description: 'Все записи от первичных',
-      icon: Users
-    },
-    {
       id: 'bookings_from_existing',
       title: 'Из базы',
       value: formatInt(value.bookings_from_existing_patients),
@@ -200,12 +200,12 @@ const cards = computed(() => {
       icon: Database
     },
     {
-      id: 'conversion',
-      title: 'Конверсия',
-      value: formatPercent(value.conversion_arrived_to_booked_pct),
-      diff: calculateDiff(value.conversion_arrived_to_booked_pct, prev?.conversion_arrived_to_booked_pct),
-      sparklineData: sparklinePoints.value.map(p => p.visits_total > 0 ? (p.arrived_total / p.visits_total) * 100 : 0),
-      description: 'Конверсия из записи в приход',
+      id: 'conversion_primary',
+      title: 'Конверсия первичных',
+      value: formatPercent(value.conversion_primary_arrived_pct),
+      diff: calculateDiff(value.conversion_primary_arrived_pct, prev?.conversion_primary_arrived_pct),
+      sparklineData: sparklinePoints.value.map(p => p.primary_visits > 0 ? (p.primary_arrived / p.primary_visits) * 100 : 0),
+      description: 'Конверсия из первичной записи в факт прихода',
       icon: Percent
     },
     {

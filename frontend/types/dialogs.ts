@@ -36,7 +36,7 @@ export type Dialog = {
 
 // Message types
 export type MessageRole = 'user' | 'agent' | 'manager'
-export type MessageType = 'text' | 'image' | 'voice'
+export type MessageType = 'text' | 'image' | 'voice' | 'tool_call' | 'tool_result'
 export type MessageStatus = 'sending' | 'sent' | 'failed' | 'streaming' | 'done'
 
 // Message entity
@@ -50,6 +50,11 @@ export type Message = {
   duration_seconds?: number         // for voice messages
   created_at: string
   error_message?: string            // for failed messages
+  // Tool call / tool result fields
+  tool_name?: string
+  tool_call_id?: string
+  args?: Record<string, unknown>
+  result?: unknown
 }
 
 // API request/response types

@@ -220,6 +220,7 @@ import {
   AlertCircle
 } from 'lucide-vue-next'
 import type { DirectoryColumn, ImportResult } from '~/types/directories'
+import { decodeCsvBuffer } from '~/utils/csvTextDecode'
 import {
   Dialog,
   DialogContent,
@@ -300,6 +301,99 @@ const handleDrop = (e: DragEvent) => {
   }
 }
 
+/** Нормализация заголовка колонки файла для сопоставления с полями справочника (в т.ч. Вопрос/Ответ). */
+const normalizeHeaderToken = (s: string) =>
+  s
+    .trim()
+    .toLowerCase()
+    .replace(/\u00a0/g, ' ')
+    .replace(/^["']|["']$/g, '')
+
+const QUESTION_HEADER_SYNONYMS = new Set([
+  'question',
+  'вопрос',
+  'q',
+  'faq',
+  'запрос',
+  'тема',
+  'query',
+  'prompt',
+  'название',
+  'title'
+])
+
+const ANSWER_HEADER_SYNONYMS = new Set([
+  'answer',
+  'ответ',
+  'a',
+  'solution',
+  'содержание',
+  'текст ответа',
+  'reply',
+  'response',
+  'описание',
+  'description',
+  'content',
+  'текст'
+])
+
+const suggestMappingForFileColumn = (fileCol: string): string | null => {
+  const token = normalizeHeaderToken(fileCol)
+  if (!token) return null
+
+  const exact = props.columns.find(
+    (c) => c.label.toLowerCase() === token || c.name.toLowerCase() === token
+  )
+  if (exact) return exact.name
+
+  for (const c of props.columns) {
+    if (c.name === 'question' && QUESTION_HEADER_SYNONYMS.has(token)) return 'question'
+    if (c.name === 'answer' && ANSWER_HEADER_SYNONYMS.has(token)) return 'answer'
+  }
+
+  return null
+}
+
+const parseSpreadsheetPreview = async (file: File): Promise<{
+  columns: string[]
+  rows_count: number
+  preview: string[][]
+}> => {
+  const XLSX = await import('xlsx')
+  const buffer = await file.arrayBuffer()
+  const workbook = XLSX.read(buffer, { type: 'array' })
+
+  const sheetName = workbook.SheetNames[0]
+  if (!sheetName) {
+    throw new Error('empty_workbook')
+  }
+
+  const sheet = workbook.Sheets[sheetName]
+  const rows = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    blankrows: false,
+    defval: '',
+    raw: false
+  }) as unknown[][]
+
+  if (!rows.length) {
+    return { columns: [], rows_count: 0, preview: [] }
+  }
+
+  const headerRow = (rows[0] ?? []).map((cell) => String(cell ?? '').trim())
+  const dataRows = rows.slice(1)
+  const columns = headerRow.map((h, i) => (h || `Колонка ${i + 1}`))
+  const preview = dataRows.slice(0, 3).map((row) =>
+    columns.map((_, colIdx) => String(row[colIdx] ?? '').trim())
+  )
+
+  return {
+    columns,
+    rows_count: dataRows.length,
+    preview
+  }
+}
+
 const processFile = async (file: File) => {
   uploadError.value = ''
   
@@ -318,29 +412,39 @@ const processFile = async (file: File) => {
   selectedFile.value = file
   
   try {
-    const text = await file.text()
-    const lines = text.split('\n').filter(line => line.trim())
-    const delimiter = text.includes(';') ? ';' : ','
-    
-    const columns = lines[0]?.split(delimiter).map(s => s.trim().replace(/^"|"$/g, '')) || []
-    const preview = lines.slice(1, 4).map(line => 
-      line.split(delimiter).map(s => s.trim().replace(/^"|"$/g, ''))
-    )
-    
+    let columns: string[]
+    let rows_count: number
+    let preview: string[][]
+
+    if (ext === '.xlsx' || ext === '.xls') {
+      ;({ columns, rows_count, preview } = await parseSpreadsheetPreview(file))
+    } else {
+      const text = decodeCsvBuffer(await file.arrayBuffer())
+      const lines = text.split(/\r?\n/).filter(line => line.trim())
+      const delimiter = text.includes(';') ? ';' : ','
+      
+      columns = lines[0]?.split(delimiter).map(s => s.trim().replace(/^"|"$/g, '')) || []
+      preview = lines.slice(1, 4).map(line => 
+        line.split(delimiter).map(s => s.trim().replace(/^"|"$/g, ''))
+      )
+      rows_count = Math.max(0, lines.length - 1)
+    }
+
+    if (!columns.length) {
+      uploadError.value = 'В файле не найдены колонки (нужна строка заголовков)'
+      selectedFile.value = null
+      return
+    }
+
     previewData.value = {
       columns,
-      rows_count: lines.length - 1,
+      rows_count,
       preview
     }
     
     const mapping: Record<string, string | null> = {}
     for (const fileCol of columns) {
-      const lowerFileCol = fileCol.toLowerCase()
-      const matchedCol = props.columns.find(c => 
-        c.label.toLowerCase() === lowerFileCol ||
-        c.name.toLowerCase() === lowerFileCol
-      )
-      mapping[fileCol] = matchedCol?.name || null
+      mapping[fileCol] = suggestMappingForFileColumn(fileCol)
     }
     columnMapping.value = mapping
     
