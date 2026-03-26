@@ -11,9 +11,52 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.sqns_service import SqnsEmployee, SqnsResource
 from app.services.sqns.client import SQNSClient
-from app.services.sqns.sync_handlers.common import compose_employee_name, parse_bool, parse_datetime, parse_int
+from app.services.sqns.sync_handlers.common import (
+    compose_employee_name,
+    parse_bool,
+    parse_datetime,
+    parse_int,
+    unwrap_payload_list,
+)
 
 logger = structlog.get_logger(__name__)
+
+_EMPLOYEE_SERVICE_KEYS: tuple[str, ...] = (
+    "services",
+    "serviceIds",
+    "service_ids",
+    "linkedServices",
+    "allowedServices",
+    "employeeServices",
+)
+
+
+def _service_external_ids_from_employee(employee: dict[str, Any]) -> list[int]:
+    seen: set[int] = set()
+    ordered: list[int] = []
+    for key in _EMPLOYEE_SERVICE_KEYS:
+        if key not in employee:
+            continue
+        raw = employee[key]
+        if raw is None:
+            continue
+        seq = unwrap_payload_list(raw, extra_nested_keys=("services",))
+        if seq is None:
+            continue
+        for item in seq:
+            sid: int | None
+            if isinstance(item, dict):
+                sid = parse_int(
+                    item.get("id")
+                    or item.get("serviceId")
+                    or item.get("service_id")
+                )
+            else:
+                sid = parse_int(item)
+            if sid is not None and sid not in seen:
+                seen.add(sid)
+                ordered.append(sid)
+    return ordered
 
 
 class SqnsEmployeesSyncHandler:
@@ -33,6 +76,7 @@ class SqnsEmployeesSyncHandler:
         employees_synced = 0
         resources_synced = 0
         active_external_ids: set[int] = set()
+        employee_service_links: list[tuple[int, int]] = []
 
         for employee in employees:
             if not isinstance(employee, dict):
@@ -67,6 +111,9 @@ class SqnsEmployeesSyncHandler:
             if is_active:
                 active_external_ids.add(external_id)
 
+            for svc_ext in _service_external_ids_from_employee(employee):
+                employee_service_links.append((external_id, svc_ext))
+
         stale_resources = 0
         if modificate is None:
             stale_resources = await self._mark_stale_resources_inactive(active_external_ids, synced_at)
@@ -85,6 +132,7 @@ class SqnsEmployeesSyncHandler:
             "resources_synced": resources_synced,
             "stale_resources": stale_resources,
             "resource_uuid_map": resource_uuid_map,
+            "employee_service_links": employee_service_links,
         }
 
     async def _upsert_employee(

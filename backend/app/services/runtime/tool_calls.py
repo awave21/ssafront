@@ -46,6 +46,19 @@ def _build_dedupe_key(tool_name: str, tool_call_id: str | None, args: dict[str, 
         return f"payload:{tool_name}:{str(args)}"
 
 
+def _tool_return_body_for_history(raw_result: Any) -> dict[str, Any] | None:
+    """Full tool output as JSON-serializable dict for tool_call_logs fallback (e.g. MCP / toolset tools)."""
+    if raw_result is None:
+        return None
+    if isinstance(raw_result, dict):
+        return raw_result
+    if isinstance(raw_result, list):
+        return {"items": raw_result}
+    if isinstance(raw_result, (str, int, float, bool)):
+        return {"value": raw_result}
+    return {"value": str(raw_result)}
+
+
 def _normalize_tool_return(raw_result: Any) -> dict[str, Any]:
     if isinstance(raw_result, dict):
         return raw_result
@@ -152,10 +165,9 @@ def extract_tools_called(
                         continue
 
                     tool_call_id = getattr(part, "tool_call_id", None) or getattr(part, "id", None)
-                    payload = _normalize_tool_return(getattr(part, "content", None) or getattr(part, "result", None))
+                    raw_return = getattr(part, "content", None) or getattr(part, "result", None)
+                    payload = _normalize_tool_return(raw_return)
                     returned_args = _normalize_args(payload.get("args"))
-                    if not returned_args:
-                        continue
 
                     target_index: int | None = None
                     if tool_call_id and str(tool_call_id) in call_index_by_id:
@@ -171,11 +183,16 @@ def extract_tools_called(
                     if target_index is None:
                         continue
 
-                    existing_args = tools_called[target_index].get("args")
-                    if isinstance(existing_args, dict) and existing_args and existing_args != returned_args:
-                        tools_called[target_index]["llm_args"] = existing_args
-                    tools_called[target_index]["args"] = returned_args
-                    tools_called[target_index]["execution_args"] = returned_args
+                    body = _tool_return_body_for_history(raw_return)
+                    if body is not None:
+                        tools_called[target_index]["result"] = body
+
+                    if returned_args:
+                        existing_args = tools_called[target_index].get("args")
+                        if isinstance(existing_args, dict) and existing_args and existing_args != returned_args:
+                            tools_called[target_index]["llm_args"] = existing_args
+                        tools_called[target_index]["args"] = returned_args
+                        tools_called[target_index]["execution_args"] = returned_args
 
                     reaction_messages_raw = payload.get("__post_tool_reaction_messages")
                     if isinstance(reaction_messages_raw, list):

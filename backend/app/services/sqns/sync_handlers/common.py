@@ -118,6 +118,22 @@ def parse_datetime(value: Any) -> datetime | None:
     return None
 
 
+def unwrap_payload_list(
+    value: Any,
+    *,
+    extra_nested_keys: tuple[str, ...] = (),
+) -> list[Any] | None:
+    """SQNS often wraps arrays as { \"data\": [...] } or nests them under alternate keys."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        for key in ("data", "items", "result") + extra_nested_keys:
+            inner = value.get(key)
+            if isinstance(inner, list):
+                return inner
+    return None
+
+
 def compose_employee_name(employee: dict[str, Any]) -> str | None:
     parts: list[str] = []
     for key in ("lastname", "firstname", "patronymic"):

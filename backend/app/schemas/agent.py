@@ -423,19 +423,25 @@ def get_sqns_tools_definitions() -> list[dict[str, Any]]:
                         "type": "string",
                         "format": "date",
                         "description": (
-                            "Одна дата в формате YYYY-MM-DD. "
-                            "Используй, когда нужно найти запись на конкретный день."
+                            "Одна дата в формате YYYY-MM-DD для поиска на конкретный день. "
+                            "Передай либо это поле, либо пару date_from + date_till (не оба варианта)."
                         ),
                     },
                     "date_from": {
                         "type": "string",
                         "format": "date",
-                        "description": "Начальная дата периода в формате YYYY-MM-DD.",
+                        "description": (
+                            "Начало диапазона YYYY-MM-DD. "
+                            "Используй вместе с date_till; альтернатива одному полю date."
+                        ),
                     },
                     "date_till": {
                         "type": "string",
                         "format": "date",
-                        "description": "Конечная дата периода в формате YYYY-MM-DD.",
+                        "description": (
+                            "Конец диапазона YYYY-MM-DD. "
+                            "Используй вместе с date_from; альтернатива одному полю date."
+                        ),
                     },
                     "per_page": {
                         "type": "integer",
@@ -446,10 +452,6 @@ def get_sqns_tools_definitions() -> list[dict[str, Any]]:
                     },
                 },
                 "required": ["phone"],
-                "anyOf": [
-                    {"required": ["date"]},
-                    {"required": ["date_from", "date_till"]},
-                ],
             },
         },
         {

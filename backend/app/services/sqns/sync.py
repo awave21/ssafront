@@ -26,6 +26,13 @@ from app.schemas.sqns_service import (
     SyncResult,
 )
 from app.services.sqns.client import SQNSClient
+from app.services.sqns.sync_handlers.employees import _service_external_ids_from_employee
+from app.services.sqns.sync_handlers.services import (
+    SqnsServicesSyncHandler,
+    collect_service_resource_links,
+    load_booking_resources_by_service_external_id,
+    merge_service_payload_from_booking_api,
+)
 from app.services.sqns.sync_orchestrator import SqnsSyncOrchestrator
 
 logger = structlog.get_logger(__name__)
@@ -303,6 +310,8 @@ class SQNSSyncService:
             result = await self.db.execute(resource_stmt)
             resource_uuid_map = {ext_id: uuid for uuid, ext_id in result.fetchall()}
 
+            booking_resources_by_id = await load_booking_resources_by_service_external_id(self.sqns_client)
+
             # 3. Process each service
             for service in services_data:
                 if not isinstance(service, dict) or "id" not in service:
@@ -310,13 +319,20 @@ class SQNSSyncService:
 
                 external_id = int(service["id"])
 
+                service = await merge_service_payload_from_booking_api(
+                    self.sqns_client,
+                    service,
+                    external_id,
+                    booking_resources_by_id,
+                )
+
                 # Upsert service
                 service_uuid = await self._upsert_service(external_id, service, synced_at)
                 services_count += 1
 
                 # Sync M2M links for this service
-                resource_links = service.get("resources", [])
-                if isinstance(resource_links, list):
+                resource_links = collect_service_resource_links(service)
+                if resource_links is not None:
                     links_added = await self._sync_service_resources(
                         service_uuid,
                         resource_links,
@@ -328,6 +344,24 @@ class SQNSSyncService:
                 category = service.get("category") or service.get("categoryName")
                 if category and isinstance(category, str):
                     await self._upsert_category(category, synced_at)
+
+            employee_pairs: list[tuple[int, int]] = []
+            for employee in employees:
+                if not isinstance(employee, dict) or "id" not in employee:
+                    continue
+                try:
+                    emp_ext = int(employee["id"])
+                except (TypeError, ValueError):
+                    continue
+                for svc_ext in _service_external_ids_from_employee(employee):
+                    employee_pairs.append((emp_ext, svc_ext))
+            if employee_pairs:
+                merge_handler = SqnsServicesSyncHandler(self.db, self.sqns_client, self.agent_id)
+                links_count += await merge_handler.merge_employee_service_resource_links(
+                    employee_pairs,
+                    resource_uuid_map,
+                    synced_at,
+                )
 
             # 4. Count unique categories synced
             categories_stmt = select(func.count(SqnsServiceCategory.id)).where(

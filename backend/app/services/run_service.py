@@ -935,7 +935,7 @@ async def execute_agent_run(
                 duration_ms=None,
                 user_info=_to_json_object(user_info),
                 request_payload=_to_json_object(args) if args else None,
-                response_payload=None,
+                response_payload=_to_json_object(item.get("result")),
                 error_payload=None,
             )
         )

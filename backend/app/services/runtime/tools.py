@@ -26,6 +26,20 @@ from app.services.runtime.utils import _safe_identifier
 
 logger = structlog.get_logger("app.services.runtime")
 
+
+def _tool_result_to_log_dict(value: Any) -> dict[str, Any] | None:
+    """Coerce tool return value to a JSONB-friendly dict for tool_call_logs / analytics."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        return {"items": value}
+    if isinstance(value, (str, int, float, bool)):
+        return {"value": value}
+    return {"value": str(value)}
+
+
 DEFAULT_KNOWLEDGE_SEARCH_TOOL_DESCRIPTION = (
     "Search uploaded knowledge files and return relevant text fragments for RAG. "
     "Each result includes chunk_id, file_id, chunk_index, title, and excerpt — cite these when answering. "
@@ -308,7 +322,7 @@ def _build_tool_wrapper(
                         "invoked_at": started_at,
                         "duration_ms": max(duration_ms, 0),
                         "request_payload": final_args,
-                        "response_payload": transformed_result if isinstance(transformed_result, dict) else None,
+                        "response_payload": _tool_result_to_log_dict(transformed_result),
                         "error_payload": None,
                     }
                 )

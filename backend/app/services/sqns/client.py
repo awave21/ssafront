@@ -431,6 +431,80 @@ class SQNSClient:
 
         return services
 
+    def _parse_booking_services_response_page(
+        self,
+        response: Any,
+        *,
+        page: int,
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        """
+        Ответ GET /api/v2/booking/service: в документации SQNS — {\"services\": [...]}.
+        Некоторые инсталляции могут отдавать пагинацию как у /api/v2/service (data/meta).
+        """
+        if isinstance(response, list):
+            return [x for x in response if isinstance(x, dict)], 1
+        if not isinstance(response, dict):
+            return [], 1
+        services = response.get("services")
+        if isinstance(services, list):
+            return [x for x in services if isinstance(x, dict)], None
+        try:
+            payload = self._normalize_page_payload(
+                response,
+                params={"page": page, "perPage": 100},
+            )
+        except SQNSClientError:
+            return [], None
+        data = payload.get("data", [])
+        meta = payload.get("meta", {}) if isinstance(payload.get("meta"), dict) else {}
+        items = [x for x in data if isinstance(x, dict)] if isinstance(data, list) else []
+        last_page = self._to_positive_int(meta.get("lastPage"), page) if meta else page
+        return items, last_page
+
+    async def list_all_booking_services(
+        self,
+        *,
+        per_page: int = 100,
+    ) -> list[dict[str, Any]]:
+        """
+        Услуги для онлайн-записи (док.: раздел «Онлайн запись») — содержат привязку resources[] к ресурсам записи.
+        Выгрузка GET /api/v2/service этого поля не содержит.
+        """
+        collected: list[dict[str, Any]] = []
+        page = 1
+        visited: set[int] = set()
+        while True:
+            if page in visited:
+                break
+            visited.add(page)
+            params: dict[str, Any] = {"page": max(page, 1), "perPage": max(per_page, 1)}
+            response = await self._request("GET", "/api/v2/booking/service", params=params)
+            items, last_page = self._parse_booking_services_response_page(response, page=page)
+            collected.extend(items)
+            if last_page is None:
+                break
+            if page >= last_page or not items:
+                break
+            page += 1
+            if page > 500:
+                logger.warning("sqns_booking_services_page_limit", host=self._host)
+                break
+        return collected
+
+    async def get_booking_service_detail(self, service_external_id: int) -> dict[str, Any] | None:
+        """Док.: GET /api/v2/booking/service/{id} → {\"service\": {...}} с resources."""
+        sid = int(service_external_id)
+        try:
+            response = await self._request("GET", f"/api/v2/booking/service/{sid}")
+        except SQNSClientError as exc:
+            logger.warning("sqns_get_booking_service_detail_failed", service_id=sid, error=str(exc))
+            return None
+        if isinstance(response, dict):
+            inner = response.get("service")
+            if isinstance(inner, dict):
+                return inner
+        return None
+
     async def list_services(self) -> list[dict[str, Any]]:
         try:
             return await self.list_all_services(per_page=100)

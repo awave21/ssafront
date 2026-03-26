@@ -93,6 +93,7 @@ class SqnsSyncOrchestrator:
             services_result = await services_handler.sync(
                 modificate=services_modificate,
                 resource_uuid_map=resource_uuid_map,
+                employee_service_links=employees_result.get("employee_service_links") or [],
             )
             counters["services_synced"] = int(services_result.get("services_synced", 0))
             counters["categories_synced"] = int(services_result.get("categories_synced", 0))

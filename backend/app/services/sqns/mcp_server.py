@@ -978,9 +978,9 @@ def create_sqns_mcp_server(
     @mcp.tool(description=get_sqns_tool_description("sqns_client_visits"))
     async def sqns_client_visits(
         phone: str,
-        date: str | None = None,
-        date_from: str | None = None,
-        date_till: str | None = None,
+        date: str = "",
+        date_from: str = "",
+        date_till: str = "",
         per_page: int = 100,
     ) -> dict[str, Any]:
         """
@@ -1002,9 +1002,9 @@ def create_sqns_mcp_server(
         try:
             normalized_phone = normalize_phone_number(phone)
             normalized_date_from, normalized_date_till, date_filter = _resolve_visits_period(
-                date=date,
-                date_from=date_from,
-                date_till=date_till,
+                date=date.strip() or None,
+                date_from=date_from.strip() or None,
+                date_till=date_till.strip() or None,
             )
             safe_per_page = _normalize_per_page(per_page)
 

@@ -74,3 +74,8 @@ def test_extract_tools_called_enriches_current_call_from_all_messages_by_tool_ca
     assert tools_called[0]["llm_args"] == {"name": "LLM"}
     assert tools_called[0]["execution_args"] == {"name": "Merged"}
     assert tools_called[0]["post_tool_reaction_messages"] == ["Соединяю с оператором"]
+    assert tools_called[0]["result"] == {
+        "tool_name": "admin_call",
+        "args": {"name": "Merged"},
+        "__post_tool_reaction_messages": ["Соединяю с оператором"],
+    }
