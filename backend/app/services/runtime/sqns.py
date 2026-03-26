@@ -53,6 +53,36 @@ def _build_visits_message(count: int) -> str:
     return f"Найдено записей: {count}."
 
 
+def _sanitize_tool_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """
+    Normalize tool JSON schema for OpenAI function-calling compatibility.
+
+    OpenAI rejects top-level combinators for function parameters.
+    Keep the schema as a plain object with safe defaults.
+    """
+    sanitized = dict(schema) if isinstance(schema, dict) else {}
+
+    # OpenAI function parameter schema must be a top-level object.
+    sanitized["type"] = "object"
+
+    # Top-level combinators are rejected by OpenAI for tools.
+    for forbidden_key in ("oneOf", "anyOf", "allOf", "not", "enum"):
+        sanitized.pop(forbidden_key, None)
+
+    properties = sanitized.get("properties")
+    if not isinstance(properties, dict):
+        sanitized["properties"] = {}
+
+    required = sanitized.get("required")
+    if not isinstance(required, list):
+        sanitized["required"] = []
+
+    if "additionalProperties" not in sanitized:
+        sanitized["additionalProperties"] = False
+
+    return sanitized
+
+
 def _strip_client_visit_field(payload: Any) -> Any:
     if not isinstance(payload, dict):
         return payload
@@ -573,6 +603,8 @@ def build_sqns_legacy_tools(agent: Agent, user: AuthContext) -> list[PydanticToo
     tools: list[PydanticTool] = []
     for defn in sqns_tools_definitions:
         def make_sqns_tool(method_name: str, tool_name: str, description: str, schema: dict):
+            safe_schema = _sanitize_tool_json_schema(schema)
+
             async def _sqns_impl(**kwargs: Any) -> Any:
                 from app.db.session import async_session_factory
                 from app.services.sqns.client_factory import build_sqns_client_for_agent
@@ -588,11 +620,23 @@ def build_sqns_legacy_tools(agent: Agent, user: AuthContext) -> list[PydanticToo
                         agent_obj,
                         tenant_id=agent_obj.tenant_id,
                     )
-                    method = getattr(client, method_name, None)
-                    if not method:
-                        raise ToolExecutionError(f"SQNS client missing method {method_name}")
-
                     try:
+                        if method_name == "find_booking_options":
+                            from app.schemas.sqns_service import BookingOptionsInput
+                            from app.services.sqns.sync import SQNSSyncService
+
+                            input_data = BookingOptionsInput(
+                                service_name=kwargs.get("service_name"),
+                                specialist_name=kwargs.get("specialist_name"),
+                            )
+                            sync_service = SQNSSyncService(db, client, agent_obj.id)
+                            result = await sync_service.find_booking_options(input_data)
+                            return result.model_dump()
+
+                        method = getattr(client, method_name, None)
+                        if not method:
+                            raise ToolExecutionError(f"SQNS client missing method {method_name}")
+
                         if method_name == "list_resources":
                             stmt = (
                                 select(SqnsResource)
@@ -853,7 +897,7 @@ def build_sqns_legacy_tools(agent: Agent, user: AuthContext) -> list[PydanticToo
                 function=_sqns_impl,
                 name=tool_name,
                 description=description,
-                json_schema=schema,
+                json_schema=safe_schema,
                 takes_ctx=False,
             )
 
