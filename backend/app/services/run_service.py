@@ -644,6 +644,19 @@ async def execute_agent_run(
                     title=injection["title"],
                     relevance=injection["relevance"],
                 )
+                # Тот же meta, что после get_direct_answer — чтобы followup / interrupt_dialog / UI работали.
+                direct_question_meta = {
+                    "source": "direct_question_eager",
+                    "question_id": injection["direct_question_id"],
+                    "title": injection["title"],
+                    "content": injection["content"],
+                    "system_instruction": injection.get("system_instruction"),
+                    "interrupt_dialog": injection["interrupt_dialog"],
+                    "notify_telegram": injection["notify_telegram"],
+                    "followup": injection.get("followup")
+                    if isinstance(injection.get("followup"), dict)
+                    else None,
+                }
             else:
                 # Совпадений нет — добавляем тулы как fallback для уточняющих вопросов.
                 dq_limit = getattr(agent, "direct_questions_limit", None) or settings.direct_questions_max_results

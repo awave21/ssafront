@@ -80,6 +80,7 @@ async def eager_inject_direct_answer(
         "system_instruction": system_instruction,
         "interrupt_dialog": bool(question.interrupt_dialog),
         "notify_telegram": bool(question.notify_telegram),
+        "followup": question.followup if isinstance(question.followup, dict) else None,
         "relevance": result.get("matched", [{}])[0].get("relevance", 0.0),
         "retrieval_result": result,
     }
