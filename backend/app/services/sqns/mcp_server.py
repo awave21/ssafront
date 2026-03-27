@@ -568,7 +568,7 @@ def create_sqns_mcp_server(
         
         4. Клиент: "Какие услуги есть?"
            → sqns_find_booking_options()
-           → Вернет топ-20 популярных услуг
+           → Вернет до 50 популярных услуг по приоритету
         
         Args:
             service_name: Название услуги (например: "чистка", "отбеливание", "консультация").
@@ -581,7 +581,7 @@ def create_sqns_mcp_server(
             - service_id: int | None - external_id услуги для sqns_list_slots (используй ЭТО поле, если ready=True)
             - resource_id: int | None - external_id специалиста для sqns_list_slots (используй ЭТО поле, если ready=True)
             - message: str - Понятное описание для клиента
-            - alternatives: dict - Альтернативные варианты (если ready=False, используй id из выбранного элемента)
+            - alternatives: dict - Варианты при ready=False: services/specialists, при неоднозначности двух параметров — compatible_pairs (оба id в additional_info)
         
         КРИТИЧЕСКИ ВАЖНО - Как использовать результат:
         
@@ -591,10 +591,11 @@ def create_sqns_mcp_server(
         
         2. Если ready=False и есть alternatives:
            - Клиент должен выбрать вариант из alternatives
-           - Используй поле "id" из выбранного элемента (это external_id для SQNS API)
+           - Используй поле "id" из выбранного элемента (это external_id для SQNS API), кроме compatible_pairs
            - Если выбрана услуга: service_ids=[выбранный_id]
            - Если выбран специалист: resource_id=выбранный_id
-           - Затем снова вызови sqns_find_booking_options с выбранными параметрами
+           - Если compatible_pairs: возьми service_id и resource_id из additional_info выбранной пары для sqns_list_slots
+           - Затем снова вызови sqns_find_booking_options с выбранными параметрами (или сразу list_slots, если id уже известны)
         
         3. ВСЕГДА используй external_id (число), НЕ внутренний UUID!
            - Правильно: service_id=1, resource_id=15

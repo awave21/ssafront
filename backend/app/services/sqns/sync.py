@@ -37,6 +37,9 @@ from app.services.sqns.sync_orchestrator import SqnsSyncOrchestrator
 
 logger = structlog.get_logger(__name__)
 
+# Единый лимит выдачи для sqns_find_booking_options (услуги, врачи, пары).
+BOOKING_OPTIONS_RESULT_LIMIT = 50
+
 
 class SQNSSyncService:
     """
@@ -607,7 +610,7 @@ class SQNSSyncService:
         1. service_name only → список специалистов для услуги
         2. specialist_name only → список услуг специалиста
         3. Оба параметра → валидация совместимости + ID для записи
-        4. Ничего → топ-20 услуг по priority
+        4. Ничего → топ услуг по priority (см. BOOKING_OPTIONS_RESULT_LIMIT)
         """
         service_name = input_data.service_name
         specialist_name = input_data.specialist_name
@@ -628,7 +631,7 @@ class SQNSSyncService:
         return await self._validate_compatibility(service_name, specialist_name)
 
     async def _get_top_services(self) -> BookingOptionsOutput:
-        """Возвращает топ-20 услуг по приоритету."""
+        """Возвращает топ услуг по приоритету (лимит BOOKING_OPTIONS_RESULT_LIMIT)."""
         stmt = (
             select(SqnsService)
             .where(
@@ -636,7 +639,7 @@ class SQNSSyncService:
                 SqnsService.is_enabled == True,
             )
             .order_by(SqnsService.priority.desc(), SqnsService.name)
-            .limit(20)
+            .limit(BOOKING_OPTIONS_RESULT_LIMIT)
         )
         result = await self.db.execute(stmt)
         services = result.scalars().all()
@@ -702,7 +705,7 @@ class SQNSSyncService:
                 SqnsService.is_enabled == True,
             )
             .order_by(SqnsService.priority.desc(), SqnsService.name)
-            .limit(20)
+            .limit(BOOKING_OPTIONS_RESULT_LIMIT)
         )
         result = await self.db.execute(services_stmt)
         services = result.scalars().all()
@@ -740,8 +743,7 @@ class SQNSSyncService:
         self,
         service_name: str,
     ) -> BookingOptionsOutput:
-        """Поиск специалистов, которые могут выполнять услугу."""
-        # Поиск услуги по названию (ILIKE)
+        """Поиск специалистов по услуге (одна или несколько услуг по ILIKE)."""
         service_stmt = (
             select(SqnsService)
             .where(
@@ -749,12 +751,13 @@ class SQNSSyncService:
                 SqnsService.is_enabled == True,
                 SqnsService.name.ilike(f"%{service_name}%"),
             )
-            .limit(1)
+            .order_by(SqnsService.priority.desc(), SqnsService.name)
+            .limit(BOOKING_OPTIONS_RESULT_LIMIT)
         )
         result = await self.db.execute(service_stmt)
-        service = result.scalar_one_or_none()
+        services = result.scalars().all()
 
-        if not service:
+        if not services:
             return BookingOptionsOutput(
                 ready=False,
                 message=(
@@ -763,57 +766,113 @@ class SQNSSyncService:
                 ),
             )
 
-        # Найти специалистов для этой услуги
-        resources_stmt = (
-            select(SqnsResource)
-            .join(
-                SqnsServiceResource,
-                SqnsServiceResource.resource_id == SqnsResource.id,
+        if len(services) == 1:
+            service = services[0]
+            resources_stmt = (
+                select(SqnsResource)
+                .join(
+                    SqnsServiceResource,
+                    SqnsServiceResource.resource_id == SqnsResource.id,
+                )
+                .where(
+                    SqnsServiceResource.service_id == service.id,
+                    SqnsResource.is_active == True,
+                    SqnsResource.active == True,
+                )
+                .order_by(SqnsResource.name)
+                .limit(BOOKING_OPTIONS_RESULT_LIMIT)
             )
-            .where(
-                SqnsServiceResource.service_id == service.id,
-                SqnsResource.is_active == True,
-                SqnsResource.active == True,
-            )
-            .order_by(SqnsResource.name)
-            .limit(20)
-        )
-        result = await self.db.execute(resources_stmt)
-        resources = result.scalars().all()
+            result = await self.db.execute(resources_stmt)
+            resources = result.scalars().all()
 
-        if not resources:
+            if not resources:
+                return BookingOptionsOutput(
+                    ready=False,
+                    service_id=service.external_id,
+                    service_name=service.name,
+                    message=(
+                        f"Для услуги '{service.name}' нет доступных специалистов. "
+                        f"service_id={service.external_id} (используй это для sqns_list_slots, если найдешь специалиста)."
+                    ),
+                )
+
+            alternatives = [
+                BookingAlternative(
+                    id=res.external_id,
+                    name=res.name,
+                    additional_info=res.information or res.specialization or "Специалист",
+                )
+                for res in resources
+            ]
+
             return BookingOptionsOutput(
                 ready=False,
                 service_id=service.external_id,
                 service_name=service.name,
+                duration_seconds=service.duration_seconds,
+                price=f"{service.price} руб." if service.price else None,
                 message=(
-                    f"Для услуги '{service.name}' нет доступных специалистов. "
-                    f"service_id={service.external_id} (используй это для sqns_list_slots, если найдешь специалиста)."
+                    f"Услугу '{service.name}' могут выполнить {len(resources)} специалистов. "
+                    f"Выберите специалиста из списка alternatives.specialists. "
+                    f"Используй поле 'id' из выбранного специалиста (это resource_id для sqns_list_slots). "
+                    f"service_id={service.external_id} (используй это для sqns_list_slots)."
                 ),
+                alternatives={"specialists": alternatives},
             )
 
-        alternatives = [
-            BookingAlternative(
-                id=res.external_id,
-                name=res.name,
-                additional_info=res.information or res.specialization or "Специалист",
+        service_ids = [s.id for s in services]
+        join_stmt = (
+            select(SqnsService, SqnsResource)
+            .join(
+                SqnsServiceResource,
+                SqnsServiceResource.service_id == SqnsService.id,
             )
-            for res in resources
-        ]
+            .join(SqnsResource, SqnsServiceResource.resource_id == SqnsResource.id)
+            .where(
+                SqnsService.id.in_(service_ids),
+                SqnsResource.is_active == True,
+                SqnsResource.active == True,
+            )
+            .order_by(
+                SqnsService.priority.desc(),
+                SqnsService.name,
+                SqnsResource.name,
+            )
+        )
+        result = await self.db.execute(join_stmt)
+        rows = result.all()
+        specialists_by_service: dict[UUID, list[SqnsResource]] = {}
+        for svc, res in rows:
+            specialists_by_service.setdefault(svc.id, []).append(res)
+
+        alternatives: list[BookingAlternative] = []
+        for svc in services:
+            spec_list = specialists_by_service.get(svc.id, [])
+            cap = spec_list[:BOOKING_OPTIONS_RESULT_LIMIT]
+            if cap:
+                names = ", ".join(r.name for r in cap)
+                if len(spec_list) > BOOKING_OPTIONS_RESULT_LIMIT:
+                    names += f" (+{len(spec_list) - BOOKING_OPTIONS_RESULT_LIMIT} ещё)"
+            else:
+                names = "нет доступных специалистов"
+            alternatives.append(
+                BookingAlternative(
+                    id=svc.external_id,
+                    name=svc.name,
+                    additional_info=(
+                        f"{svc.duration_seconds // 60} мин • {names}"
+                    ),
+                )
+            )
 
         return BookingOptionsOutput(
             ready=False,
-            service_id=service.external_id,
-            service_name=service.name,
-            duration_seconds=service.duration_seconds,
-            price=f"{service.price} руб." if service.price else None,
             message=(
-                f"Услугу '{service.name}' могут выполнить {len(resources)} специалистов. "
-                f"Выберите специалиста из списка alternatives.specialists. "
-                f"Используй поле 'id' из выбранного специалиста (это resource_id для sqns_list_slots). "
-                f"service_id={service.external_id} (используй это для sqns_list_slots)."
+                f"По запросу «{service_name}» найдено {len(services)} услуг. "
+                f"Уточните название или выберите одну услугу в alternatives.services "
+                f"(в additional_info кратко перечислены врачи по связи услуга–специалист)."
             ),
-            alternatives={"specialists": alternatives},
+            alternatives={"services": alternatives},
         )
 
     async def _validate_compatibility(
@@ -821,8 +880,7 @@ class SQNSSyncService:
         service_name: str,
         specialist_name: str,
     ) -> BookingOptionsOutput:
-        """Проверка совместимости услуги и специалиста."""
-        # Найти услугу
+        """Проверка совместимости: до N услуг и N врачей по ILIKE, пары только из M2M."""
         service_stmt = (
             select(SqnsService)
             .where(
@@ -830,12 +888,13 @@ class SQNSSyncService:
                 SqnsService.is_enabled == True,
                 SqnsService.name.ilike(f"%{service_name}%"),
             )
-            .limit(1)
+            .order_by(SqnsService.priority.desc(), SqnsService.name)
+            .limit(BOOKING_OPTIONS_RESULT_LIMIT)
         )
         result = await self.db.execute(service_stmt)
-        service = result.scalar_one_or_none()
+        services = result.scalars().all()
 
-        if not service:
+        if not services:
             return BookingOptionsOutput(
                 ready=False,
                 message=(
@@ -844,7 +903,6 @@ class SQNSSyncService:
                 ),
             )
 
-        # Найти специалиста
         resource_stmt = (
             select(SqnsResource)
             .where(
@@ -853,33 +911,60 @@ class SQNSSyncService:
                 SqnsResource.active == True,
                 SqnsResource.name.ilike(f"%{specialist_name}%"),
             )
-            .limit(1)
+            .order_by(SqnsResource.name)
+            .limit(BOOKING_OPTIONS_RESULT_LIMIT)
         )
         result = await self.db.execute(resource_stmt)
-        resource = result.scalar_one_or_none()
+        resources = result.scalars().all()
 
-        if not resource:
+        if not resources:
+            if len(services) == 1:
+                s0 = services[0]
+                return BookingOptionsOutput(
+                    ready=False,
+                    service_id=s0.external_id,
+                    service_name=s0.name,
+                    message=(
+                        f"Специалист '{specialist_name}' не найден. "
+                        f"service_id={s0.external_id} (используй это для sqns_list_slots, если найдешь специалиста). "
+                        f"Попробуйте использовать sqns_list_resources для просмотра всех специалистов."
+                    ),
+                )
             return BookingOptionsOutput(
                 ready=False,
-                service_id=service.external_id,
-                service_name=service.name,
                 message=(
                     f"Специалист '{specialist_name}' не найден. "
-                    f"service_id={service.external_id} (используй это для sqns_list_slots, если найдешь специалиста). "
                     f"Попробуйте использовать sqns_list_resources для просмотра всех специалистов."
                 ),
             )
 
-        # Проверить связь
-        link_stmt = select(SqnsServiceResource).where(
-            SqnsServiceResource.service_id == service.id,
-            SqnsServiceResource.resource_id == resource.id,
-        )
-        result = await self.db.execute(link_stmt)
-        link = result.scalar_one_or_none()
+        service_ids = [s.id for s in services]
+        resource_ids = [r.id for r in resources]
 
-        if link:
-            # Совместимы! Возвращаем ID для записи
+        pairs_stmt = (
+            select(SqnsService, SqnsResource, SqnsServiceResource)
+            .join(
+                SqnsServiceResource,
+                SqnsServiceResource.service_id == SqnsService.id,
+            )
+            .join(
+                SqnsResource,
+                SqnsServiceResource.resource_id == SqnsResource.id,
+            )
+            .where(
+                SqnsService.id.in_(service_ids),
+                SqnsResource.id.in_(resource_ids),
+                SqnsResource.is_active == True,
+                SqnsResource.active == True,
+            )
+            .order_by(SqnsService.name, SqnsResource.name)
+            .limit(BOOKING_OPTIONS_RESULT_LIMIT)
+        )
+        result = await self.db.execute(pairs_stmt)
+        pair_rows = result.all()
+
+        if len(pair_rows) == 1:
+            service, resource, link = pair_rows[0]
             duration = link.duration_seconds or service.duration_seconds
             return BookingOptionsOutput(
                 ready=True,
@@ -896,8 +981,29 @@ class SQNSSyncService:
                 ),
             )
 
-        # Несовместимы! Предложить альтернативы
-        # Найти других специалистов для этой услуги
+        if len(pair_rows) > 1:
+            compatible_pairs = [
+                BookingAlternative(
+                    id=svc.external_id,
+                    name=f"{svc.name} — {res.name}",
+                    additional_info=(
+                        f"service_id={svc.external_id} resource_id={res.external_id} "
+                        f"для sqns_list_slots(resource_id={res.external_id}, service_ids=[{svc.external_id}])"
+                    ),
+                )
+                for svc, res, _link in pair_rows
+            ]
+            return BookingOptionsOutput(
+                ready=False,
+                message=(
+                    f"Найдено {len(compatible_pairs)} совместимых пар услуга–специалист по запросу. "
+                    f"Выберите одну пару в alternatives.compatible_pairs (в additional_info оба id для SQNS)."
+                ),
+                alternatives={"compatible_pairs": compatible_pairs},
+            )
+
+        # 0 M2M-пар среди кандидатов
+        s0, r0 = services[0], resources[0]
         other_specialists_stmt = (
             select(SqnsResource)
             .join(
@@ -905,17 +1011,17 @@ class SQNSSyncService:
                 SqnsServiceResource.resource_id == SqnsResource.id,
             )
             .where(
-                SqnsServiceResource.service_id == service.id,
+                SqnsServiceResource.service_id == s0.id,
                 SqnsResource.is_active == True,
                 SqnsResource.active == True,
-                SqnsResource.id != resource.id,
+                SqnsResource.id.notin_(resource_ids),
             )
-            .limit(5)
+            .order_by(SqnsResource.name)
+            .limit(BOOKING_OPTIONS_RESULT_LIMIT)
         )
         result = await self.db.execute(other_specialists_stmt)
         other_specialists = result.scalars().all()
 
-        # Найти другие услуги этого специалиста
         other_services_stmt = (
             select(SqnsService)
             .join(
@@ -923,16 +1029,17 @@ class SQNSSyncService:
                 SqnsServiceResource.service_id == SqnsService.id,
             )
             .where(
-                SqnsServiceResource.resource_id == resource.id,
+                SqnsServiceResource.resource_id == r0.id,
                 SqnsService.is_enabled == True,
-                SqnsService.id != service.id,
+                SqnsService.id.notin_(service_ids),
             )
-            .limit(5)
+            .order_by(SqnsService.priority.desc(), SqnsService.name)
+            .limit(BOOKING_OPTIONS_RESULT_LIMIT)
         )
         result = await self.db.execute(other_services_stmt)
         other_services = result.scalars().all()
 
-        alternatives = {}
+        alternatives: dict[str, list[BookingAlternative]] = {}
         if other_specialists:
             alternatives["other_specialists"] = [
                 BookingAlternative(
@@ -952,16 +1059,21 @@ class SQNSSyncService:
                 for svc in other_services
             ]
 
+        root_service_id = services[0].external_id if len(services) == 1 else None
+        root_service_name = services[0].name if len(services) == 1 else None
+        root_resource_id = resources[0].external_id if len(resources) == 1 else None
+        root_resource_name = resources[0].name if len(resources) == 1 else None
+
         return BookingOptionsOutput(
             ready=False,
-            service_id=service.external_id,
-            service_name=service.name,
-            resource_id=resource.external_id,
-            resource_name=resource.name,
+            service_id=root_service_id,
+            service_name=root_service_name,
+            resource_id=root_resource_id,
+            resource_name=root_resource_name,
             message=(
-                f"✗ {resource.name} не может выполнить '{service.name}'. "
-                f"Выберите другого специалиста или другую услугу из alternatives. "
-                f"Используй поле 'id' из выбранного элемента (это external_id для SQNS API)."
+                f"Среди найденных по ILIKE услуг и специалистов нет совместимой пары в базе клиники "
+                f"(ни один из кандидатов-врачей не назначен на кандидат-услугу). Уточните формулировку или "
+                f"выберите другого специалиста / услугу из alternatives, если списки не пусты."
             ),
             alternatives=alternatives,
         )

@@ -9,7 +9,9 @@ SQNS_TOOL_DESCRIPTIONS: dict[str, str] = {
     "sqns_find_booking_options": (
         "Вызывай первым для подбора услуги и специалиста по словам клиента. "
         "Передавай service_name и/или specialist_name из диалога. "
-        "Если ready=True, используй service_id и resource_id для sqns_list_slots. "
+        "Нечёткий ILIKE может дать несколько услуг без специалиста: тогда в alternatives.services список услуг, уточни или выбери id. "
+        "Если переданы оба параметра и совместимых пар несколько, смотри alternatives.compatible_pairs (для каждой пары в доп. поле оба SQNS id). "
+        "Если ready=True, используй service_id и resource_id из корня ответа для sqns_list_slots. "
         "Если ready=False, предложи варианты из alternatives и дождись выбора."
     ),
     "sqns_list_resources": (

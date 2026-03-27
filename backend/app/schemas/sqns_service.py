@@ -229,7 +229,7 @@ class BookingOptionsInput(BaseModel):
     - Только service_name → найти специалистов для услуги
     - Только specialist_name → найти услуги специалиста
     - Оба параметра → проверить совместимость и вернуть ID для записи
-    - Ничего → топ-20 услуг по priority
+    - Ничего → топ услуг по priority (см. лимит выдачи в реализации)
     """
 
     service_name: str | None = Field(
@@ -294,8 +294,11 @@ class BookingOptionsOutput(BaseModel):
     alternatives: dict[str, list[BookingAlternative]] = Field(
         default_factory=dict,
         description=(
-            "Альтернативные варианты: {'services': [...], 'specialists': [...], 'other_specialists': [...], 'other_services': [...]}. "
-            "Если ready=False, используй поле 'id' из выбранного элемента (это external_id для SQNS API)."
+            "Альтернативные варианты: {'services': [...], 'specialists': [...], "
+            "'compatible_pairs': [...] при нескольких совместимых парах услуга+специалист (см. additional_info с обоими id), "
+            "'other_specialists': [...], 'other_services': [...]}. "
+            "Если ready=False, используй поле 'id' из выбранного элемента (это external_id услуги или специалиста для SQNS API), "
+            "а для compatible_pairs читай оба id в additional_info."
         ),
     )
     # Дополнительная информация для агента
