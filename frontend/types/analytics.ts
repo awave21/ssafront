@@ -1,4 +1,7 @@
 export type AnalyticsTimeGroup = 'day' | 'week' | 'month'
+
+/** all — полная касса; clinical — услуги + товары + сертификаты (как итог отчёта по услугам SQNS). */
+export type AnalyticsRevenueBasis = 'all' | 'clinical'
 export type AnalyticsBreakdownDimension = 'channel' | 'tag' | 'client_type'
 export type AnalyticsPeriodPreset = '7d' | '30d' | '90d' | 'custom'
 
@@ -8,14 +11,21 @@ export type AnalyticsOverview = {
   primary_visits: number
   primary_arrived: number
   conversion_primary_arrived_pct: number
-  arrived_primary: number
+  primary_revenue: number
   repeat_total: number
+  repeat_arrived: number
+  conversion_repeat_arrived_pct: number
+  repeat_revenue: number
+  /** Выручка первичных / дошедшие первичные */
+  primary_avg_check: number
+  /** Выручка повторных / дошедшие повторные */
+  repeat_avg_check: number
   bookings_from_primary: number
-  bookings_from_existing_patients: number
   conversion_arrived_to_booked_pct: number
   avg_check: number
   revenue_total: number
   payments_total: number
+  revenue_basis?: AnalyticsRevenueBasis
   period_start: string
   period_end: string
   timezone: string
@@ -37,6 +47,7 @@ export type AnalyticsTimeseries = {
   timezone: string
   period_start: string
   period_end: string
+  revenue_basis?: AnalyticsRevenueBasis
   points: AnalyticsTimeseriesPoint[]
 }
 
@@ -72,6 +83,11 @@ export type AnalyticsFiltersMeta = {
   phase2_backlog: string[]
 }
 
+export type AnalyticsPaymentMethod = 'cash' | 'card' | 'certificate'
+
+/** Группы paymentTypeHandle SQNS: услуги (в т.ч. сертификаты продажа) / товары. */
+export type AnalyticsRevenueCategory = 'services' | 'commodities'
+
 export type AnalyticsFilters = {
   agentId: string
   periodPreset: AnalyticsPeriodPreset
@@ -80,6 +96,14 @@ export type AnalyticsFilters = {
   timezone: string
   channel: string
   clientTags: string[]
+  /** По умолчанию clinical — ближе к выручке в SQNS. */
+  revenueBasis: AnalyticsRevenueBasis
+  /** Пустой массив = все способы оплаты. */
+  paymentMethods: AnalyticsPaymentMethod[]
+  /** Пустой массив = все типы (услуги+товары в clinical). */
+  revenueCategories: AnalyticsRevenueCategory[]
+  /** Внешний ID сотрудника SQNS; null — все. */
+  resourceExternalId: number | null
 }
 
 export type AnalyticsAgentOption = {
@@ -106,6 +130,9 @@ export type ServicesTableQuery = {
   channel: string
   resourceExternalId: number | string | null
   clientTags: string[]
+  revenueBasis: AnalyticsRevenueBasis
+  paymentMethods: AnalyticsPaymentMethod[]
+  revenueCategories: AnalyticsRevenueCategory[]
   sortBy: ServicesTableSortBy
   sortOrder: ServicesTableSortOrder
   limit: number
@@ -148,12 +175,87 @@ export type AnalyticsServicesTableResponse = {
   period_start: string
   period_end: string
   timezone: string
+  revenue_basis?: AnalyticsRevenueBasis
   last_sync_at?: string | null
   total: number
   limit: number
   offset: number
   sort_by: ServicesTableSortBy
   sort_order: ServicesTableSortOrder
+  resource_external_id?: number | null
+}
+
+export type CommoditiesTableSortBy =
+  | 'commodity_name'
+  | 'bookings_total'
+  | 'arrived_total'
+  | 'primary_total'
+  | 'primary_arrived_total'
+  | 'repeat_total'
+  | 'revenue_total'
+  | 'avg_check'
+
+export type CommoditiesTableSortOrder = 'asc' | 'desc'
+
+export type CommoditiesTableQuery = {
+  dateFrom: string
+  dateTo: string
+  timezone: string
+  channel: string
+  resourceExternalId: number | string | null
+  clientTags: string[]
+  revenueBasis: AnalyticsRevenueBasis
+  paymentMethods: AnalyticsPaymentMethod[]
+  revenueCategories: AnalyticsRevenueCategory[]
+  sortBy: CommoditiesTableSortBy
+  sortOrder: CommoditiesTableSortOrder
+  limit: number
+  offset: number
+}
+
+export type AnalyticsCommodityTableItem = {
+  commodity_key: string
+  commodity_external_id: string | number | null
+  commodity_name: string
+  commodity_category: string | null
+  bookings_total: number
+  arrived_total: number
+  primary_total: number
+  primary_arrived_total: number
+  repeat_total: number
+  repeat_arrived_total: number
+  revenue_total: number
+  payments_total: number
+  avg_check: number
+  share_bookings: number
+}
+
+export type AnalyticsCommoditiesTableTotals = {
+  commodities_total: number
+  bookings_total: number
+  arrived_total: number
+  primary_total: number
+  primary_arrived_total: number
+  repeat_total: number
+  repeat_arrived_total: number
+  revenue_total: number
+  payments_total: number
+  avg_check: number
+}
+
+export type AnalyticsCommoditiesTableResponse = {
+  items: AnalyticsCommodityTableItem[]
+  totals: AnalyticsCommoditiesTableTotals
+  period_start: string
+  period_end: string
+  timezone: string
+  revenue_basis?: AnalyticsRevenueBasis
+  last_sync_at?: string | null
+  total: number
+  limit: number
+  offset: number
+  sort_by: CommoditiesTableSortBy
+  sort_order: CommoditiesTableSortOrder
   resource_external_id?: number | null
 }
 

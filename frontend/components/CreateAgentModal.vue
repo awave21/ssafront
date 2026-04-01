@@ -328,8 +328,7 @@ const handleSubmit = async () => {
 
     emit('close')
 
-    // Перенаправление на страницу редактирования
-    await navigateTo(`/agents/${newAgent.id}`)
+    await navigateTo(`/agents/${newAgent.id}/prompt`)
   } catch (err) {
     console.error('Ошибка создания агента:', err)
   } finally {

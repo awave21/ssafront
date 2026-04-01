@@ -1,5 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 import { useAnalyticsApi } from '~/composables/analyticsApi'
+import { routerReplaceSafe } from '~/utils/routerSafe'
 import type {
   AnalyticsAgentOption,
   AnalyticsBreakdown,
@@ -7,6 +8,8 @@ import type {
   AnalyticsFiltersMeta,
   AnalyticsOverview,
   AnalyticsPeriodPreset,
+  AnalyticsResourceOption,
+  AnalyticsRevenueCategory,
   AnalyticsTimeseries,
 } from '~/types/analytics'
 
@@ -65,6 +68,8 @@ export const useDashboardData = () => {
   const pending = ref(false)
   const error = ref<string | null>(null)
   const initialized = ref(false)
+  /** Первый заход на страницу: true до завершения initialize (чтобы показывать скелетоны до старта fetch). */
+  const isBootstrapping = ref(true)
   const requestSerial = ref(0)
 
   const filters = reactive<AnalyticsFilters>({
@@ -75,9 +80,14 @@ export const useDashboardData = () => {
     timezone: DEFAULT_TIMEZONE,
     channel: '',
     clientTags: [],
+    revenueBasis: 'clinical',
+    paymentMethods: [],
+    revenueCategories: [],
+    resourceExternalId: null,
   })
 
   const agentOptions = ref<AnalyticsAgentOption[]>([])
+  const analyticsResources = ref<AnalyticsResourceOption[]>([])
   const filtersMeta = ref<AnalyticsFiltersMeta | null>(null)
   const overview = ref<AnalyticsOverview | null>(null)
   const previousOverview = ref<AnalyticsOverview | null>(null)
@@ -119,6 +129,29 @@ export const useDashboardData = () => {
     filters.channel = typeof query.channel === 'string' ? query.channel : ''
     filters.clientTags = parseTags(query.tags)
     filters.timezone = typeof query.tz === 'string' && query.tz.trim() ? query.tz.trim() : DEFAULT_TIMEZONE
+    const rawRevenueBasis = query.revenue_basis
+    const revenueBasisParam = Array.isArray(rawRevenueBasis) ? rawRevenueBasis[0] : rawRevenueBasis
+    filters.revenueBasis = revenueBasisParam === 'all' ? 'all' : 'clinical'
+    const rawPm = query.pm
+    filters.paymentMethods = typeof rawPm === 'string'
+      ? (rawPm.split(',').filter((v): v is 'cash' | 'card' | 'certificate' => ['cash', 'card', 'certificate'].includes(v)))
+      : []
+    const rawRc = query.rc
+    filters.revenueCategories =
+      typeof rawRc === 'string'
+        ? (rawRc
+            .split(',')
+            .map((s) => s.trim().toLowerCase())
+            .filter((v): v is AnalyticsRevenueCategory => v === 'services' || v === 'commodities'))
+        : []
+
+    const rawResource = query.resource
+    if (typeof rawResource === 'string' && rawResource.trim()) {
+      const n = Number(rawResource.trim())
+      filters.resourceExternalId = Number.isFinite(n) ? n : null
+    } else {
+      filters.resourceExternalId = null
+    }
 
     const queryFrom = parseDate(query.from)
     const queryTo = parseDate(query.to)
@@ -146,7 +179,11 @@ export const useDashboardData = () => {
     if (filters.channel) query.channel = filters.channel
     if (filters.clientTags.length) query.tags = filters.clientTags.join(',')
     if (filters.timezone && filters.timezone !== DEFAULT_TIMEZONE) query.tz = filters.timezone
-    await router.replace({ query })
+    if (filters.revenueBasis === 'all') query.revenue_basis = 'all'
+    if (filters.paymentMethods.length) query.pm = filters.paymentMethods.join(',')
+    if (filters.revenueCategories.length) query.rc = filters.revenueCategories.join(',')
+    if (filters.resourceExternalId != null) query.resource = String(filters.resourceExternalId)
+    await routerReplaceSafe(router, { query })
   }
 
   const clearData = () => {
@@ -170,6 +207,7 @@ export const useDashboardData = () => {
   const refresh = async () => {
     if (!filters.agentId) {
       clearData()
+      pending.value = false
       return
     }
 
@@ -186,6 +224,10 @@ export const useDashboardData = () => {
         timezone: filters.timezone,
         channel: filters.channel,
         clientTags: filters.clientTags,
+        revenueBasis: filters.revenueBasis,
+        paymentMethods: filters.paymentMethods,
+        revenueCategories: filters.revenueCategories,
+        resourceExternalId: filters.resourceExternalId,
       }
 
       // Calculate previous period
@@ -201,13 +243,23 @@ export const useDashboardData = () => {
         dateTo: formatDate(prevTo),
       }
 
-      const [overviewResponse, prevOverviewResponse, timeseriesResponse, channelResponse, tagResponse] = await Promise.all([
+      const [
+        overviewResponse,
+        prevOverviewResponse,
+        timeseriesResponse,
+        channelResponse,
+        tagResponse,
+        resourcesList,
+      ] = await Promise.all([
         analyticsApi.getOverview(filters.agentId, requestFilters),
         analyticsApi.getOverview(filters.agentId, prevRequestFilters).catch(() => null),
         analyticsApi.getTimeseries(filters.agentId, requestFilters, 'day'),
         analyticsApi.getBreakdown(filters.agentId, requestFilters, 'channel', 10),
         analyticsApi.getBreakdown(filters.agentId, requestFilters, 'tag', 10),
+        analyticsApi.getSqnsResourcesForFilter(filters.agentId).catch(() => []),
       ])
+
+      analyticsResources.value = resourcesList
 
       if (currentRequest !== requestSerial.value) return
 
@@ -232,6 +284,7 @@ export const useDashboardData = () => {
       filters.agentId = patch.agentId
       filters.channel = ''
       filters.clientTags = []
+      filters.resourceExternalId = null
     }
 
     if (patch.periodPreset !== undefined) {
@@ -261,6 +314,22 @@ export const useDashboardData = () => {
       filters.timezone = patch.timezone || DEFAULT_TIMEZONE
     }
 
+    if (patch.revenueBasis !== undefined) {
+      filters.revenueBasis = patch.revenueBasis
+    }
+
+    if (patch.paymentMethods !== undefined) {
+      filters.paymentMethods = patch.paymentMethods
+    }
+
+    if (patch.revenueCategories !== undefined) {
+      filters.revenueCategories = patch.revenueCategories
+    }
+
+    if (patch.resourceExternalId !== undefined) {
+      filters.resourceExternalId = patch.resourceExternalId
+    }
+
     if (initialized.value) {
       await syncQueryWithFilters()
       await refresh()
@@ -271,6 +340,10 @@ export const useDashboardData = () => {
     filters.periodPreset = DEFAULT_PERIOD_PRESET
     filters.channel = ''
     filters.clientTags = []
+    filters.revenueBasis = 'clinical'
+    filters.paymentMethods = []
+    filters.revenueCategories = []
+    filters.resourceExternalId = null
     applyPresetDates(filters.periodPreset)
     if (initialized.value) {
       await syncQueryWithFilters()
@@ -297,13 +370,15 @@ export const useDashboardData = () => {
         applyPresetDates(filters.periodPreset)
       }
 
-      initialized.value = true
       await syncQueryWithFilters()
       await refresh()
+      initialized.value = true
     } catch (err: any) {
       clearData()
       error.value = err?.data?.message || err?.message || fallbackErrorMessage
       pending.value = false
+    } finally {
+      isBootstrapping.value = false
     }
   }
 
@@ -312,9 +387,11 @@ export const useDashboardData = () => {
     pending,
     error,
     initialized,
+    isBootstrapping,
     filters,
     filtersMeta,
     agentOptions,
+    analyticsResources,
     availableChannels,
     availableTags,
     phase2Backlog,

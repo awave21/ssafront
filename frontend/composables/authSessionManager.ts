@@ -3,13 +3,15 @@ type RefreshSuccess = {
   token: string
 }
 
-type RefreshFailure = {
+export type RefreshFailure = {
   success: false
   shouldLogout: boolean
   reason: string
 }
 
 export type RefreshResult = RefreshSuccess | RefreshFailure
+
+export const isRefreshFailure = (r: RefreshResult): r is RefreshFailure => r.success === false
 
 export type EnsureAccessTokenResult = {
   token: string | null
@@ -307,6 +309,10 @@ export const ensureFreshAccessToken = async (options?: {
       refreshed: true,
       shouldLogout: false
     }
+  }
+
+  if (!isRefreshFailure(refreshResult)) {
+    return { token: null, refreshed: false, shouldLogout: false }
   }
 
   const fallbackToken = getStoredAccessToken()

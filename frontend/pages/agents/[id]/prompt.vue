@@ -1,5 +1,5 @@
 <template>
-  <AgentPageShell title="Системный промпт" :hide-actions="true">
+  <AgentPageShell title="Системный промпт" :hide-actions="true" :contained="true">
     <AgentPromptPanel />
   </AgentPageShell>
 </template>

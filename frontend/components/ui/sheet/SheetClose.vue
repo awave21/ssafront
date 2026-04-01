@@ -2,7 +2,7 @@
   <DialogClose
     :class="[
       'p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors',
-      'focus:outline-none focus:ring-2 focus:ring-indigo-400',
+      'outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
       className
     ]"
   >

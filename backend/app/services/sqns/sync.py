@@ -29,9 +29,11 @@ from app.services.sqns.client import SQNSClient
 from app.services.sqns.sync_handlers.employees import _service_external_ids_from_employee
 from app.services.sqns.sync_handlers.services import (
     SqnsServicesSyncHandler,
+    collect_resource_refs_from_services_payload,
     collect_service_resource_links,
     load_booking_resources_by_service_external_id,
     merge_service_payload_from_booking_api,
+    resource_data_from_service_link,
 )
 from app.services.sqns.sync_orchestrator import SqnsSyncOrchestrator
 
@@ -293,15 +295,39 @@ class SQNSSyncService:
             )
             resources_map = self._build_resources_map_from_employees(employees)
 
-            # 2. Upsert resources (specialists)
+            booking_resources_by_id = await load_booking_resources_by_service_external_id(self.sqns_client)
+            resource_ids_from_services, link_by_resource_id = await collect_resource_refs_from_services_payload(
+                self.sqns_client,
+                services_data,
+                booking_resources_by_id,
+            )
+
+            # 2. Upsert resources (specialists) из списка сотрудников
             synced_resource_external_ids: set[int] = set()
             for external_id, resource_data in resources_map.items():
                 await self._upsert_resource(external_id, resource_data, synced_at)
                 synced_resource_external_ids.add(external_id)
                 resources_count += 1
 
+            # Специалисты только из онлайн-записи (resources услуги), но не в /employee — не помечаем устаревшими
+            employee_external_ids = set(synced_resource_external_ids)
+            for ext_res in resource_ids_from_services:
+                if ext_res in employee_external_ids:
+                    continue
+                link = link_by_resource_id.get(ext_res, {})
+                stub = resource_data_from_service_link(ext_res, link)
+                await self._upsert_resource(ext_res, stub, synced_at)
+                synced_resource_external_ids.add(ext_res)
+                resources_count += 1
+                logger.info(
+                    "sqns_resource_upserted_from_service_link",
+                    agent_id=str(self.agent_id),
+                    external_id=ext_res,
+                )
+
+            protected_resource_ids = employee_external_ids | resource_ids_from_services
             stale_resources_count = await self._mark_stale_resources_inactive(
-                synced_resource_external_ids,
+                protected_resource_ids,
                 synced_at,
             )
 
@@ -312,8 +338,6 @@ class SQNSSyncService:
             )
             result = await self.db.execute(resource_stmt)
             resource_uuid_map = {ext_id: uuid for uuid, ext_id in result.fetchall()}
-
-            booking_resources_by_id = await load_booking_resources_by_service_external_id(self.sqns_client)
 
             # 3. Process each service
             for service in services_data:

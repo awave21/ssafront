@@ -34,7 +34,18 @@
             </div>
 
             <!-- Members Table -->
-            <div v-else-if="members.length > 0" class="bg-white rounded-xl border border-border overflow-hidden">
+            <div v-else-if="members.length > 0" class="flex flex-col gap-3">
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  @click="showInviteModal = true"
+                  class="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                >
+                  <Plus class="h-4 w-4" />
+                  <span>Пригласить</span>
+                </button>
+              </div>
+              <div class="bg-white rounded-xl border border-border overflow-hidden">
               <div class="overflow-x-auto">
                 <table class="w-full">
                   <thead class="bg-muted border-b border-border">
@@ -117,6 +128,7 @@
                   </tbody>
                 </table>
               </div>
+            </div>
             </div>
 
             <!-- Empty State for Members -->
@@ -275,7 +287,7 @@
 <script setup lang="ts">
 // @ts-ignore - definePageMeta is auto-imported in Nuxt 3
 definePageMeta({
-  middleware: 'auth'
+  middleware: ['auth', 'settings-write'] as any,
 })
 
 import { ref, onMounted, computed, watch } from 'vue'

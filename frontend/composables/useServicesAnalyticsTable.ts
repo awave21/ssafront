@@ -1,7 +1,9 @@
 import { computed, reactive, ref, watch, type Ref } from 'vue'
 import { useAnalyticsApi } from '~/composables/analyticsApi'
+import { routerReplaceSafe } from '~/utils/routerSafe'
 import type {
   AnalyticsFilterOption,
+  AnalyticsFilters,
   AnalyticsResourceOption,
   AnalyticsServiceTableItem,
   AnalyticsServicesTableResponse,
@@ -10,6 +12,11 @@ import type {
   ServicesTableSortBy,
   ServicesTableSortOrder,
 } from '~/types/analytics'
+
+export type UseServicesAnalyticsTableOptions = {
+  /** Период / канал / теги / TZ берутся из дашборда; в URL не пишутся st_from, st_to, … */
+  syncFromDashboard?: AnalyticsFilters
+}
 
 const DEFAULT_LIMIT = 50
 const DEFAULT_SORT_BY: ServicesTableSortBy = 'bookings_total'
@@ -56,7 +63,11 @@ const escapeCsv = (value: unknown) => {
   return text
 }
 
-export const useServicesAnalyticsTable = (agentId: Readonly<Ref<string>>) => {
+export const useServicesAnalyticsTable = (
+  agentId: Readonly<Ref<string>>,
+  options?: UseServicesAnalyticsTableOptions,
+) => {
+  const syncFromDashboard = options?.syncFromDashboard
   const route = useRoute()
   const router = useRouter()
   const analyticsApi = useAnalyticsApi()
@@ -74,6 +85,9 @@ export const useServicesAnalyticsTable = (agentId: Readonly<Ref<string>>) => {
     channel: '',
     resourceExternalId: null,
     clientTags: [],
+    revenueBasis: 'clinical',
+    paymentMethods: [],
+    revenueCategories: [],
     sortBy: DEFAULT_SORT_BY,
     sortOrder: DEFAULT_SORT_ORDER,
     limit: DEFAULT_LIMIT,
@@ -89,17 +103,8 @@ export const useServicesAnalyticsTable = (agentId: Readonly<Ref<string>>) => {
     query.dateTo = formatDate(dateTo)
   }
 
-  const applyRouteQuery = () => {
-    query.dateFrom = parseDate(route.query.st_from)
-    query.dateTo = parseDate(route.query.st_to)
-    query.timezone = typeof route.query.st_tz === 'string' && route.query.st_tz.trim()
-      ? route.query.st_tz.trim()
-      : DEFAULT_TIMEZONE
-    query.channel = typeof route.query.st_channel === 'string' ? route.query.st_channel : ''
-
+  const applyTableParamsFromRoute = () => {
     query.resourceExternalId = parseResourceId(route.query.st_resource)
-
-    query.clientTags = parseTags(route.query.st_tags)
     query.limit = Math.max(1, Math.min(200, parseNumber(route.query.st_limit, DEFAULT_LIMIT)))
     query.offset = Math.max(0, parseNumber(route.query.st_offset, 0))
 
@@ -120,23 +125,80 @@ export const useServicesAnalyticsTable = (agentId: Readonly<Ref<string>>) => {
 
     const rawSortOrder = route.query.st_sort_order
     query.sortOrder = rawSortOrder === 'asc' || rawSortOrder === 'desc' ? rawSortOrder : DEFAULT_SORT_ORDER
+  }
 
+  const patchQueryFromDashboard = () => {
+    if (!syncFromDashboard) return
+    if (!syncFromDashboard.dateFrom || !syncFromDashboard.dateTo) return
+    query.dateFrom = syncFromDashboard.dateFrom
+    query.dateTo = syncFromDashboard.dateTo
+    query.timezone = syncFromDashboard.timezone?.trim() || DEFAULT_TIMEZONE
+    query.channel = syncFromDashboard.channel || ''
+    query.clientTags = [...syncFromDashboard.clientTags]
+    query.revenueBasis = syncFromDashboard.revenueBasis
+    query.paymentMethods = [...(syncFromDashboard.paymentMethods ?? [])]
+    query.revenueCategories = [...(syncFromDashboard.revenueCategories ?? [])]
+    query.resourceExternalId = syncFromDashboard.resourceExternalId
+  }
+
+  const applyRouteQuery = () => {
+    applyTableParamsFromRoute()
+    if (syncFromDashboard) {
+      patchQueryFromDashboard()
+      return
+    }
+    query.dateFrom = parseDate(route.query.st_from)
+    query.dateTo = parseDate(route.query.st_to)
+    query.timezone = typeof route.query.st_tz === 'string' && route.query.st_tz.trim()
+      ? route.query.st_tz.trim()
+      : DEFAULT_TIMEZONE
+    query.channel = typeof route.query.st_channel === 'string' ? route.query.st_channel : ''
+    query.clientTags = parseTags(route.query.st_tags)
     applyDefaultDates()
   }
 
   applyRouteQuery()
+
+  if (syncFromDashboard) {
+    watch(
+      () => [
+        syncFromDashboard.dateFrom,
+        syncFromDashboard.dateTo,
+        syncFromDashboard.timezone,
+        syncFromDashboard.channel,
+        [...syncFromDashboard.clientTags].slice().sort().join(','),
+        syncFromDashboard.revenueBasis,
+        [...(syncFromDashboard.paymentMethods ?? [])].slice().sort().join(','),
+        [...(syncFromDashboard.revenueCategories ?? [])].slice().sort().join(','),
+        syncFromDashboard.resourceExternalId,
+      ],
+      () => {
+        patchQueryFromDashboard()
+        query.offset = 0
+      },
+      { flush: 'sync', immediate: true },
+    )
+  }
 
   const syncRouteQuery = async () => {
     if (isSyncingRoute.value) return
     isSyncingRoute.value = true
 
     const nextQuery = { ...route.query } as Record<string, any>
-    nextQuery.st_from = query.dateFrom
-    nextQuery.st_to = query.dateTo
-    nextQuery.st_tz = query.timezone !== DEFAULT_TIMEZONE ? query.timezone : undefined
-    nextQuery.st_channel = query.channel || undefined
+    if (syncFromDashboard) {
+      delete nextQuery.st_from
+      delete nextQuery.st_to
+      delete nextQuery.st_tz
+      delete nextQuery.st_channel
+      delete nextQuery.st_tags
+    } else {
+      nextQuery.st_from = query.dateFrom
+      nextQuery.st_to = query.dateTo
+      nextQuery.st_tz = query.timezone !== DEFAULT_TIMEZONE ? query.timezone : undefined
+      nextQuery.st_channel = query.channel || undefined
+      nextQuery.st_tags = query.clientTags.length ? query.clientTags.join(',') : undefined
+    }
     nextQuery.st_resource = query.resourceExternalId ?? undefined
-    nextQuery.st_tags = query.clientTags.length ? query.clientTags.join(',') : undefined
     nextQuery.st_sort_by = query.sortBy !== DEFAULT_SORT_BY ? query.sortBy : undefined
     nextQuery.st_sort_order = query.sortOrder !== DEFAULT_SORT_ORDER ? query.sortOrder : undefined
     nextQuery.st_limit = query.limit !== DEFAULT_LIMIT ? String(query.limit) : undefined
@@ -146,7 +208,7 @@ export const useServicesAnalyticsTable = (agentId: Readonly<Ref<string>>) => {
       if (nextQuery[key] === undefined || nextQuery[key] === '') delete nextQuery[key]
     })
 
-    await router.replace({ query: nextQuery })
+    await routerReplaceSafe(router, { query: nextQuery })
     isSyncingRoute.value = false
   }
 
@@ -171,6 +233,9 @@ export const useServicesAnalyticsTable = (agentId: Readonly<Ref<string>>) => {
     channel: query.channel,
     resourceExternalId: query.resourceExternalId,
     clientTags: query.clientTags,
+    revenueBasis: query.revenueBasis,
+    paymentMethods: query.paymentMethods,
+    revenueCategories: query.revenueCategories,
     sortBy: query.sortBy,
     sortOrder: query.sortOrder,
     limit: query.limit,
@@ -186,6 +251,7 @@ export const useServicesAnalyticsTable = (agentId: Readonly<Ref<string>>) => {
     'analytics-services-table',
     async () => {
       if (!agentId.value) return null
+      if (syncFromDashboard && (!query.dateFrom || !query.dateTo)) return null
       await syncRouteQuery()
       return await analyticsApi.getServicesTable(agentId.value, query)
     },
@@ -201,6 +267,7 @@ export const useServicesAnalyticsTable = (agentId: Readonly<Ref<string>>) => {
     if (!nextAgentId) return
     query.offset = 0
     await fetchFiltersOptions()
+    if (syncFromDashboard && (!query.dateFrom || !query.dateTo)) return
     await refresh()
   }, { immediate: true })
 

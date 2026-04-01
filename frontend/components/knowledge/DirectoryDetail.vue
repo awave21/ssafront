@@ -2,15 +2,7 @@
   <div class="space-y-4">
     <!-- Header -->
     <div class="flex items-center justify-between gap-4">
-      <div class="flex items-center gap-3 min-w-0">
-        <button
-          @click="$emit('back')"
-          class="flex items-center gap-2 px-3 py-2 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors text-sm font-medium"
-        >
-          <ArrowLeft class="w-4 h-4" />
-          <span>Все справочники</span>
-        </button>
-        <div class="w-px h-6 bg-slate-200"></div>
+      <div class="flex min-w-0 items-center gap-3">
         <div class="min-w-0">
           <h3 class="text-lg font-bold text-slate-900 truncate">{{ directory.name }}</h3>
           <p class="text-xs text-slate-500">
@@ -305,7 +297,6 @@ import {
   type ColumnDef,
 } from '@tanstack/vue-table'
 import {
-  ArrowLeft,
   Pencil,
   Loader2,
   FileText,
@@ -337,7 +328,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'back'): void
   (e: 'settings'): void
   (e: 'import'): void
   (e: 'export'): void

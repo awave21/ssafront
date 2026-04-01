@@ -1,6 +1,7 @@
 """Интеграция с WAPPI API."""
 
 from app.services.wappi.client import (
+    WappiAuth2FAResult,
     WappiAuthQrResult,
     WappiBalanceAddDaysResult,
     WappiClient,
@@ -8,6 +9,8 @@ from app.services.wappi.client import (
     WappiPlatform,
     WappiProfileCreateResult,
     WappiProfileDeleteResult,
+    WappiProfileLogoutResult,
+    WappiSyncMessageSendResult,
 )
 from app.services.wappi.binding import (
     ChannelProfileAlreadyBoundError,
@@ -19,6 +22,7 @@ from app.services.wappi.binding import (
     bind_profile_to_channel,
     build_wappi_client,
     request_channel_auth_qr,
+    submit_channel_auth_2fa,
     unbind_profile_from_channel,
 )
 
@@ -26,10 +30,13 @@ __all__ = [
     "WappiClient",
     "WappiClientError",
     "WappiPlatform",
+    "WappiAuth2FAResult",
     "WappiAuthQrResult",
     "WappiBalanceAddDaysResult",
     "WappiProfileCreateResult",
     "WappiProfileDeleteResult",
+    "WappiProfileLogoutResult",
+    "WappiSyncMessageSendResult",
     "ChannelProfileAlreadyBoundError",
     "ChannelProfileBindingError",
     "ChannelProfileConfigError",
@@ -39,5 +46,6 @@ __all__ = [
     "bind_profile_to_channel",
     "build_wappi_client",
     "request_channel_auth_qr",
+    "submit_channel_auth_2fa",
     "unbind_profile_from_channel",
 ]

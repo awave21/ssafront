@@ -24,7 +24,7 @@ from app.services.runtime.message_history import prepare_message_history
 from app.services.runtime.sqns import prepare_sqns_tooling
 from app.services.runtime.token_usage import extract_token_usage
 from app.services.runtime.tool_calls import extract_tools_called
-from app.services.runtime.tools import _build_tool_wrapper, build_directory_tools
+from app.services.runtime.tools import _build_tool_wrapper
 from app.services.runtime.utils import _enrich_system_prompt_with_datetime, _sanitize_output
 
 logger = structlog.get_logger(__name__)
@@ -96,10 +96,6 @@ async def run_agent_with_tools(
         )
         wrapped_tools.append(pydantic_tool)
     
-    directory_tools = await build_directory_tools(agent.id)
-    if directory_tools:
-        wrapped_tools.extend(directory_tools)
-
     sqns_toolsets, sqns_tools = await prepare_sqns_tooling(agent, user)
     if sqns_tools:
         wrapped_tools.extend(sqns_tools)

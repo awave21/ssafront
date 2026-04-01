@@ -15,6 +15,8 @@ from app.db.models.channel import AgentChannel, Channel
 from app.db.session import get_db
 from app.schemas.auth import AuthContext
 from app.schemas.channel import (
+    ChannelAuth2FAPayload,
+    ChannelAuth2FARead,
     ChannelAuthQrRead,
     ChannelConnectionPayload,
     ChannelDisconnectPayload,
@@ -29,6 +31,7 @@ from app.services.wappi import (
     ChannelProfileUnsupportedTypeError,
     bind_profile_to_channel,
     request_channel_auth_qr,
+    submit_channel_auth_2fa,
     unbind_profile_from_channel,
 )
 
@@ -46,6 +49,7 @@ CHANNEL_TYPE_MAP = {
     "Max_Phone": "max",
 }
 WAPPI_PHONE_CHANNEL_TYPES = {"telegram_phone", "whatsapp", "max"}
+WAPPI_PHONE_2FA_CHANNEL_TYPES = {"telegram_phone", "max"}
 
 
 def _generate_webhook_token() -> str:
@@ -112,6 +116,41 @@ def _build_wappi_profile_name(agent_name: str, channel_type: str, channel_id: UU
     }
     type_label = type_label_map.get(channel_type, "Phone")
     return f"{normalized_agent} {type_label} {str(channel_id)[:8]}"
+
+
+def _build_wappi_external_error_context(exc: ChannelProfileExternalError) -> dict[str, str]:
+    context: dict[str, str] = {}
+    profile_id = str(getattr(exc, "profile_id", "") or "").strip()
+    if profile_id:
+        context["profile_id"] = profile_id
+    payment_error = str(getattr(exc, "payment_error", "") or "").strip()
+    if payment_error:
+        context["payment_error"] = payment_error
+    return context
+
+
+def _normalize_wappi_error_text(error_text: str) -> str:
+    normalized = (error_text or "").strip().lower()
+    if not normalized:
+        return ""
+    try:
+        decoded = normalized.encode("utf-8").decode("unicode_escape").lower()
+    except Exception:  # noqa: BLE001
+        decoded = normalized
+    return f"{normalized}\n{decoded}"
+
+
+def _is_wappi_2fa_error(exc: ChannelProfileExternalError) -> bool:
+    normalized = _normalize_wappi_error_text(str(exc))
+    markers = (
+        "2fa_error",
+        "2fa error",
+        "wrong password",
+        "invalid password",
+        "incorrect password",
+        "неверный пароль",
+    )
+    return any(marker in normalized for marker in markers)
 
 
 async def _get_channel_for_agent_by_type_or_404(
@@ -228,8 +267,9 @@ async def get_channel_auth_qr(
             detail="QR авторизация доступна только для подключаемых номеров",
         )
     channel, _ = await _get_channel_for_agent_by_type_or_404(db, agent_id, resolved_type)
+    previous_auth_state = bool(channel.phone_is_authorized)
     try:
-        qr_result = await request_channel_auth_qr(channel=channel)
+        qr_result = await request_channel_auth_qr(db=db, channel=channel)
     except ChannelProfileConfigError as exc:
         wappi_webhook_logger.warning(
             "channel_phone_qr_config_error",
@@ -275,12 +315,108 @@ async def get_channel_auth_qr(
             detail="Не удалось получить QR-код. Попробуйте позже",
         ) from exc
 
+    if bool(channel.phone_is_authorized) != previous_auth_state:
+        await db.commit()
+
     return ChannelAuthQrRead(
         status=qr_result.status,
-        qr_code=qr_result.qr_code,
+        qr_code=qr_result.qr_code or None,
+        requires_2fa=qr_result.requires_2fa,
+        detail=qr_result.detail,
         uuid=qr_result.uuid,
         time=qr_result.time,
         timestamp=qr_result.timestamp,
+    )
+
+
+@router.post(
+    "/{agent_id}/channels/{channel_type}/auth/2fa",
+    response_model=ChannelAuth2FARead,
+    summary="Ввести пароль 2FA для авторизации номера",
+)
+async def submit_channel_auth_2fa_password(
+    agent_id: UUID,
+    channel_type: str,
+    payload: ChannelAuth2FAPayload,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> ChannelAuth2FARead:
+    await get_agent_or_404(agent_id, db, user)
+    resolved_type = _resolve_channel_type_from_path(channel_type.lower())
+    if resolved_type not in WAPPI_PHONE_CHANNEL_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="2FA авторизация доступна только для подключаемых номеров",
+        )
+    if resolved_type not in WAPPI_PHONE_2FA_CHANNEL_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="2FA авторизация недоступна для выбранного типа канала",
+        )
+
+    channel, _ = await _get_channel_for_agent_by_type_or_404(db, agent_id, resolved_type)
+    try:
+        result = await submit_channel_auth_2fa(
+            channel=channel,
+            pwd_code=payload.pwd_code,
+        )
+    except ChannelProfileConfigError as exc:
+        wappi_webhook_logger.warning(
+            "channel_phone_auth_2fa_config_error",
+            agent_id=str(agent_id),
+            channel_type=resolved_type,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Сервис авторизации канала сейчас недоступен",
+        ) from exc
+    except ChannelProfileUnsupportedTypeError as exc:
+        wappi_webhook_logger.warning(
+            "channel_phone_auth_2fa_unsupported_type",
+            agent_id=str(agent_id),
+            channel_type=resolved_type,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Выбранный тип канала не поддерживается",
+        ) from exc
+    except ChannelProfileNotBoundError as exc:
+        wappi_webhook_logger.warning(
+            "channel_phone_auth_2fa_not_ready",
+            agent_id=str(agent_id),
+            channel_type=resolved_type,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Канал еще не готов к авторизации",
+        ) from exc
+    except ChannelProfileExternalError as exc:
+        wappi_webhook_logger.warning(
+            "channel_phone_auth_2fa_external_error",
+            agent_id=str(agent_id),
+            channel_type=resolved_type,
+            error=str(exc),
+            **_build_wappi_external_error_context(exc),
+        )
+        if _is_wappi_2fa_error(exc):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Неверный пароль 2FA. Проверьте облачный пароль и попробуйте снова",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Не удалось передать пароль 2FA. Попробуйте позже",
+        ) from exc
+
+    return ChannelAuth2FARead(
+        status=result.status,
+        detail=result.detail,
+        uuid=result.uuid,
+        time=result.time,
+        timestamp=result.timestamp,
     )
 
 
@@ -340,6 +476,8 @@ async def connect_channel(
             ) from exc
         _log_telegram_webhook_connected(agent_id=agent.id, channel=channel, action="connect")
     elif resolved_type in WAPPI_PHONE_CHANNEL_TYPES:
+        if resolved_type == "max" and payload.max_bot_id:
+            channel.wappi_max_bot_id = payload.max_bot_id.strip() or None
         try:
             webhook_url = _build_public_webhook_url(_build_phone_channel_webhook_endpoint(channel.id))
             await bind_profile_to_channel(
@@ -377,11 +515,13 @@ async def connect_channel(
             ) from exc
         except ChannelProfileExternalError as exc:
             await db.rollback()
+            log_context = _build_wappi_external_error_context(exc)
             wappi_webhook_logger.warning(
                 "channel_phone_connect_external_error",
                 agent_id=agent_id_str,
                 channel_type=resolved_type,
                 error=str(exc),
+                **log_context,
             )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -426,6 +566,8 @@ async def update_channel(
                 detail="Telegram setWebhook failed",
             ) from exc
         _log_telegram_webhook_connected(agent_id=agent_id, channel=channel, action="update")
+    elif resolved_type == "max" and payload.max_bot_id is not None:
+        channel.wappi_max_bot_id = payload.max_bot_id.strip() or None
     await db.commit()
     await db.refresh(channel)
     await write_audit(db, user, "agent.channel.update", "agent", str(agent_id))
@@ -446,7 +588,10 @@ def _resolve_channel_type_from_path(channel_type: str) -> str:
     "/{agent_id}/channels/{channel_type}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Отключить канал по типу (из пути)",
-    description="Удаляет привязку канала к агенту. Тип в пути: telegram, telegram_phone, whatsapp или max.",
+    description=(
+        "Для phone-каналов выполняет logout в WAPPI и оставляет привязанный профиль для повторной "
+        "авторизации. Для telegram-бота удаляет привязку канала к агенту."
+    ),
 )
 async def disconnect_channel_by_type(
     agent_id: UUID,
@@ -495,11 +640,15 @@ async def disconnect_channel_by_type(
                 agent_id=str(agent_id),
                 channel_type=resolved_type,
                 error=str(exc),
+                **_build_wappi_external_error_context(exc),
             )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Не удалось отключить номер мессенджера. Попробуйте позже",
             ) from exc
+        await db.commit()
+        await write_audit(db, user, "agent.channel.disconnect", "agent", str(agent_id))
+        return None
     await db.delete(link)
     await db.flush()
     stmt = select(AgentChannel.id).where(AgentChannel.channel_id == channel.id)
@@ -516,7 +665,10 @@ async def disconnect_channel_by_type(
     "/{agent_id}/channels",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Отключить канал (тип в теле)",
-    description="Удаляет привязку канала. Тип в теле: type = Telegram_Bot | Telegram_Phone | Whatsapp_Phone | Max_Phone.",
+    description=(
+        "Для phone-каналов выполняет logout в WAPPI и оставляет привязанный профиль для повторной "
+        "авторизации. Для Telegram_Bot удаляет привязку канала."
+    ),
 )
 async def disconnect_channel(
     agent_id: UUID,
@@ -565,11 +717,15 @@ async def disconnect_channel(
                 agent_id=str(agent_id),
                 channel_type=resolved_type,
                 error=str(exc),
+                **_build_wappi_external_error_context(exc),
             )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Не удалось отключить номер мессенджера. Попробуйте позже",
             ) from exc
+        await db.commit()
+        await write_audit(db, user, "agent.channel.disconnect", "agent", str(agent_id))
+        return None
     await db.delete(link)
     await db.flush()
     stmt = select(AgentChannel.id).where(AgentChannel.channel_id == channel.id)

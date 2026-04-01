@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Применение миграций Alembic через infra/docker-compose.yml
 # Использование: ./scripts/apply-migrations.sh
+#
+# Всегда одноразовый контейнер `compose run` + SKIP_ALEMBIC=1:
+# не делаем `exec` в уже запущенный api — иначе второй alembic параллельно с
+# entrypoint и деплоем, блокировки PostgreSQL и «зависание» сборки.
 
 set -euo pipefail
 
@@ -48,13 +52,7 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-API_RUNNING="$("${DC[@]}" ps -q api 2>/dev/null | wc -l | tr -d ' ')"
-if [[ "$API_RUNNING" == "0" ]]; then
-  echo "API контейнер не запущен, запускаю одноразовый контейнер для миграций..."
-  "${DC[@]}" run --rm api alembic -c /app/alembic.ini upgrade head
-else
-  echo "API контейнер запущен, применяю миграции через exec..."
-  "${DC[@]}" exec -T api alembic -c /app/alembic.ini upgrade head
-fi
+echo "Применяю миграции (docker compose run api, SKIP_ALEMBIC=1 — без гонки с entrypoint)..."
+"${DC[@]}" run --rm --no-deps -e SKIP_ALEMBIC=1 api sh -c 'alembic -c /app/alembic.ini upgrade head'
 
 echo "Миграции успешно применены."

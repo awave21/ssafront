@@ -164,7 +164,12 @@ watch(() => props.messages.length, (newLength, oldLength) => {
 
     const lastMessage = props.messages[props.messages.length - 1]
 
-    if (isAtBottom.value || lastMessage?.role === 'user' || lastMessage?.role === 'manager') {
+    if (
+      isAtBottom.value
+      || lastMessage?.role === 'user'
+      || lastMessage?.role === 'manager'
+      || lastMessage?.role === 'system'
+    ) {
       nextTick(() => scrollToBottom(false))
     } else if (lastMessage?.role === 'agent') {
       showNewMessagesButton.value = true

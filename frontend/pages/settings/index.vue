@@ -208,7 +208,7 @@
 <script setup lang="ts">
 // @ts-ignore - definePageMeta is auto-imported in Nuxt 3
 definePageMeta({
-  middleware: 'auth'
+  middleware: ['auth', 'settings-write'] as any,
 })
 
 import { ref, computed, onMounted, watch } from 'vue'

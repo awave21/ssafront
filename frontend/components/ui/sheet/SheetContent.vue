@@ -6,10 +6,13 @@
     <DialogContent
       :class="[
         'fixed z-[10001] bg-white shadow-xl flex flex-col',
+        'outline-none ring-0 focus:outline-none focus-visible:outline-none focus-visible:ring-0',
         'duration-300 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:pointer-events-none',
         sideClasses,
         className
       ]"
+      @open-auto-focus="onOpenAutoFocus"
+      @close-auto-focus="onCloseAutoFocus"
       v-bind="{ ...forwarded, ...$attrs }"
     >
       <slot />
@@ -27,6 +30,7 @@ import {
   DialogPortal,
   useForwardPropsEmits,
 } from 'radix-vue'
+import { clearStaleBodyPointerAndOverflow } from '~/utils/bodyPointerFix'
 
 type SheetSide = 'top' | 'bottom' | 'left' | 'right'
 
@@ -37,6 +41,17 @@ const props = withDefaults(defineProps<DialogContentProps & { side?: SheetSide; 
 
 const emits = defineEmits<DialogContentEmits>()
 const forwarded = useForwardPropsEmits(props, emits)
+
+/** Без автофокуса Radix не попадает на первый фокусируемый узел (часто кнопка закрытия) — без кольца вокруг крестика при открытии. */
+const onOpenAutoFocus = (e: Event) => {
+  e.preventDefault()
+}
+
+/** После закрытия принудительно чистим body-стили, застрявшие при открытии из dropdown (reka-ui + radix-vue). */
+const onCloseAutoFocus = (e: Event) => {
+  e.preventDefault()
+  clearStaleBodyPointerAndOverflow()
+}
 
 const sideClasses = computed(() => {
   const base: Record<SheetSide, string> = {

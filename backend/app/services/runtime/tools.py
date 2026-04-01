@@ -21,7 +21,6 @@ from app.services.direct_questions.retrieval import search_direct_question_candi
 from app.services.knowledge_files import search_indexed_knowledge_files
 from app.services.function_rules_runtime import run_rules_for_phase
 from app.services.tool_executor import ToolExecutionError, execute_tool_call, transform_response
-from app.services.directory.service import get_agent_directory_tools
 from app.services.runtime.utils import _safe_identifier
 
 logger = structlog.get_logger("app.services.runtime")
@@ -579,53 +578,3 @@ async def build_knowledge_search_tool(
     )
 
 
-async def build_directory_tools(agent_id: UUID) -> list[PydanticTool]:
-    try:
-        from app.db.session import async_session_factory
-
-        async with async_session_factory() as db:
-            directory_tools_info = await get_agent_directory_tools(
-                db=db,
-                agent_id=agent_id,
-                db_session_factory=async_session_factory,
-                only_catalog_templates=True,
-            )
-
-            tools: list[PydanticTool] = []
-            for tool_info in directory_tools_info:
-                tool_fn = tool_info["function"]
-                pydantic_tool = PydanticTool.from_schema(
-                    function=tool_fn,
-                    name=tool_info["name"],
-                    description=tool_info["description"],
-                    json_schema={
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "Поисковый запрос — точная формулировка вопроса пользователя или ключевые слова",
-                            }
-                        },
-                        "required": ["query"],
-                        "additionalProperties": False,
-                    },
-                    takes_ctx=True,
-                )
-                tools.append(pydantic_tool)
-
-            if directory_tools_info:
-                logger.info(
-                    "directory_tools_loaded",
-                    agent_id=str(agent_id),
-                    count=len(directory_tools_info),
-                    tool_names=[t["name"] for t in directory_tools_info],
-                )
-
-            return tools
-    except Exception as exc:
-        logger.error(
-            "directory_tools_error",
-            agent_id=str(agent_id),
-            error=str(exc),
-        )
-        return []

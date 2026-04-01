@@ -165,7 +165,7 @@
 
 <script setup lang="ts">
 definePageMeta({
-  middleware: 'auth'
+  middleware: ['auth', 'settings-write'] as any,
 })
 
 import { ref, onMounted, watch } from 'vue'

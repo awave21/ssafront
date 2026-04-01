@@ -53,12 +53,13 @@
             {{ dialogTitle }}
           </h3>
           
-          <!-- Platform Badge -->
+          <!-- Канал / платформа -->
           <span
-            v-if="isTelegram"
-            class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700"
+            v-if="channelBadgeText"
+            class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700 max-w-[140px] truncate"
+            :title="channelBadgeText"
           >
-            TG
+            {{ channelBadgeText }}
           </span>
           
           <!-- Status Indicator -->
@@ -258,7 +259,20 @@ onClickOutside(contextMenuRef, () => {
 
 // Computed
 const isTelegram = computed(() => {
-  return props.dialog.platform === 'telegram' || props.dialog.id?.startsWith('telegram:')
+  const p = props.dialog.platform || props.dialog.user_info?.platform
+  return (
+    p === 'telegram' ||
+    p === 'telegram_phone' ||
+    props.dialog.id?.startsWith('telegram:') ||
+    props.dialog.id?.startsWith('telegram_phone:')
+  )
+})
+
+const channelBadgeText = computed(() => {
+  const label = props.dialog.user_info?.integration_channel_label?.trim()
+  if (label) return label
+  if (isTelegram.value) return 'TG'
+  return ''
 })
 
 const username = computed(() => {
@@ -272,10 +286,10 @@ const dialogTitle = computed(() => {
     return [userInfo.first_name, userInfo.last_name].filter(Boolean).join(' ')
   }
   if (userInfo?.username) return `@${userInfo.username}`
-  // For Telegram dialogs without user_info, show Telegram ID
+  // For Telegram / telegram_phone dialogs without user_info, show ID
   if (isTelegram.value && props.dialog.id) {
-    const telegramId = props.dialog.id.replace('telegram:', '')
-    return `Telegram #${telegramId}`
+    const id = props.dialog.id.replace(/^(telegram|telegram_phone):/, '')
+    return `Telegram #${id}`
   }
   return 'Диалог'
 })

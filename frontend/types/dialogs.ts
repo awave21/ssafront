@@ -6,12 +6,18 @@ export type DialogAgentStatus = 'active' | 'paused'
 
 // User info from external platforms
 export type DialogUserInfo = {
-  platform?: string                 // 'telegram', 'whatsapp', 'web', etc.
+  platform?: string                 // 'telegram', 'telegram_phone', 'whatsapp', 'web', etc.
   platform_id?: string
   session_id?: string
   username?: string
   first_name?: string
   last_name?: string
+  /** Подпись канала интеграции (например «Telegram (личный номер)») */
+  integration_channel_label?: string
+  integration_channel_type?: string
+  message_sender_kind?: string
+  manager_source?: string
+  wappi_direction?: string
 }
 
 // Dialog entity
@@ -35,7 +41,7 @@ export type Dialog = {
 }
 
 // Message types
-export type MessageRole = 'user' | 'agent' | 'manager'
+export type MessageRole = 'user' | 'agent' | 'manager' | 'system'
 export type MessageType = 'text' | 'image' | 'voice' | 'tool_call' | 'tool_result'
 export type MessageStatus = 'sending' | 'sent' | 'failed' | 'streaming' | 'done'
 
@@ -50,6 +56,11 @@ export type Message = {
   duration_seconds?: number         // for voice messages
   created_at: string
   error_message?: string            // for failed messages
+  /** С сервера (MessageRead): contact, agent, manager, wappi_operator, system */
+  sender_kind?: string
+  /** Подпись отправителя для UI («Клиент», «Агент», «Оператор (MAX)») */
+  sender_label?: string
+  user_info?: DialogUserInfo
   // Tool call / tool result fields
   tool_name?: string
   tool_call_id?: string

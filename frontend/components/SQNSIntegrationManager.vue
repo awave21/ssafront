@@ -4,6 +4,7 @@
       <Tabs v-model:value="activeTab">
         <TabsList className="bg-slate-50/70 p-1 rounded-xl">
           <TabsTrigger value="tools">Инструменты</TabsTrigger>
+          <TabsTrigger value="all-records">Все записи</TabsTrigger>
           <TabsTrigger value="services">Услуги</TabsTrigger>
           <TabsTrigger value="specialists">Специалисты</TabsTrigger>
           <TabsTrigger value="categories">Категории</TabsTrigger>
@@ -87,6 +88,114 @@
                 >
                   <Loader2 class="w-6 h-6 animate-spin text-indigo-600" />
                 </div>
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="all-records">
+          <div class="space-y-0.5 border border-slate-200 rounded-lg overflow-hidden">
+            <div class="p-6 border-b border-slate-100 space-y-4">
+              <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h3 class="text-lg font-bold text-slate-900">Все записи SQNS</h3>
+                  <p class="text-sm text-slate-500 mt-1">
+                    Плоский список связей: услуга, сотрудник, категория и дата обновления.
+                  </p>
+                </div>
+                <div class="relative">
+                  <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input
+                    v-model="allRecordsSearch"
+                    placeholder="Поиск по услуге, сотруднику, категории..."
+                    class="pl-9 w-72"
+                  />
+                </div>
+              </div>
+            </div>
+            <Table wrapper-class="rounded-none border-0 bg-transparent">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>
+                    <button @click="toggleSort(allRecordsTable, 'service')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                      Услуга
+                      <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                    </button>
+                  </TableHead>
+                  <TableHead>
+                    <button @click="toggleSort(allRecordsTable, 'employee')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                      Сотрудник
+                      <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                    </button>
+                  </TableHead>
+                  <TableHead>
+                    <button @click="toggleSort(allRecordsTable, 'category')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                      Категория
+                      <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                    </button>
+                  </TableHead>
+                  <TableHead>
+                    <button @click="toggleSort(allRecordsTable, 'updated_at')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
+                      Дата обновления
+                      <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
+                    </button>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-if="isAllRecordsLoading" v-for="i in 8" :key="`all-records-skel-${i}`" class="animate-pulse">
+                  <TableCell><div class="h-4 w-48 bg-slate-100 rounded"></div></TableCell>
+                  <TableCell><div class="h-4 w-48 bg-slate-100 rounded"></div></TableCell>
+                  <TableCell><div class="h-4 w-32 bg-slate-100 rounded"></div></TableCell>
+                  <TableCell><div class="h-4 w-36 bg-slate-100 rounded"></div></TableCell>
+                </TableRow>
+                <TableRow v-else-if="filteredAllRecords.length === 0">
+                  <TableCell :colspan="4" className="p-12 text-center text-slate-400 italic">
+                    Записи не найдены
+                  </TableCell>
+                </TableRow>
+                <TableRow v-else v-for="(row, index) in pagedAllRecords" :key="`${row.service}-${row.employee}-${index}`">
+                  <TableCell className="font-medium text-slate-900">{{ row.service }}</TableCell>
+                  <TableCell>{{ row.employee || '—' }}</TableCell>
+                  <TableCell>{{ row.category || 'Без категории' }}</TableCell>
+                  <TableCell>{{ formatRecordUpdatedAt(row.updated_at) }}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+            <div class="p-4 border-t border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-500">Записей на странице:</span>
+                <select
+                  v-model.number="allRecordsPageSize"
+                  class="px-2 py-1 bg-white border border-slate-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 transition-all"
+                >
+                  <option :value="25">25</option>
+                  <option :value="50">50</option>
+                  <option :value="100">100</option>
+                  <option :value="250">250</option>
+                </select>
+              </div>
+              <p class="text-xs text-slate-500">
+                {{ allRecordsPageOffset + 1 }}–{{ Math.min(allRecordsPageOffset + allRecordsPageSize, filteredAllRecords.length) }}
+                из {{ filteredAllRecords.length }}
+                <span v-if="filteredAllRecords.length !== allRecordsTotal">(всего {{ allRecordsTotal }})</span>
+              </p>
+              <div class="flex items-center gap-2">
+                <button
+                  @click="allRecordsPageOffset = Math.max(0, allRecordsPageOffset - allRecordsPageSize)"
+                  :disabled="allRecordsPageOffset === 0"
+                  class="p-2 rounded-lg hover:bg-white hover:shadow-sm disabled:opacity-30 transition-all"
+                >
+                  <ChevronLeft class="h-4 w-4" />
+                </button>
+                <span class="text-xs font-bold text-slate-700">Страница {{ allRecordsCurrentPage }}</span>
+                <button
+                  @click="allRecordsPageOffset += allRecordsPageSize"
+                  :disabled="allRecordsPageOffset + allRecordsPageSize >= filteredAllRecords.length"
+                  class="p-2 rounded-lg hover:bg-white hover:shadow-sm disabled:opacity-30 transition-all"
+                >
+                  <ChevronRight class="h-4 w-4" />
+                </button>
               </div>
             </div>
           </div>
@@ -698,7 +807,7 @@ import {
   ChevronLeft, 
   ChevronRight
 } from 'lucide-vue-next'
-import { useAgents, type SqnsSpecialist, type SqnsTool } from '../composables/useAgents'
+import { useAgents, type SqnsServiceEmployeeLink, type SqnsSpecialist, type SqnsTool } from '../composables/useAgents'
 import { useAgentEditorStore } from '../composables/useAgentEditorStore'
 import { useToast } from '../composables/useToast'
 import { getReadableErrorMessage } from '~/utils/api-errors'
@@ -740,6 +849,7 @@ const {
   bulkUpdateSqnsServices,
   fetchSqnsCategories,
   fetchSqnsSpecialists,
+  fetchSqnsServiceEmployeeLinks,
   updateSqnsSpecialist,
   updateSqnsCategory
 } = useAgents()
@@ -754,9 +864,15 @@ const selectedIds = ref<string[]>([])
 const isCategoriesLoading = ref(false)
 const categorySearch = ref('')
 const showOnlyEnabledCategories = ref(false)
-const activeTab = ref<'tools' | 'services' | 'specialists' | 'categories'>('tools')
+const activeTab = ref<'tools' | 'all-records' | 'services' | 'specialists' | 'categories'>('tools')
 const specialists = ref<SqnsSpecialist[]>([])
 const isSpecialistsLoading = ref(false)
+const allRecords = ref<SqnsServiceEmployeeLink[]>([])
+const allRecordsTotal = ref(0)
+const isAllRecordsLoading = ref(false)
+const allRecordsSearch = ref('')
+const allRecordsPageSize = ref(50)
+const allRecordsPageOffset = ref(0)
 const specialistSearch = ref('')
 const specialistInformationSheetOpen = ref(false)
 const selectedSpecialistForInformation = ref<SqnsSpecialist | null>(null)
@@ -784,8 +900,8 @@ const pagination = ref({
 })
 
 const getActiveTabStorageKey = () => `sqns-active-tab:${props.agentId}`
-const isValidActiveTab = (value: string): value is 'tools' | 'services' | 'specialists' | 'categories' =>
-  value === 'tools' || value === 'services' || value === 'specialists' || value === 'categories'
+const isValidActiveTab = (value: string): value is 'tools' | 'all-records' | 'services' | 'specialists' | 'categories' =>
+  value === 'tools' || value === 'all-records' || value === 'services' || value === 'specialists' || value === 'categories'
 
 const currentPage = computed(() => Math.floor(pagination.value.offset / pagination.value.limit) + 1)
 const isAllSelected = computed(() => services.value.length > 0 && services.value.every(s => selectedIds.value.includes(s.id)))
@@ -841,6 +957,26 @@ const filteredSpecialists = computed(() => {
   })
 })
 
+const filteredAllRecords = computed(() => {
+  const query = allRecordsSearch.value.trim().toLowerCase()
+  if (!query) return allRecords.value
+  return allRecords.value.filter((row) => {
+    const haystack = `${row.service ?? ''} ${row.employee ?? ''} ${row.category ?? ''}`.toLowerCase()
+    return haystack.includes(query)
+  })
+})
+
+const allRecordsCurrentPage = computed(() =>
+  Math.floor(allRecordsPageOffset.value / allRecordsPageSize.value) + 1
+)
+
+const pagedAllRecords = computed(() =>
+  filteredAllRecords.value.slice(allRecordsPageOffset.value, allRecordsPageOffset.value + allRecordsPageSize.value)
+)
+
+watch(allRecordsSearch, () => { allRecordsPageOffset.value = 0 })
+watch(allRecordsPageSize, () => { allRecordsPageOffset.value = 0 })
+
 const isSpecialistEnabled = (specialist: SqnsSpecialist) => specialist.active ?? specialist.is_active ?? false
 const parseServicePrice = (service: any) => {
   if (typeof service?.price === 'number' && Number.isFinite(service.price)) return service.price
@@ -851,6 +987,7 @@ const parseServicePrice = (service: any) => {
 const servicesSorting = ref<SortingState>([])
 const specialistsSorting = ref<SortingState>([])
 const categoriesSorting = ref<SortingState>([])
+const allRecordsSorting = ref<SortingState>([{ id: 'updated_at', desc: true }])
 
 const servicesColumns: ColumnDef<any>[] = [
   { id: 'name', accessorFn: (row) => row.name ?? '' },
@@ -874,6 +1011,20 @@ const categoriesColumns: ColumnDef<any>[] = [
   { id: 'services', accessorFn: (row) => row.services_count ?? 0 },
   { id: 'status', accessorFn: (row) => Boolean(row.is_enabled) },
   { id: 'priority', accessorFn: (row) => row.priority ?? 0 },
+]
+
+const allRecordsColumns: ColumnDef<SqnsServiceEmployeeLink>[] = [
+  { id: 'service', accessorFn: (row) => row.service ?? '' },
+  { id: 'employee', accessorFn: (row) => row.employee ?? '' },
+  { id: 'category', accessorFn: (row) => row.category ?? '' },
+  {
+    id: 'updated_at',
+    accessorFn: (row) => {
+      if (!row.updated_at) return 0
+      const ts = new Date(row.updated_at).getTime()
+      return Number.isFinite(ts) ? ts : 0
+    }
+  },
 ]
 
 const servicesTable = useVueTable({
@@ -909,9 +1060,21 @@ const categoriesTable = useVueTable({
   getSortedRowModel: getSortedRowModel(),
 })
 
+const allRecordsTable = useVueTable({
+  get data() { return filteredAllRecords.value },
+  columns: allRecordsColumns,
+  state: {
+    get sorting() { return allRecordsSorting.value },
+  },
+  onSortingChange: (updater) => valueUpdater(updater, allRecordsSorting),
+  getCoreRowModel: getCoreRowModel(),
+  getSortedRowModel: getSortedRowModel(),
+})
+
 const sortedServices = computed(() => servicesTable.getRowModel().rows.map((row) => row.original))
 const sortedSpecialists = computed(() => specialistsTable.getRowModel().rows.map((row) => row.original))
 const sortedCategories = computed(() => categoriesTable.getRowModel().rows.map((row) => row.original))
+const sortedAllRecords = computed(() => allRecordsTable.getRowModel().rows.map((row) => row.original))
 
 const toggleSort = (table: any, columnId: string) => {
   const column = table.getColumn(columnId)
@@ -961,6 +1124,26 @@ const loadSpecialists = async (silent = false) => {
   } finally {
     if (!silent) isSpecialistsLoading.value = false
   }
+}
+
+const loadAllRecords = async (silent = false) => {
+  try {
+    if (!silent) isAllRecordsLoading.value = true
+    const response = await fetchSqnsServiceEmployeeLinks(props.agentId, { limit: 2000, offset: 0 })
+    allRecords.value = response.items ?? []
+    allRecordsTotal.value = response.total ?? allRecords.value.length
+  } catch (err) {
+    console.error('Failed to load service-employee links:', err)
+  } finally {
+    if (!silent) isAllRecordsLoading.value = false
+  }
+}
+
+const formatRecordUpdatedAt = (value: string | null) => {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 const handleToggleService = async (service: any) => {
@@ -1227,6 +1410,9 @@ watch(activeTab, (tab) => {
   if (tab === 'services' && services.value.length === 0) {
     loadServices()
   }
+  if (tab === 'all-records' && allRecords.value.length === 0) {
+    loadAllRecords()
+  }
 })
 
 onMounted(() => {
@@ -1241,6 +1427,7 @@ onMounted(() => {
   if (activeTab.value === 'services') loadServices()
   else if (activeTab.value === 'categories') loadCategories()
   else if (activeTab.value === 'specialists') loadSpecialists()
+  else if (activeTab.value === 'all-records') loadAllRecords()
   
   // Always ensure status is loaded for tools
   store.ensureSqnsStatusLoaded()

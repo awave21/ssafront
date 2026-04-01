@@ -764,6 +764,14 @@ class SQNSClient:
         normalized = normalize_phone_number(phone)
         return await self._request("GET", f"/api/v2/client/phone/{normalized}")
 
+    async def get_visit(self, visit_id: int) -> dict[str, Any]:
+        """
+        GET /api/v2/visit/{id}.
+
+        Типичный ответ: {\"status\": \"success\", \"visit\": {...}} — см. поле visit.
+        """
+        return await self._request("GET", f"/api/v2/visit/{int(visit_id)}")
+
     async def create_visit(self, visit_payload: dict[str, Any]) -> dict[str, Any]:
         return await self._request("POST", "/api/v2/visit", json={"visit": visit_payload})
 

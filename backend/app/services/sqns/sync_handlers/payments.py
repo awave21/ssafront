@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.sqns_service import SqnsPayment
 from app.services.sqns.client import SQNSClient
-from app.services.sqns.sync_handlers.common import build_payment_external_id, parse_datetime, parse_decimal
+from app.services.sqns.sync_handlers.common import build_payment_external_id, parse_datetime, parse_decimal, parse_int
+from app.services.sqns.sync_handlers.visit_commodity_lines import replace_payment_commodity_lines
 
 logger = structlog.get_logger(__name__)
 
@@ -91,6 +92,14 @@ class SqnsPaymentsSyncHandler:
                 },
             )
             await self.db.execute(stmt)
+            visit_ext = parse_int(payment.get("visitId"))
+            await replace_payment_commodity_lines(
+                self.db,
+                agent_id=self.agent_id,
+                payment_external_id=external_id,
+                visit_external_id=visit_ext,
+                payment_raw=payment,
+            )
             payments_synced += 1
 
         logger.info(

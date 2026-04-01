@@ -13,8 +13,11 @@ from app.db.session import get_db
 from app.schemas.analytics import (
     AnalyticsBreakdownDimension,
     AnalyticsBreakdownResponse,
+    AnalyticsCommoditiesTableResponse,
+    AnalyticsCommoditiesTableSortBy,
     AnalyticsFiltersMetaResponse,
     AnalyticsOverviewResponse,
+    AnalyticsRevenueBasis,
     AnalyticsServicesTableResponse,
     AnalyticsServicesTableSortBy,
     AnalyticsSortOrder,
@@ -109,9 +112,23 @@ async def get_agent_analytics_overview(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     timezone: str | None = Query(default=None),
+    revenue_basis: AnalyticsRevenueBasis = Query(
+        default="all",
+        description="all — все типы; clinical — service-sell, commodity-sell, alternative-payment, certificate-sell (как «Сумма продаж» в отчёте по услугам SQNS).",
+    ),
     channel: str | None = Query(default=None),
     client_tags: list[str] = Query(default_factory=list, alias="client_tags"),
     tags: str | None = Query(default=None, alias="tags"),
+    payment_methods: list[str] = Query(default_factory=list, alias="payment_methods"),
+    revenue_categories: list[str] = Query(
+        default_factory=list,
+        alias="revenue_categories",
+        description="services, commodities — фильтр по типу оплаты SQNS (услуги / товары). Пусто — все.",
+    ),
+    resource_external_id: int | None = Query(
+        default=None,
+        description="Внешний ID сотрудника (SQNS resource); только визиты этого специалиста.",
+    ),
     db: AsyncSession = Depends(get_db),
     user: AuthContext = Depends(require_scope("analytics:view")),
 ) -> AnalyticsOverviewResponse:
@@ -127,6 +144,10 @@ async def get_agent_analytics_overview(
         period=period,
         channel=channel,
         client_tags=_parse_client_tags(client_tags, tags),
+        revenue_basis=revenue_basis,
+        payment_methods=payment_methods or None,
+        revenue_categories=revenue_categories or None,
+        resource_external_id=resource_external_id,
     )
 
 
@@ -136,10 +157,14 @@ async def get_agent_analytics_timeseries(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     timezone: str | None = Query(default=None),
+    revenue_basis: AnalyticsRevenueBasis = Query(default="all"),
     group_by: AnalyticsTimeGroup = Query(default="day"),
     channel: str | None = Query(default=None),
     client_tags: list[str] = Query(default_factory=list, alias="client_tags"),
     tags: str | None = Query(default=None, alias="tags"),
+    payment_methods: list[str] = Query(default_factory=list, alias="payment_methods"),
+    revenue_categories: list[str] = Query(default_factory=list, alias="revenue_categories"),
+    resource_external_id: int | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user: AuthContext = Depends(require_scope("analytics:view")),
 ) -> AnalyticsTimeseriesResponse:
@@ -156,6 +181,10 @@ async def get_agent_analytics_timeseries(
         group_by=group_by,
         channel=channel,
         client_tags=_parse_client_tags(client_tags, tags),
+        revenue_basis=revenue_basis,
+        payment_methods=payment_methods or None,
+        revenue_categories=revenue_categories or None,
+        resource_external_id=resource_external_id,
     )
 
 
@@ -170,6 +199,7 @@ async def get_agent_analytics_breakdown(
     client_tags: list[str] = Query(default_factory=list, alias="client_tags"),
     tags: str | None = Query(default=None, alias="tags"),
     limit: int = Query(default=10, ge=1, le=100),
+    resource_external_id: int | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user: AuthContext = Depends(require_scope("analytics:view")),
 ) -> AnalyticsBreakdownResponse:
@@ -187,6 +217,7 @@ async def get_agent_analytics_breakdown(
         channel=channel,
         client_tags=_parse_client_tags(client_tags, tags),
         limit=limit,
+        resource_external_id=resource_external_id,
     )
 
 
@@ -208,10 +239,13 @@ async def get_agent_analytics_services_table(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     timezone: str | None = Query(default=None),
+    revenue_basis: AnalyticsRevenueBasis = Query(default="all"),
     channel: str | None = Query(default=None),
     resource_external_id: int | None = Query(default=None),
     client_tags: list[str] = Query(default_factory=list, alias="client_tags"),
     tags: str | None = Query(default=None, alias="tags"),
+    payment_methods: list[str] = Query(default_factory=list, alias="payment_methods"),
+    revenue_categories: list[str] = Query(default_factory=list, alias="revenue_categories"),
     sort_by: AnalyticsServicesTableSortBy = Query(default="bookings_total"),
     sort_order: AnalyticsSortOrder = Query(default="desc"),
     limit: int = Query(default=50, ge=1, le=200),
@@ -236,4 +270,50 @@ async def get_agent_analytics_services_table(
         sort_order=sort_order,
         limit=limit,
         offset=offset,
+        revenue_basis=revenue_basis,
+        payment_methods=payment_methods or None,
+        revenue_categories=revenue_categories or None,
+    )
+
+
+@router.get("/analytics/commodities-table", response_model=AnalyticsCommoditiesTableResponse)
+async def get_agent_analytics_commodities_table(
+    agent_id: UUID,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    timezone: str | None = Query(default=None),
+    revenue_basis: AnalyticsRevenueBasis = Query(default="all"),
+    channel: str | None = Query(default=None),
+    resource_external_id: int | None = Query(default=None),
+    client_tags: list[str] = Query(default_factory=list, alias="client_tags"),
+    tags: str | None = Query(default=None, alias="tags"),
+    payment_methods: list[str] = Query(default_factory=list, alias="payment_methods"),
+    revenue_categories: list[str] = Query(default_factory=list, alias="revenue_categories"),
+    sort_by: AnalyticsCommoditiesTableSortBy = Query(default="bookings_total"),
+    sort_order: AnalyticsSortOrder = Query(default="desc"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> AnalyticsCommoditiesTableResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    period = _resolve_period(
+        date_from=date_from,
+        date_to=date_to,
+        timezone_name=timezone,
+        fallback_timezone=agent.timezone,
+    )
+    service = AgentAnalyticsService(db, agent)
+    return await service.get_commodities_table(
+        period=period,
+        channel=channel,
+        client_tags=_parse_client_tags(client_tags, tags),
+        resource_external_id=resource_external_id,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        limit=limit,
+        offset=offset,
+        revenue_basis=revenue_basis,
+        payment_methods=payment_methods or None,
+        revenue_categories=revenue_categories or None,
     )

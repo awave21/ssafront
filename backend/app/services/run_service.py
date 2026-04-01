@@ -48,8 +48,26 @@ from app.services.tenant_balance import sync_run_balance_charge
 from app.services.token_costing import apply_fallback_costs
 from app.services.tool_executor import ToolExecutionError
 from app.utils.broadcast import broadcaster
+from app.utils.message_mapping import extract_text_contents
 
 logger = structlog.get_logger(__name__)
+
+
+def _session_messages_contain_output_text(
+    messages: list[dict[str, Any]],
+    output_text: str,
+) -> bool:
+    """Проверка, что финальный текст ответа уже представлен в сообщениях для session_messages."""
+    needle = output_text.strip()
+    if not needle:
+        return True
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        for txt in extract_text_contents(m):
+            if txt.strip() == needle:
+                return True
+    return False
 
 
 def _agent_disabled_http_error(agent_id: UUID | Any) -> HTTPException:
@@ -946,9 +964,21 @@ async def execute_agent_run(
 
     await sync_run_balance_charge(db, run=run)
 
-    messages_to_save = result.new_messages
+    messages_to_save: list[dict[str, Any]] = list(result.new_messages or [])
     if new_messages_filter and messages_to_save:
         messages_to_save = new_messages_filter(messages_to_save)
+
+    # Финальный ответ пользователю иногда не попадает в new_messages (или не сериализуется в текст).
+    # Без этой записи в диалогах остаются только входящие сообщения.
+    out_text = (result.output or "").strip()
+    if out_text and not _session_messages_contain_output_text(messages_to_save, out_text):
+        messages_to_save = [
+            *messages_to_save,
+            {
+                "role": "assistant",
+                "parts": [{"content": out_text}],
+            },
+        ]
 
     await append_session_messages(
         db,

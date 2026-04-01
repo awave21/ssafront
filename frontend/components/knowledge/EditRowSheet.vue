@@ -35,9 +35,10 @@
             <span class="text-sm text-slate-700">{{ formData[col.name] ? 'Да' : 'Нет' }}</span>
           </label>
 
-          <!-- Text -->
+          <!-- Select -->
+          <!-- Long text (textarea) -->
           <textarea
-            v-else-if="col.type === 'text'"
+            v-else-if="col.type === 'textarea'"
             v-model="formData[col.name]"
             :placeholder="getPlaceholder(col.name, col.label)"
             rows="4"
@@ -62,12 +63,21 @@
             class="mt-1 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:bg-white transition-all"
           />
 
-          <!-- Default text -->
+          <!-- Date + time (datetime-local) -->
+          <input
+            v-else-if="col.type === 'datetime'"
+            v-model="formData[col.name]"
+            type="datetime-local"
+            class="mt-1 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 font-mono focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:bg-white transition-all"
+          />
+
+          <!-- Default: varchar or short text -->
           <input
             v-else
             v-model="formData[col.name]"
             type="text"
-            :placeholder="getPlaceholder(col.name, col.label)"
+            :maxlength="col.maxLength ?? undefined"
+            :placeholder="col.maxLength ? `${getPlaceholder(col.name, col.label)} (макс. ${col.maxLength})` : getPlaceholder(col.name, col.label)"
             class="mt-1 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:bg-white transition-all"
             @keydown.enter="handleEnter"
           />
@@ -115,6 +125,12 @@ import {
   SheetClose,
 } from '~/components/ui/sheet'
 import { getFieldPlaceholder } from '~/utils/directory-helpers'
+import {
+  datetimeLocalToIsoUtc,
+  isoToDateInput,
+  isoToDatetimeLocal,
+} from '~/utils/tableFormDatetime'
+import { clearStaleBodyPointerAndOverflow } from '~/utils/bodyPointerFix'
 
 const props = defineProps<{
   open: boolean
@@ -146,10 +162,16 @@ const loadItemData = () => {
   if (!props.item) return
   const data: Record<string, any> = {}
   const snapshot: Record<string, any> = {}
-  props.columns.forEach(col => {
-    const val = props.item!.data[col.name]
-    data[col.name] = val ?? (col.type === 'bool' ? false : '')
-    snapshot[col.name] = val ?? (col.type === 'bool' ? false : '')
+  props.columns.forEach((col) => {
+    const raw = props.item!.data[col.name]
+    let val: unknown = raw ?? (col.type === 'bool' ? false : '')
+    if (col.type === 'datetime') {
+      val = isoToDatetimeLocal(raw ?? '')
+    } else if (col.type === 'date') {
+      val = isoToDateInput(raw ?? '')
+    }
+    data[col.name] = val
+    snapshot[col.name] = val
   })
   formData.value = data
   initialData.value = snapshot
@@ -160,10 +182,23 @@ const save = () => {
   error.value = ''
 
   const cleanData: Record<string, any> = {}
-  props.columns.forEach(col => {
-    const val = formData.value[col.name]
-    cleanData[col.name] = val === '' ? null : val
-  })
+  try {
+    props.columns.forEach((col) => {
+      let val = formData.value[col.name]
+      if (col.type === 'datetime') {
+        if (val === '' || val === null || val === undefined) {
+          cleanData[col.name] = null
+        } else {
+          cleanData[col.name] = datetimeLocalToIsoUtc(val)
+        }
+        return
+      }
+      cleanData[col.name] = val === '' ? null : val
+    })
+  } catch (e: any) {
+    error.value = e?.message ?? 'Проверьте дату и время'
+    return
+  }
 
   emit('save', props.item.id, cleanData)
 }
@@ -184,6 +219,8 @@ watch(() => props.open, (isOpen) => {
   if (isOpen && props.item) {
     error.value = ''
     loadItemData()
+  } else if (!isOpen) {
+    clearStaleBodyPointerAndOverflow()
   }
 })
 

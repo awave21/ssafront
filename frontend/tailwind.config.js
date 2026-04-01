@@ -57,6 +57,28 @@ export default {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      keyframes: {
+        "analytics-card-enter": {
+          from: {
+            opacity: "0",
+            transform: "translateY(14px) scale(0.985)",
+          },
+          to: {
+            opacity: "1",
+            transform: "translateY(0) scale(1)",
+          },
+        },
+        "analytics-shimmer-wave": {
+          "0%": { transform: "translateX(-140%)" },
+          "100%": { transform: "translateX(260%)" },
+        },
+      },
+      animation: {
+        "analytics-card-enter":
+          "analytics-card-enter 0.58s cubic-bezier(0.22, 1, 0.36, 1) both",
+        "analytics-shimmer-wave":
+          "analytics-shimmer-wave 2.45s ease-in-out infinite",
+      },
     },
   },
   plugins: [require('tailwindcss-animate')],

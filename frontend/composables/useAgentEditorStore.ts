@@ -40,7 +40,17 @@ type AgentChannelRecord = {
 
 type ChannelAuthQrResponse = {
   status: string
-  qr_code: string
+  qr_code?: string | null
+  requires_2fa?: boolean
+  detail?: string | null
+  uuid?: string | null
+  time?: string | null
+  timestamp?: number | null
+}
+
+type ChannelAuth2FAResponse = {
+  status: string
+  detail?: string | null
   uuid?: string | null
   time?: string | null
   timestamp?: number | null
@@ -802,6 +812,30 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     })
   }
 
+  const submitChannelAuth2FA = async (
+    channelType: PhoneChannelTypePath,
+    pwdCode: string
+  ): Promise<ChannelAuth2FAResponse> => {
+    if (!agent.value) {
+      throw new Error('Агент не выбран')
+    }
+    const normalizedPwdCode = pwdCode.trim()
+    if (!normalizedPwdCode) {
+      throw new Error('Введите пароль 2FA')
+    }
+
+    return await apiFetch<ChannelAuth2FAResponse>(`/agents/${agent.value.id}/channels/${channelType}/auth/2fa`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token.value}`,
+        'Content-Type': 'application/json'
+      },
+      body: {
+        pwd_code: normalizedPwdCode
+      }
+    })
+  }
+
   const ensureDirectoriesLoaded = async () => {
     if (!directoriesComposable.value || directoriesLoaded.value) return
     await directoriesComposable.value.fetchDirectories()
@@ -1379,6 +1413,7 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     connectChannel,
     disconnectChannel,
     fetchChannelAuthQr,
+    submitChannelAuth2FA,
     ensureDirectoriesLoaded,
     loadSqnsStatusForAgent,
     ensureSqnsStatusLoaded,

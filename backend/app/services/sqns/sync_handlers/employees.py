@@ -21,6 +21,32 @@ from app.services.sqns.sync_handlers.common import (
 
 logger = structlog.get_logger(__name__)
 
+
+async def mark_stale_sqns_resources(
+    db: AsyncSession,
+    agent_id: UUID,
+    protected_external_ids: set[int],
+    synced_at: datetime,
+) -> int:
+    """Помечает is_active=False тех sqns_resources, чьих external_id нет в protected_external_ids."""
+    stmt = (
+        update(SqnsResource)
+        .where(
+            SqnsResource.agent_id == agent_id,
+            SqnsResource.is_active == True,
+        )
+        .values(
+            is_active=False,
+            synced_at=synced_at,
+            updated_at=synced_at,
+        )
+    )
+    if protected_external_ids:
+        stmt = stmt.where(SqnsResource.external_id.notin_(protected_external_ids))
+    result = await db.execute(stmt)
+    return result.rowcount or 0
+
+
 _EMPLOYEE_SERVICE_KEYS: tuple[str, ...] = (
     "services",
     "serviceIds",
@@ -76,6 +102,7 @@ class SqnsEmployeesSyncHandler:
         employees_synced = 0
         resources_synced = 0
         active_external_ids: set[int] = set()
+        employee_external_ids: set[int] = set()
         employee_service_links: list[tuple[int, int]] = []
 
         for employee in employees:
@@ -84,6 +111,7 @@ class SqnsEmployeesSyncHandler:
             external_id = parse_int(employee.get("id"))
             if external_id is None:
                 continue
+            employee_external_ids.add(external_id)
 
             full_name = compose_employee_name(employee) or f"Employee {external_id}"
             is_fired = parse_bool(employee.get("isFired"), default=False)
@@ -114,25 +142,31 @@ class SqnsEmployeesSyncHandler:
             for svc_ext in _service_external_ids_from_employee(employee):
                 employee_service_links.append((external_id, svc_ext))
 
-        stale_resources = 0
-        if modificate is None:
-            stale_resources = await self._mark_stale_resources_inactive(active_external_ids, synced_at)
-
         resource_uuid_map = await self._load_active_resource_map()
+
+        # Загружаем ПОЛНЫЙ список пар сотрудник→услуга из raw_data в БД,
+        # а не из ответа API. Это гарантирует, что при инкрементальной синхронизации
+        # (когда CRM возвращает только недавно изменённых сотрудников) у нас есть
+        # полная картина: свежие данные для изменённых + сохранённые для остальных.
+        # Без этого replace-стратегия в merge_employee_service_resource_links
+        # удаляла бы связи неизменённых сотрудников.
+        complete_employee_service_links = await self._load_employee_service_links_from_db()
+
         logger.info(
             "sqns_sync_employees_completed",
             agent_id=str(self.agent_id),
             employees_synced=employees_synced,
             resources_synced=resources_synced,
-            stale_resources=stale_resources,
+            employee_service_links_total=len(complete_employee_service_links),
             modificate=modificate,
         )
         return {
             "employees_synced": employees_synced,
             "resources_synced": resources_synced,
-            "stale_resources": stale_resources,
+            "stale_resources": 0,
             "resource_uuid_map": resource_uuid_map,
-            "employee_service_links": employee_service_links,
+            "employee_service_links": complete_employee_service_links,
+            "employee_external_ids": employee_external_ids,
         }
 
     async def _upsert_employee(
@@ -229,24 +263,6 @@ class SqnsEmployeesSyncHandler:
         )
         await self.db.execute(stmt)
 
-    async def _mark_stale_resources_inactive(self, active_external_ids: set[int], synced_at: datetime) -> int:
-        stmt = (
-            update(SqnsResource)
-            .where(
-                SqnsResource.agent_id == self.agent_id,
-                SqnsResource.is_active == True,
-            )
-            .values(
-                is_active=False,
-                synced_at=synced_at,
-                updated_at=synced_at,
-            )
-        )
-        if active_external_ids:
-            stmt = stmt.where(SqnsResource.external_id.notin_(active_external_ids))
-        result = await self.db.execute(stmt)
-        return result.rowcount or 0
-
     async def _load_active_resource_map(self) -> dict[int, UUID]:
         stmt = select(SqnsResource.id, SqnsResource.external_id).where(
             SqnsResource.agent_id == self.agent_id,
@@ -254,3 +270,22 @@ class SqnsEmployeesSyncHandler:
         )
         rows = (await self.db.execute(stmt)).all()
         return {int(external_id): resource_id for resource_id, external_id in rows}
+
+    async def _load_employee_service_links_from_db(self) -> list[tuple[int, int]]:
+        """
+        Загружает пары (resource_external_id, service_external_id) из raw_data
+        всех активных ресурсов в БД. Используется вместо ответа CRM API, чтобы
+        всегда иметь полную картину при инкрементальной синхронизации.
+        """
+        stmt = select(SqnsResource.external_id, SqnsResource.raw_data).where(
+            SqnsResource.agent_id == self.agent_id,
+            SqnsResource.is_active == True,
+        )
+        rows = (await self.db.execute(stmt)).all()
+        links: list[tuple[int, int]] = []
+        for ext_id, raw_data in rows:
+            if not isinstance(raw_data, dict):
+                continue
+            for svc_ext in _service_external_ids_from_employee(raw_data):
+                links.append((int(ext_id), svc_ext))
+        return links

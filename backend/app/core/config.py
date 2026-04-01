@@ -316,6 +316,11 @@ class Settings(BaseSettings):
     wappi_retry_max_seconds: float = Field(default=4.0, ge=0, validation_alias="WAPPI_RETRY_MAX_SECONDS")
     wappi_profile_tariff_id: int = Field(default=1, ge=1, le=4, validation_alias="WAPPI_PROFILE_TARIFF_ID")
     wappi_profile_promo_code: str | None = Field(default=None, validation_alias="WAPPI_PROFILE_PROMO_CODE")
+    wappi_max_default_bot_id: str | None = Field(
+        default=None,
+        validation_alias="WAPPI_MAX_DEFAULT_BOT_ID",
+        description="Fallback bot_id для MAX API, если у канала не задан wappi_max_bot_id",
+    )
     alerts_telegram_bot_token: str | None = Field(
         default=None,
         validation_alias=AliasChoices("ALERTS_TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"),

@@ -7,7 +7,7 @@
         class="inline-flex h-10 shrink-0 self-start items-center gap-2 whitespace-nowrap rounded-xl bg-indigo-600 px-5 text-sm font-bold text-white transition-colors hover:bg-indigo-700"
       >
         <Plus class="w-4 h-4" />
-        Добавить
+        {{ createButtonLabel }}
       </button>
 
       <div v-if="directories.length > 0" class="relative min-w-0 grow sm:grow-0">
@@ -38,7 +38,7 @@
         <h3 class="text-lg font-bold text-red-900">Ошибка загрузки</h3>
         <p class="text-red-600 mt-2 mb-4">{{ error }}</p>
         <p class="text-sm text-red-500 mb-4">
-          Убедитесь, что API справочников реализован на бэкенде
+          {{ mode === 'table' ? 'Убедитесь, что API таблиц реализован на бэкенде' : 'Убедитесь, что API справочников реализован на бэкенде' }}
         </p>
         <button
           @click="$emit('retry')"
@@ -56,11 +56,11 @@
     >
       <div class="max-w-md mx-auto">
         <div class="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <BookOpen class="h-8 w-8 text-slate-400" />
+          <component :is="emptyIcon" class="h-8 w-8 text-slate-400" />
         </div>
-        <h3 class="text-lg font-bold text-slate-900">Справочников пока нет</h3>
+        <h3 class="text-lg font-bold text-slate-900">{{ emptyTitle }}</h3>
         <p class="text-slate-500 mt-2">
-          Создайте справочник для хранения FAQ, каталога услуг или другой структурированной информации.
+          {{ emptyDescription }}
         </p>
       </div>
     </div>
@@ -90,12 +90,13 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Plus, Search, Loader2, BookOpen, AlertCircle } from 'lucide-vue-next'
+import { Plus, Search, Loader2, BookOpen, AlertCircle, Table2 } from 'lucide-vue-next'
 import DirectoryCard from './DirectoryCard.vue'
 import type { Directory } from '~/types/directories'
 
 const props = defineProps<{
   directories: Directory[]
+  mode?: 'directory' | 'table'
   loading?: boolean
   error?: string | null
 }>()
@@ -110,6 +111,15 @@ defineEmits<{
 }>()
 
 const searchQuery = ref('')
+const mode = computed(() => props.mode ?? 'directory')
+const createButtonLabel = computed(() => (mode.value === 'table' ? 'Добавить таблицу' : 'Добавить'))
+const emptyIcon = computed(() => (mode.value === 'table' ? Table2 : BookOpen))
+const emptyTitle = computed(() => (mode.value === 'table' ? 'Таблиц пока нет' : 'Справочников пока нет'))
+const emptyDescription = computed(() => (
+  mode.value === 'table'
+    ? 'Создайте таблицу с атрибутами и записями для работы функций поиска, создания и обновления данных.'
+    : 'Создайте справочник для хранения FAQ, каталога услуг или другой структурированной информации.'
+))
 
 const filteredDirectories = computed(() => {
   if (!searchQuery.value.trim()) {

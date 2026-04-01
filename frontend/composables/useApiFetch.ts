@@ -4,6 +4,7 @@ import {
   ensureFreshAccessToken,
   getStoredAccessToken,
   initAuthActivityTracking,
+  isRefreshFailure,
   refreshAuthSession
 } from '~/composables/authSessionManager'
 import { getReadableErrorMessage, getErrorTitle } from '~/utils/api-errors'
@@ -64,6 +65,17 @@ export const useApiFetch = () => {
 
   const apiFetch = $fetch.create({
     baseURL: apiBase,
+    /** 204 No Content и пустое тело: иначе JSON.parse('') падает → «Failed to fetch» в UI. */
+    parseResponse: (responseText) => {
+      if (responseText === '' || responseText == null) return null
+      const trimmed = String(responseText).trim()
+      if (!trimmed) return null
+      try {
+        return JSON.parse(responseText)
+      } catch {
+        return responseText
+      }
+    },
     async onRequest({ request, options }) {
       ;(options as any).credentials = (options as any).credentials || 'include'
 
@@ -133,9 +145,7 @@ export const useApiFetch = () => {
             ;(options as any).credentials = (options as any).credentials || 'include'
             return await apiFetch(request as any, options as any)
           }
-        }
-
-        if (!refreshResult.success) {
+        } else if (isRefreshFailure(refreshResult)) {
           // На 409 не разлогиниваем сразу: даем короткий шанс дочитать новый токен.
           if (refreshResult.reason === 'refresh_token_in_use') {
             await new Promise((resolve) => setTimeout(resolve, 300))

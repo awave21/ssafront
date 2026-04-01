@@ -11,6 +11,7 @@ from app.api.routers.integrations import router as integrations_router
 from app.api.routers.invitations import router as invitations_router
 from app.api.routers.model_pricing import router as model_pricing_router
 from app.api.routers.runs import router as runs_router
+from app.api.routers.tables import router as tables_router
 from app.api.routers.users import router as users_router
 from app.api.routers.tools import router as tools_router
 from app.api.routers.tenant_settings import router as tenant_settings_router
@@ -30,6 +31,7 @@ api_router.include_router(analytics_router, prefix="/analytics", tags=["analytic
 api_router.include_router(tools_router, prefix="/tools", tags=["tools"])
 api_router.include_router(bindings_router, prefix="/agents", tags=["bindings"])
 api_router.include_router(runs_router, prefix="/runs", tags=["runs"])
+api_router.include_router(tables_router, tags=["tables"])
 api_router.include_router(webhooks_router, tags=["webhooks"])
 api_router.include_router(ws_router, tags=["websocket"])
 api_router.include_router(integrations_router, prefix="/integrations", tags=["integrations"])

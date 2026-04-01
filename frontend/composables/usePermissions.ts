@@ -32,7 +32,6 @@ const ROLE_PERMISSIONS = {
     'dialogs:read',
     'dialogs:write',
     'analytics:view',
-    'settings:read',
   ]
 } as const
 

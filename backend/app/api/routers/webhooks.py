@@ -1,15 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-import re
 import secrets
 import structlog
-import time
-from datetime import datetime
 from typing import Any
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -17,38 +11,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.agent import Agent
 from app.db.models.channel import AgentChannel, Channel
-from app.db.models.run import Run
 from app.db.session import get_db
-from app.schemas.auth import AuthContext
+from app.api.routers.webhooks_inbound_agent import process_webhook_inbound_agent_message
 from app.api.routers.webhooks_phone import router as phone_webhooks_router
-from app.api.routers.webhooks_utils import mask_headers
+from app.api.routers.webhooks_utils import mask_headers, sanitize_agent_reply_text
 from app.services.dialog_state import is_dialog_active, is_manager_paused, set_dialog_status
 from app.services.agent_user_state import is_agent_user_disabled
 from app.services.telegram import send_telegram_chat_action, send_telegram_message, TelegramWebhookError
-from app.services.tool_executor import ToolExecutionError
-from app.utils.message_mapping import build_user_prompt, filter_user_prompts
 
 logger = structlog.get_logger()
 webhook_logger = structlog.get_logger("webhooks")
 
 router = APIRouter()
-
-
-def _sanitize_reply(text: str) -> str:
-    """Убрать технические параметры и repr-строки, заменить \\n на переносы строк."""
-    if not text or not isinstance(text, str):
-        return ""
-    # AgentRunResult(output='...') -> только содержимое
-    m = re.match(r"^AgentRunResult\(output=['\"](.+)['\"]\)\s*$", text.strip(), re.DOTALL)
-    if m:
-        text = m.group(1)
-    elif text.strip().startswith("AgentRunResult("):
-        inner = re.search(r"output=['\"](.+?)['\"]\)\s*$", text, re.DOTALL)
-        if inner:
-            text = inner.group(1)
-    # Заменить литеральные \n и \t на реальные переносы и табуляцию
-    text = text.replace("\\n", "\n").replace("\\t", "\t")
-    return text
 
 
 def _parse_telegram_message(body: dict[str, Any]) -> tuple[int, str, dict[str, Any]] | None:
@@ -71,6 +45,7 @@ def _parse_telegram_message(body: dict[str, Any]) -> tuple[int, str, dict[str, A
     user_info: dict[str, Any] = {
         "platform": "telegram",
         "platform_id": str(chat_id),
+        "message_sender_kind": "contact",
     }
     if from_user.get("username"):
         user_info["username"] = from_user["username"]
@@ -119,127 +94,18 @@ async def _process_telegram_message(
     run_agent: bool = True,
 ) -> str | None:
     """Запустить агента и вернуть ответ. Возвращает None при ошибке."""
-    from app.services.logfire_cost_reconcile import schedule_logfire_cost_reconcile
-    from app.services.run_service import (
-        append_session_messages,
-        execute_agent_run,
-        get_session_history,
-        load_agent_and_tools,
-    )
-
     session_id = f"telegram:{chat_id}"
-
-    # Подготовим user_info для передачи в broadcast (копия, чтобы не мутировать входной dict)
     base = user_info or {"platform": "telegram", "platform_id": str(chat_id)}
-    telegram_user_info = {**base, "session_id": session_id}
-
-    webhook_user = AuthContext(
-        user_id=agent.owner_user_id,
-        tenant_id=agent.tenant_id,
-        scopes=["tools:write"],
-    )
-    # region agent log
-    try:
-        os.makedirs("/opt/app-agent/myapp/backend/.cursor", exist_ok=True)
-        with open("/opt/app-agent/myapp/backend/.cursor/debug-e26c68.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "sessionId": "e26c68",
-                "runId": "audit-1",
-                "hypothesisId": "H4",
-                "location": "app/api/routers/webhooks.py:_process_telegram_message",
-                "message": "telegram_webhook_auth_context",
-                "data": {
-                    "agent_id": str(agent.id),
-                    "tenant_id": str(agent.tenant_id),
-                    "session_id": session_id,
-                    "scopes": list(webhook_user.scopes),
-                },
-                "timestamp": int(time.time() * 1000),
-            }) + "\n")
-    except Exception:
-        pass
-    # endregion agent log
-
-    trace_id = str(uuid4())
-    run = Run(
-        tenant_id=agent.tenant_id,
-        agent_id=agent.id,
+    return await process_webhook_inbound_agent_message(
+        db,
+        agent,
         session_id=session_id,
-        status="running",
-        input_message=input_text,
-        trace_id=trace_id,
+        input_text=input_text,
+        user_info=base,
+        run_agent=run_agent,
+        log_source="telegram_bot",
+        telegram_debug_audit=True,
     )
-    db.add(run)
-    await db.flush()
-
-    try:
-        # Сразу сохраняем и броадкастим сообщение пользователя
-        user_message = build_user_prompt(input_text)
-        await append_session_messages(
-            db,
-            agent.tenant_id,
-            session_id,
-            run.id,
-            [user_message],
-            agent.max_history_messages,
-            agent_id=agent.id,
-            user_info=telegram_user_info,
-        )
-        await db.commit()
-
-        if not run_agent:
-            run.status = "succeeded"
-            run.output_message = None
-            run.messages = []
-            run.prompt_tokens = 0
-            run.completion_tokens = 0
-            run.total_tokens = 0
-            run.cost_usd = None
-            run.cost_rub = None
-            run.logfire_reconcile_status = "skipped"
-            run.logfire_reconcile_error = "run_not_executed"
-            run.tools_called = []
-            return None
-
-        agent_obj, tools, bindings = await load_agent_and_tools(
-            db, agent.id, agent.tenant_id
-        )
-        message_history = await get_session_history(
-            db, session_id, agent.tenant_id, agent.id, limit=agent.max_history_messages
-        )
-
-        result = await execute_agent_run(
-            db,
-            agent=agent_obj,
-            tools=tools,
-            bindings=bindings,
-            run=run,
-            input_message=input_text,
-            trace_id=trace_id,
-            user=webhook_user,
-            session_id=session_id,
-            message_history=message_history,
-            new_messages_filter=filter_user_prompts,
-            user_info=telegram_user_info,
-        )
-        schedule_logfire_cost_reconcile(run_id=run.id, trace_id=trace_id)
-        return result.output
-    except ToolExecutionError as exc:
-        run.status = "failed"
-        run.error_message = str(exc)
-        run.logfire_reconcile_status = "skipped"
-        run.logfire_reconcile_error = "run_failed"
-        return "Произошла ошибка при выполнении запроса. Попробуйте ещё раз."
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("telegram_webhook_agent_failed", trace_id=trace_id, error=str(exc))
-        run.status = "failed"
-        run.error_message = f"Runtime error: {str(exc)}"
-        run.logfire_reconcile_status = "skipped"
-        run.logfire_reconcile_error = "run_failed"
-        return "Произошла ошибка при обработке сообщения. Попробуйте позже."
-    finally:
-        run.updated_at = datetime.utcnow()
-        await db.commit()
 
 
 @router.post("/webhooks/telegram/{webhook_token}")
@@ -396,7 +262,7 @@ async def telegram_webhook(
                     pass
 
             if reply and bot_token:
-                reply_text = _sanitize_reply(reply)
+                reply_text = sanitize_agent_reply_text(reply)
                 if reply_text:
                     try:
                         await send_telegram_message(

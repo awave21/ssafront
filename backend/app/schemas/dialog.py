@@ -42,6 +42,11 @@ class MessageRead(BaseModel):
     created_at: datetime = Field(..., description="Время создания")
     # Дополнительная информация о пользователе (например, из Telegram)
     user_info: dict[str, Any] | None = Field(None, description="Информация об отправителе")
+    sender_kind: str | None = Field(
+        None,
+        description="Класс отправителя: contact, agent, manager, wappi_operator, system",
+    )
+    sender_label: str | None = Field(None, description="Подпись отправителя для UI (рус.)")
     part_kind: str | None = Field(None, description="Тип части pydantic-ai")
     tool_name: str | None = Field(None, description="Название инструмента")
     tool_call_id: str | None = Field(None, description="ID вызова инструмента")

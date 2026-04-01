@@ -39,12 +39,18 @@
         {{ dialogTitle }}
       </h2>
       
-      <!-- Username -->
+      <!-- Username + канал -->
       <p
         v-if="isTelegram && username"
         class="text-xs text-blue-600 truncate"
       >
         @{{ username }}
+      </p>
+      <p
+        v-if="integrationChannelLabel"
+        class="text-xs text-slate-500 truncate"
+      >
+        {{ integrationChannelLabel }}
       </p>
       
       <!-- Agent name & Status -->
@@ -111,7 +117,17 @@ const { toggleDialogAgentStatus } = useDialogs()
 const isEnabled = computed(() => (props.dialog?.agent_status ?? 'active') === 'active')
 
 const isTelegram = computed(() => {
-  return props.dialog?.platform === 'telegram' || props.dialog?.id?.startsWith('telegram:')
+  const p = props.dialog?.platform || props.dialog?.user_info?.platform
+  return (
+    p === 'telegram' ||
+    p === 'telegram_phone' ||
+    props.dialog?.id?.startsWith('telegram:') ||
+    props.dialog?.id?.startsWith('telegram_phone:')
+  )
+})
+
+const integrationChannelLabel = computed(() => {
+  return props.dialog?.user_info?.integration_channel_label?.trim() || ''
 })
 
 const username = computed(() => {
@@ -125,9 +141,9 @@ const dialogTitle = computed(() => {
     return [userInfo.first_name, userInfo.last_name].filter(Boolean).join(' ')
   }
   if (userInfo?.username) return `@${userInfo.username}`
-  // For Telegram dialogs without user_info, extract ID from dialog ID
+  // For Telegram / telegram_phone without user_info, extract ID from dialog ID
   if (isTelegram.value && props.dialog?.id) {
-    const telegramId = props.dialog.id.replace('telegram:', '')
+    const telegramId = props.dialog.id.replace(/^(telegram|telegram_phone):/, '')
     return `Telegram #${telegramId}`
   }
   // Fallback - don't use dialog.title as it contains message preview

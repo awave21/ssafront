@@ -124,6 +124,29 @@ def _map_session_message(msg_data: dict[str, Any], msg_id: UUID, created_at: dat
     user_info = extract_user_info(msg_data)
     contents = extract_text_contents(msg_data)
 
+    sender_kind: str | None = None
+    sender_label: str | None = None
+    ui = user_info or {}
+    if mapped_role == "agent":
+        sender_kind = "agent"
+        sender_label = "Агент"
+    elif mapped_role == "user":
+        sender_kind = str(ui.get("message_sender_kind") or "contact")
+        sender_label = ui.get("sender_display_label")
+        if not sender_label:
+            sender_label = "Клиент" if sender_kind == "contact" else sender_kind
+    elif mapped_role == "manager":
+        if ui.get("manager_source") == "wappi_linked_messenger":
+            sender_kind = "wappi_operator"
+            ch = ui.get("integration_channel_label") or "мессенджер"
+            sender_label = f"Оператор ({ch})"
+        else:
+            sender_kind = "manager"
+            sender_label = "Менеджер"
+    elif mapped_role == "system":
+        sender_kind = "system"
+        sender_label = "Система"
+
     return [
         MessageRead(
             id=msg_id,
@@ -135,6 +158,8 @@ def _map_session_message(msg_data: dict[str, Any], msg_id: UUID, created_at: dat
             status="done",
             created_at=created_at,
             user_info=user_info,
+            sender_kind=sender_kind,
+            sender_label=sender_label,
         )
         for content in contents
     ]
@@ -271,10 +296,20 @@ async def list_messages(
         runs = run_result.scalars().all()
 
         # User info (например, Telegram)
-        user_info = {"session_id": dialog_id}
+        user_info: dict[str, Any] = {"session_id": dialog_id}
         if dialog_id.startswith("telegram:"):
             user_info["platform"] = "telegram"
-            user_info["platform_id"] = dialog_id.split(":")[1]
+            user_info["platform_id"] = dialog_id.split(":", 1)[1]
+        elif dialog_id.startswith("telegram_phone:"):
+            user_info["platform"] = "telegram_phone"
+            user_info["platform_id"] = dialog_id.split(":", 1)[1]
+            user_info["integration_channel_label"] = "Telegram (личный номер)"
+            user_info["integration_channel_type"] = "telegram_phone"
+        elif dialog_id.startswith("max:"):
+            user_info["platform"] = "max"
+            user_info["platform_id"] = dialog_id.split(":", 1)[1]
+            user_info["integration_channel_label"] = "MAX"
+            user_info["integration_channel_type"] = "max"
 
         for run in runs:
             if run.input_message:

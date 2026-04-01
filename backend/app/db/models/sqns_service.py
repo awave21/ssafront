@@ -419,6 +419,53 @@ class SqnsPayment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
 
+class SqnsVisitCommodityLine(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Связь визита SQNS с товарами: строки из payload визита и/или из платежей с visitId.
+
+    Справочник товаров остаётся в sqns_commodities; здесь только ссылки и суммы из сырого API.
+    """
+
+    __tablename__ = "sqns_visit_commodity_lines"
+
+    agent_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    visit_external_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    commodity_external_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    source_ref: Mapped[str] = mapped_column(String(220), nullable=False)
+    line_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default="now()",
+    )
+
+    agent: Mapped["Agent"] = relationship(
+        "Agent",
+        foreign_keys=[agent_id],
+        viewonly=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "agent_id",
+            "visit_external_id",
+            "source",
+            "source_ref",
+            "line_index",
+            name="uq_sqns_vcl_agent_visit_source_ref_idx",
+        ),
+    )
+
+
 class SqnsClientRecord(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
     Кэш клиентов из SQNS.

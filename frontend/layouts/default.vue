@@ -56,10 +56,13 @@ onMounted(() => {
       <!-- Верхний хедер (закреплен, не скроллится) -->
       <DashboardTopBar>
         <template #left>
-          <!-- Заголовок страницы -->
-          <h1 v-if="pageTitle" class="text-xl font-bold text-foreground">
-            {{ pageTitle }}
-          </h1>
+          <div v-if="pageTitle" class="flex min-w-0 items-start gap-3">
+            <div class="flex min-w-0 flex-col gap-0.5">
+              <h1 class="truncate text-xl font-bold tracking-tight text-foreground">
+                {{ pageTitle }}
+              </h1>
+            </div>
+          </div>
         </template>
         <template #right>
           <div id="topbar-actions" class="contents" />

@@ -35,9 +35,10 @@
             <span class="text-sm text-slate-700">{{ formData[col.name] ? 'Да' : 'Нет' }}</span>
           </label>
 
-          <!-- Text -->
+          <!-- Select -->
+          <!-- Long text (textarea) -->
           <textarea
-            v-else-if="col.type === 'text'"
+            v-else-if="col.type === 'textarea'"
             :ref="(el) => setRef(col.name, el)"
             v-model="formData[col.name]"
             :placeholder="getPlaceholder(col.name, col.label)"
@@ -65,13 +66,23 @@
             class="mt-1 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:bg-white transition-all"
           />
 
-          <!-- Default text -->
+          <!-- Date + time -->
+          <input
+            v-else-if="col.type === 'datetime'"
+            :ref="(el) => setRef(col.name, el)"
+            v-model="formData[col.name]"
+            type="datetime-local"
+            class="mt-1 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 font-mono focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:bg-white transition-all"
+          />
+
+          <!-- Default: varchar or short text -->
           <input
             v-else
             :ref="(el) => setRef(col.name, el)"
             v-model="formData[col.name]"
             type="text"
-            :placeholder="getPlaceholder(col.name, col.label)"
+            :maxlength="col.maxLength ?? undefined"
+            :placeholder="col.maxLength ? `${getPlaceholder(col.name, col.label)} (макс. ${col.maxLength})` : getPlaceholder(col.name, col.label)"
             class="mt-1 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:bg-white transition-all"
             @keydown.enter="handleEnter"
           />
@@ -81,6 +92,8 @@
         <div v-if="columns.length === 0" class="text-center py-8 text-slate-400 text-sm">
           Нет столбцов. Сначала добавьте столбцы в справочник.
         </div>
+
+        <p v-if="error" class="text-sm text-red-600">{{ error }}</p>
       </div>
 
       <!-- Sticky Footer -->
@@ -124,6 +137,8 @@ import {
   SheetClose,
 } from '~/components/ui/sheet'
 import { getFieldPlaceholder } from '~/utils/directory-helpers'
+import { datetimeLocalToIsoUtc } from '~/utils/tableFormDatetime'
+import { clearStaleBodyPointerAndOverflow } from '~/utils/bodyPointerFix'
 
 const props = defineProps<{
   open: boolean
@@ -140,6 +155,7 @@ const emit = defineEmits<{
 
 const formData = ref<Record<string, any>>({})
 const savedCount = ref(0)
+const error = ref('')
 const inputRefs = ref<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({})
 
 const hasData = computed(() =>
@@ -173,12 +189,22 @@ const save = async () => {
   if (!hasData.value || props.saving) return
 
   const cleanData: Record<string, any> = {}
-  Object.entries(formData.value).forEach(([key, value]) => {
-    if (value !== '' && value !== null && value !== undefined) {
-      cleanData[key] = value
+  try {
+    for (const col of props.columns) {
+      const value = formData.value[col.name]
+      if (value === '' || value === null || value === undefined) continue
+      if (col.type === 'datetime') {
+        cleanData[col.name] = datetimeLocalToIsoUtc(value)
+      } else {
+        cleanData[col.name] = value
+      }
     }
-  })
+  } catch (e: any) {
+    error.value = e?.message ?? 'Проверьте дату и время'
+    return
+  }
 
+  error.value = ''
   try {
     if (props.rowSave) {
       await props.rowSave(cleanData)
@@ -188,12 +214,13 @@ const save = async () => {
     savedCount.value++
     resetForm()
     focusFirst()
-  } catch {
-    // Ошибку показывает родитель (toast)
+  } catch (e: any) {
+    error.value = e?.message ?? 'Не удалось сохранить'
   }
 }
 
 const close = () => {
+  error.value = ''
   emit('update:open', false)
 }
 
@@ -204,12 +231,15 @@ const handleEnter = (e: KeyboardEvent) => {
   }
 }
 
-// Initialize form when sheet opens
+// Initialize form when sheet opens; сброс body после закрытия (dropdown + sheet)
 watch(() => props.open, (val) => {
   if (val) {
     savedCount.value = 0
+    error.value = ''
     resetForm()
     focusFirst()
+  } else {
+    clearStaleBodyPointerAndOverflow()
   }
 })
 </script>

@@ -52,6 +52,13 @@ export type SqnsSpecialist = {
   information?: string | null
 }
 
+export type SqnsServiceEmployeeLink = {
+  service: string
+  employee: string
+  category: string | null
+  updated_at: string | null
+}
+
 export type SqnsSlot = {
   datetime: string
   isAvailable: boolean
@@ -467,6 +474,30 @@ export const useAgents = () => {
     }
   }
 
+  const fetchSqnsServiceEmployeeLinks = async (
+    agentId: string,
+    params?: { limit?: number; offset?: number }
+  ) => {
+    try {
+      const query = new URLSearchParams()
+      if (params?.limit) query.append('limit', params.limit.toString())
+      if (params?.offset) query.append('offset', params.offset.toString())
+
+      return await apiFetch<{
+        items: SqnsServiceEmployeeLink[]
+        total: number
+        limit: number
+        offset: number
+        has_more: boolean
+      }>(`/agents/${agentId}/sqns/service-employee-links`, {
+        query: Object.fromEntries(query)
+      })
+    } catch (err: any) {
+      sqnsError.value = getReadableErrorMessage(err, 'Не удалось загрузить связи услуга-сотрудник')
+      throw err
+    }
+  }
+
   const updateSqnsSpecialist = async (
     agentId: string,
     specialistId: string,
@@ -549,6 +580,7 @@ export const useAgents = () => {
     bulkUpdateSqnsServices,
     fetchSqnsCategories,
     fetchSqnsSpecialists,
+    fetchSqnsServiceEmployeeLinks,
     updateSqnsSpecialist,
     updateSqnsCategory,
     getSqnsDisablePreview

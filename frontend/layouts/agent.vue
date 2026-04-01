@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
-import { Menu, Check, Play, Trash2, Copy } from 'lucide-vue-next'
+import { Menu, Check, Play, Trash2, Copy, ChevronRight } from 'lucide-vue-next'
 import { navigateTo } from '#app'
 import DashboardSidebar from '~/components/DashboardSidebar.vue'
 import DashboardTopBar from '~/components/DashboardTopBar.vue'
 import Switch from '~/components/ui/switch/Switch.vue'
-import { useLayoutState } from '~/composables/useLayoutState'
+import { useLayoutState, type LayoutBreadcrumbSegment } from '~/composables/useLayoutState'
 
 const {
   initSidebarState,
@@ -14,6 +14,8 @@ const {
   breadcrumbTitle,
   breadcrumbAgentName,
   breadcrumbBackPath,
+  layoutBreadcrumbSegments,
+  pendingBreadcrumbAction,
   functionsRunAction,
   functionsDeleteAction,
   functionsDuplicateAction,
@@ -32,6 +34,15 @@ const functionsCreateLabel = computed(() =>
 const handleBreadcrumbBack = () => {
   if (!breadcrumbBackPath.value) return
   navigateTo(breadcrumbBackPath.value)
+}
+
+const handleBreadcrumbSegmentClick = (seg: LayoutBreadcrumbSegment) => {
+  if (!seg.action) return
+  if (seg.action.type === 'route') {
+    navigateTo(seg.action.path)
+    return
+  }
+  pendingBreadcrumbAction.value = seg.action
 }
 
 onMounted(() => {
@@ -85,8 +96,26 @@ onMounted(() => {
       <!-- TopBar скрывается в fullscreen режиме -->
       <DashboardTopBar v-if="!isPromptFullscreen">
         <template #left>
-          <!-- Хлебные крошки агента -->
-          <template v-if="breadcrumbTitle">
+          <nav
+            v-if="layoutBreadcrumbSegments?.length"
+            class="flex min-w-0 items-center gap-1 text-sm"
+            aria-label="Навигация"
+          >
+            <template v-for="(seg, i) in layoutBreadcrumbSegments" :key="i">
+              <ChevronRight v-if="i > 0" class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <button
+                v-if="seg.action"
+                type="button"
+                class="max-w-[9rem] shrink-0 truncate text-muted-foreground transition-colors hover:text-foreground sm:max-w-[14rem]"
+                @click="handleBreadcrumbSegmentClick(seg)"
+              >
+                {{ seg.label }}
+              </button>
+              <span v-else class="min-w-0 truncate font-medium text-foreground">{{ seg.label }}</span>
+            </template>
+          </nav>
+          <!-- Хлебные крошки агента (простой режим) -->
+          <template v-else-if="breadcrumbTitle">
             <button
               v-if="breadcrumbBackPath"
               @click="handleBreadcrumbBack"
@@ -167,7 +196,7 @@ onMounted(() => {
       </DashboardTopBar>
 
       <!-- Прокручиваемый контент -->
-      <main class="flex-1 overflow-y-auto bg-muted">
+      <main class="flex-1 min-h-0 overflow-y-auto bg-muted">
         <slot />
       </main>
     </div>

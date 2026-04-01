@@ -42,6 +42,16 @@ class WappiProfileDeleteResult:
 
 
 @dataclass(frozen=True)
+class WappiProfileLogoutResult:
+    status: str
+    detail: str | None = None
+    uuid: str | None = None
+    time: str | None = None
+    timestamp: int | None = None
+    raw: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class WappiBalanceAddDaysResult:
     status: str
     detail: str | None = None
@@ -54,9 +64,27 @@ class WappiBalanceAddDaysResult:
 class WappiAuthQrResult:
     status: str
     qr_code: str
+    detail: str | None = None
+    requires_2fa: bool = False
     uuid: str | None = None
     time: str | None = None
     timestamp: int | None = None
+    raw: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class WappiAuth2FAResult:
+    status: str
+    detail: str | None = None
+    uuid: str | None = None
+    time: str | None = None
+    timestamp: int | None = None
+
+
+@dataclass(frozen=True)
+class WappiSyncMessageSendResult:
+    status: str
+    detail: str | None = None
     raw: dict[str, Any] | None = None
 
 
@@ -71,6 +99,11 @@ _DELETE_PROFILE_PATHS: dict[WappiPlatform, str] = {
     WappiPlatform.TELEGRAM_PHONE: "/tapi/profile/delete",
     WappiPlatform.MAX: "/maxapi/profile/delete",
 }
+_LOGOUT_PROFILE_PATHS: dict[WappiPlatform, str] = {
+    WappiPlatform.WHATSAPP: "/api/profile/logout",
+    WappiPlatform.TELEGRAM_PHONE: "/tapi/profile/logout",
+    WappiPlatform.MAX: "/maxapi/profile/logout",
+}
 
 _WEBHOOK_SUPPORTED_PLATFORMS: set[WappiPlatform] = {
     WappiPlatform.WHATSAPP,
@@ -82,8 +115,29 @@ _AUTH_QR_PATHS: dict[WappiPlatform, str] = {
     WappiPlatform.TELEGRAM_PHONE: "/tapi/sync/auth/qr",
     WappiPlatform.MAX: "/maxapi/sync/auth/qr",
 }
+_AUTH_2FA_PATHS: dict[WappiPlatform, str] = {
+    WappiPlatform.TELEGRAM_PHONE: "/tapi/sync/auth/2fa",
+    WappiPlatform.MAX: "/maxapi/sync/auth/2fa",
+}
+_TAPI_SYNC_MESSAGE_SEND_PATH = "/tapi/sync/message/send"
+_MAXAPI_SYNC_MESSAGE_SEND_PATH = "/maxapi/sync/message/send"
 _BALANCE_ADD_DAYS_PATH = "/payments/balance/add_days"
 _AVAILABLE_TARIFF_IDS = {1, 2, 3, 4}
+_AUTH_2FA_REQUIRED_MARKERS = {
+    "2fa",
+    "need2fa",
+    "auth2fa",
+    "twofactorrequired",
+    "passwordrequired",
+    "cloudpasswordrequired",
+}
+_LOGOUT_SUCCESS_DETAIL_MARKERS = (
+    "logout",
+    "logouted",
+    "logout success",
+    "ok",
+    "success",
+)
 
 
 def _normalize_base_url(base_url: str) -> str:
@@ -109,6 +163,35 @@ def _to_int_or_none(value: Any) -> int | None:
     if isinstance(value, str) and value.isdigit():
         return int(value)
     return None
+
+
+def _is_dashboard_payment_redirect(value: str) -> bool:
+    normalized = (value or "").strip()
+    if not normalized:
+        return False
+    return normalized.startswith("/dashboard/")
+
+
+def _is_2fa_required_detail(value: str | None) -> bool:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return False
+    compact = "".join(ch for ch in normalized if ch.isalnum())
+    if compact in _AUTH_2FA_REQUIRED_MARKERS:
+        return True
+    normalized_words = normalized.replace("-", " ").replace("_", " ")
+    return (
+        "two factor" in normalized_words
+        or "password required" in normalized_words
+        or "cloud password" in normalized_words
+    )
+
+
+def _is_logout_success_detail(value: str | None) -> bool:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in _LOGOUT_SUCCESS_DETAIL_MARKERS)
 
 
 def _normalize_qr_code(raw_value: str) -> str:
@@ -204,6 +287,41 @@ class WappiClient:
             raw=payload,
         )
 
+    async def logout_profile(
+        self,
+        *,
+        platform: WappiPlatform,
+        profile_id: str,
+    ) -> WappiProfileLogoutResult:
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+
+        payload = await self._request_json_or_text(
+            method="GET",
+            path=_LOGOUT_PROFILE_PATHS[platform],
+            params={"profile_id": normalized_profile_id},
+        )
+        status = str(payload.get("status")).strip() if payload.get("status") is not None else ""
+        detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else ""
+        if status:
+            if status.lower() not in {"done", "ok", "success"}:
+                raise WappiClientError(detail or f"Logout request returned status '{status}'")
+        elif detail:
+            if not _is_logout_success_detail(detail):
+                raise WappiClientError(detail)
+        else:
+            raise WappiClientError("Logout response is missing status and detail")
+
+        return WappiProfileLogoutResult(
+            status=status or "done",
+            detail=detail or None,
+            uuid=str(payload.get("uuid")).strip() if payload.get("uuid") is not None else None,
+            time=str(payload.get("time")) if payload.get("time") is not None else None,
+            timestamp=_to_int_or_none(payload.get("timestamp")),
+            raw=payload,
+        )
+
     async def add_days_from_balance(
         self,
         *,
@@ -218,33 +336,42 @@ class WappiClient:
         if tariff_id not in _AVAILABLE_TARIFF_IDS:
             raise WappiClientError("tariff_id must be one of: 1, 2, 3, 4")
 
+        payload = {
+            "profile_uuid": normalized_profile_uuid,
+            "tariff_id": tariff_id,
+        }
         normalized_profile_ids: list[str] = []
         for value in profile_ids or []:
             normalized = str(value).strip()
             if normalized:
                 normalized_profile_ids.append(normalized)
-        if not normalized_profile_ids:
-            normalized_profile_ids = [normalized_profile_uuid]
-        elif normalized_profile_uuid not in normalized_profile_ids:
-            normalized_profile_ids.insert(0, normalized_profile_uuid)
-
-        payload = {
-            "profile_uuid": normalized_profile_uuid,
-            "tariff_id": tariff_id,
-            "profile_ids": normalized_profile_ids,
-        }
+        if normalized_profile_ids:
+            if normalized_profile_uuid not in normalized_profile_ids:
+                normalized_profile_ids.insert(0, normalized_profile_uuid)
+            payload["profile_ids"] = normalized_profile_ids
         normalized_code = (code or "").strip()
         if normalized_code:
             payload["code"] = normalized_code
 
-        response_payload = await self._request_json(
+        response_payload = await self._request_json_or_text(
             method="POST",
             path=_BALANCE_ADD_DAYS_PATH,
             json=payload,
         )
+        status = str(response_payload.get("status")).strip() if response_payload.get("status") is not None else ""
+        detail = str(response_payload.get("detail")).strip() if response_payload.get("detail") is not None else ""
+        if status:
+            if status.lower() not in {"done", "ok", "success"}:
+                raise WappiClientError(detail or f"Balance payment request returned status '{status}'")
+        elif detail:
+            if not _is_dashboard_payment_redirect(detail):
+                raise WappiClientError(detail)
+        else:
+            raise WappiClientError("Balance payment response is missing status and detail")
+
         return WappiBalanceAddDaysResult(
-            status=str(response_payload.get("status") or "done"),
-            detail=str(response_payload.get("detail")) if response_payload.get("detail") is not None else None,
+            status=status or "done",
+            detail=detail or None,
             time=str(response_payload.get("time")) if response_payload.get("time") is not None else None,
             timestamp=_to_int_or_none(response_payload.get("timestamp")),
             raw=response_payload,
@@ -265,19 +392,151 @@ class WappiClient:
             path=_AUTH_QR_PATHS[platform],
             params={"profile_id": normalized_profile_id},
         )
+        status = str(payload.get("status") or "done")
+        detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else None
+        if _is_2fa_required_detail(detail):
+            return WappiAuthQrResult(
+                status=status,
+                qr_code="",
+                detail=detail,
+                requires_2fa=True,
+                uuid=str(payload.get("uuid")) if payload.get("uuid") is not None else None,
+                time=str(payload.get("time")) if payload.get("time") is not None else None,
+                timestamp=_to_int_or_none(payload.get("timestamp")),
+                raw=payload,
+            )
+
         qr_raw = payload.get("qrCode") or payload.get("qr_code") or payload.get("detail")
         qr_code = _normalize_qr_code(str(qr_raw or ""))
         if not qr_code:
             raise WappiClientError("QR code is missing in service response")
 
         return WappiAuthQrResult(
-            status=str(payload.get("status") or "done"),
+            status=status,
             qr_code=qr_code,
+            detail=detail,
+            requires_2fa=False,
             uuid=str(payload.get("uuid")) if payload.get("uuid") is not None else None,
             time=str(payload.get("time")) if payload.get("time") is not None else None,
             timestamp=_to_int_or_none(payload.get("timestamp")),
             raw=payload,
         )
+
+    async def submit_auth_2fa(
+        self,
+        *,
+        platform: WappiPlatform,
+        profile_id: str,
+        pwd_code: str,
+    ) -> WappiAuth2FAResult:
+        path = _AUTH_2FA_PATHS.get(platform)
+        if not path:
+            raise WappiClientError("2FA auth is not supported for this platform")
+
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+        normalized_pwd_code = pwd_code.strip()
+        if not normalized_pwd_code:
+            raise WappiClientError("pwd_code is required")
+
+        payload = await self._request_json(
+            method="POST",
+            path=path,
+            params={"profile_id": normalized_profile_id},
+            json={"pwd_code": normalized_pwd_code},
+        )
+        status = str(payload.get("status") or "done").strip()
+        detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else None
+        if status and status.lower() not in {"done", "ok", "success"}:
+            raise WappiClientError(detail or f"2FA auth request returned status '{status}'")
+
+        return WappiAuth2FAResult(
+            status=status or "done",
+            detail=detail,
+            uuid=str(payload.get("uuid")) if payload.get("uuid") is not None else None,
+            time=str(payload.get("time")) if payload.get("time") is not None else None,
+            timestamp=_to_int_or_none(payload.get("timestamp")),
+            raw=payload,
+        )
+
+    async def send_telegram_sync_message(
+        self,
+        *,
+        profile_id: str,
+        body: str,
+        recipient: str,
+    ) -> WappiSyncMessageSendResult:
+        """Отправка текста через Wappi Telegram (tapi) sync API."""
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+        text = (body or "").strip()
+        if not text:
+            raise WappiClientError("body is required")
+        to_recipient = (recipient or "").strip()
+        if not to_recipient:
+            raise WappiClientError("recipient is required")
+
+        payload = await self._request_json(
+            method="POST",
+            path=_TAPI_SYNC_MESSAGE_SEND_PATH,
+            params={"profile_id": normalized_profile_id},
+            json={"body": text, "recipient": to_recipient},
+        )
+        status = str(payload.get("status") or "done").strip()
+        detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else None
+        if status and status.lower() not in {"done", "ok", "success"}:
+            raise WappiClientError(detail or f"Send message returned status '{status}'")
+        return WappiSyncMessageSendResult(status=status or "done", detail=detail, raw=payload)
+
+    async def send_max_sync_message(
+        self,
+        *,
+        profile_id: str,
+        bot_id: str,
+        body: str,
+        recipient: str,
+        chat_id: str,
+        manager: dict[str, Any] | None = None,
+    ) -> WappiSyncMessageSendResult:
+        """Отправка текста через Wappi MAX API (maxapi/sync/message/send)."""
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+        normalized_bot_id = bot_id.strip()
+        if not normalized_bot_id:
+            raise WappiClientError("bot_id is required")
+        text = (body or "").strip()
+        if not text:
+            raise WappiClientError("body is required")
+        to_recipient = (recipient or "").strip()
+        if not to_recipient:
+            raise WappiClientError("recipient is required")
+        to_chat = (chat_id or "").strip()
+        if not to_chat:
+            raise WappiClientError("chat_id is required")
+
+        send_json: dict[str, Any] = {
+            "recipient": to_recipient,
+            "chat_id": to_chat,
+            "body": text,
+        }
+        if manager:
+            send_json["manager"] = manager
+
+        payload = await self._request_json_or_text(
+            method="POST",
+            path=_MAXAPI_SYNC_MESSAGE_SEND_PATH,
+            params={"profile_id": normalized_profile_id, "bot_id": normalized_bot_id},
+            json=send_json,
+            accept="text/plain, application/json",
+        )
+        status = str(payload.get("status") or "done").strip()
+        detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else None
+        if status and status.lower() not in {"done", "ok", "success"}:
+            raise WappiClientError(detail or f"Send message returned status '{status}'")
+        return WappiSyncMessageSendResult(status=status or "done", detail=detail, raw=payload)
 
     async def _request_json(
         self,
@@ -286,11 +545,67 @@ class WappiClient:
         path: str,
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
+        accept: str | None = None,
     ) -> dict[str, Any]:
+        response = await self._request_response(
+            method=method,
+            path=path,
+            params=params,
+            json=json,
+            accept=accept,
+        )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise WappiClientError("Service returned invalid JSON response") from exc
+        if not isinstance(payload, dict):
+            raise WappiClientError("Service response must be a JSON object")
+        return payload
+
+    async def _request_json_or_text(
+        self,
+        *,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        accept: str | None = None,
+    ) -> dict[str, Any]:
+        response = await self._request_response(
+            method=method,
+            path=path,
+            params=params,
+            json=json,
+            accept=accept,
+        )
+        text_body = response.text.strip()
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        if isinstance(payload, dict):
+            return payload
+        if isinstance(payload, str):
+            normalized_payload = payload.strip()
+            return {"detail": normalized_payload} if normalized_payload else {}
+        if payload is None:
+            return {"detail": text_body} if text_body else {}
+        raise WappiClientError("Service response must be a JSON object or plain text")
+
+    async def _request_response(
+        self,
+        *,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        accept: str | None = None,
+    ) -> httpx.Response:
         url = urljoin(f"{self._base_url}/", path.lstrip("/"))
         headers = {
             "Authorization": self._api_token,
-            "Accept": "application/json",
+            "Accept": accept or "application/json",
         }
         response: httpx.Response | None = None
         try:
@@ -327,11 +642,4 @@ class WappiClient:
 
         if response is None:
             raise WappiClientError("Request finished without response")
-
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise WappiClientError("Service returned invalid JSON response") from exc
-        if not isinstance(payload, dict):
-            raise WappiClientError("Service response must be a JSON object")
-        return payload
+        return response

@@ -123,15 +123,16 @@
               </div>
             </div>
 
-            <DropdownMenuSeparator class="h-px bg-border my-1" />
-
-            <DropdownMenuItem
-              class="flex items-center gap-2 px-3 py-2 text-sm text-foreground rounded-lg cursor-pointer outline-none hover:bg-muted focus:bg-muted transition-colors"
-              @select="router.push('/settings')"
-            >
-              <Settings class="h-4 w-4 text-muted-foreground" />
-              Настройки
-            </DropdownMenuItem>
+            <template v-if="hasScope('settings:write')">
+              <DropdownMenuSeparator class="h-px bg-border my-1" />
+              <DropdownMenuItem
+                class="flex items-center gap-2 px-3 py-2 text-sm text-foreground rounded-lg cursor-pointer outline-none hover:bg-muted focus:bg-muted transition-colors"
+                @select="router.push('/settings')"
+              >
+                <Settings class="h-4 w-4 text-muted-foreground" />
+                Настройки
+              </DropdownMenuItem>
+            </template>
 
             <DropdownMenuSeparator class="h-px bg-border my-1" />
 
@@ -178,7 +179,8 @@ import {
   Webhook,
   KeyRound,
   GraduationCap,
-  ChevronsUpDown
+  ChevronsUpDown,
+  UsersRound
 } from 'lucide-vue-next'
 import {
   TooltipRoot,
@@ -258,6 +260,11 @@ const menuItems = [
     icon: MessageSquare
   },
   {
+    name: 'Пациенты',
+    path: '/patients',
+    icon: UsersRound
+  },
+  {
     name: 'Аналитика',
     path: '/analytics',
     icon: Activity
@@ -275,12 +282,14 @@ const menuItems = [
   {
     name: 'Учётные данные',
     path: '/credentials',
-    icon: Shield
+    icon: Shield,
+    requiresScope: 'agents:write',
   },
   {
     name: 'Настройки',
     path: '/settings',
-    icon: Settings
+    icon: Settings,
+    requiresScope: 'settings:write',
   }
 ]
 
@@ -296,7 +305,13 @@ const agentMenuItems = [
   { id: 'analysis', name: 'Анализ', icon: Activity, path: (id: string) => `/agents/${id}/analysis` },
   { id: 'chat', name: 'Чат', icon: MessageSquare, path: (id: string) => `/agents/${id}/chat` },
   { id: 'api-keys', name: 'API-ключи', icon: KeyRound, path: (id: string) => `/agents/${id}/api-keys`, requiresScope: 'settings:write' },
-  { id: 'settings', name: 'Настройки', icon: Settings, path: (id: string) => `/agents/${id}/settings` },
+  {
+    id: 'settings',
+    name: 'Настройки',
+    icon: Settings,
+    path: (id: string) => `/agents/${id}/settings`,
+    requiresScope: 'agents:write',
+  },
 ]
 
 const currentMenuItems = computed(() => {
@@ -309,6 +324,8 @@ const currentMenuItems = computed(() => {
         path: item.path(agentId)
       }))
   }
-  return menuItems
+  return menuItems.filter(
+    item => !('requiresScope' in item && item.requiresScope) || hasScope(item.requiresScope),
+  )
 })
 </script>

@@ -1,24 +1,31 @@
 from __future__ import annotations
 
-from datetime import datetime
+from collections import Counter
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any, Awaitable, Callable, TypeVar
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, HttpUrl, model_validator
-from sqlalchemy import select
+from sqlalchemy import desc, func, nulls_last, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, require_scope
+from app.api.deps import get_current_user, require_scope, require_scope_any
 from app.db.models.agent import Agent
 from app.db.models.credential import Credential
+from app.db.models.sqns_service import SqnsClientRecord, SqnsPayment
 from app.db.session import get_db
 from app.schemas.agent import AgentRead, SqnsStatus, SqnsTool, get_sqns_tools_definitions
 from app.schemas.auth import AuthContext
 from app.schemas.sqns_service import (
     SqnsCategoryRead,
     SqnsCategoryUpdate,
+    SqnsClientCachedVisitItem,
+    SqnsClientCachedVisitsResponse,
+    SqnsClientListItem,
+    SqnsClientsListResponse,
     SqnsSpecialistListItem,
     SqnsSpecialistUpdate,
     SqnsServiceBulkUpdate,
@@ -31,6 +38,19 @@ from app.services.sqns import SQNSClient, SQNSClientError, fetch_token_by_login
 from app.services.sqns.client_factory import SqnsClientConfigurationError, build_sqns_client_for_agent
 from app.services.sqns.sync import sync_sqns_entities
 from app.services.sqns.sync_locks import sqns_agent_lock
+from app.schemas.analytics import AnalyticsRevenueBasis
+from app.services.analytics import (
+    build_analytics_period,
+    _dedupe_payments_for_revenue,
+    _extract_client_tags,
+    _extract_visit_channel,
+    _normalize_channel,
+    _normalize_text,
+    _payment_allowed_for_revenue_basis,
+    resolve_revenue_category_handles,
+)
+from app.services.sqns.sync_handlers.visits import sqns_visit_datetime_raw_string
+from app.services.sqns.visit_arrival import is_sqns_visit_arrived
 
 from app.api.routers.agents.deps import get_agent_or_404
 
@@ -80,6 +100,51 @@ def _extract_raw_text(raw_data: dict[str, Any] | None, keys: tuple[str, ...]) ->
         if text:
             return text
     return None
+
+
+def _extract_employee_service_ids(raw_data: dict[str, Any] | None) -> list[int]:
+    if not isinstance(raw_data, dict):
+        return []
+    keys = (
+        "services",
+        "serviceIds",
+        "service_ids",
+        "linkedServices",
+        "allowedServices",
+        "employeeServices",
+        "serviceList",
+        "servicesList",
+    )
+    out: list[int] = []
+    seen: set[int] = set()
+    for key in keys:
+        payload = raw_data.get(key)
+        if payload is None:
+            continue
+        seq: list[Any] | None = None
+        if isinstance(payload, list):
+            seq = payload
+        elif isinstance(payload, dict):
+            for nested in ("services", "items", "data"):
+                value = payload.get(nested)
+                if isinstance(value, list):
+                    seq = value
+                    break
+        if not isinstance(seq, list):
+            continue
+        for item in seq:
+            value: Any = item
+            if isinstance(item, dict):
+                value = item.get("id") or item.get("serviceId") or item.get("service_id")
+            try:
+                sid = int(value)
+            except (TypeError, ValueError):
+                continue
+            if sid in seen:
+                continue
+            seen.add(sid)
+            out.append(sid)
+    return out
 
 
 def _normalize_sqns_host(host: str) -> str:
@@ -475,6 +540,7 @@ async def disable_sqns_integration(
     - sqns_commodities (товары)
     - sqns_employees (сотрудники)
     - sqns_clients (клиенты)
+    - sqns_visit_commodity_lines (связи визит–товар из сырого API)
     - sqns_visits (визиты)
     - sqns_payments (платежи)
     - sqns_service_resources (связи)
@@ -496,6 +562,7 @@ async def disable_sqns_integration(
         SqnsSyncCursor,
         SqnsSyncRun,
         SqnsVisit,
+        SqnsVisitCommodityLine,
     )
 
     agent = await get_agent_or_404(agent_id, db, user)
@@ -524,6 +591,11 @@ async def disable_sqns_integration(
         await db.execute(
             delete(SqnsPayment).where(
                 SqnsPayment.agent_id == agent.id
+            )
+        )
+        await db.execute(
+            delete(SqnsVisitCommodityLine).where(
+                SqnsVisitCommodityLine.agent_id == agent.id
             )
         )
         await db.execute(
@@ -620,7 +692,7 @@ async def sqns_list_cached_specialists(
     limit: int = Query(200, ge=1, le=1000, description="Максимум результатов (1-1000)"),
     offset: int = Query(0, ge=0, description="Смещение для пагинации"),
     db: AsyncSession = Depends(get_db),
-    user: AuthContext = Depends(require_scope("agents:write")),
+    user: AuthContext = Depends(require_scope_any("agents:write", "analytics:view")),
 ) -> dict[str, Any]:
     from sqlalchemy import func, select
     from app.db.models.sqns_service import SqnsResource, SqnsServiceResource
@@ -830,6 +902,759 @@ async def sqns_client_by_phone(
     return {"client": client_payload}
 
 
+def _sqns_client_tags_list(raw: list | None) -> list[str] | None:
+    if not raw:
+        return None
+    out: list[str] = []
+    for t in raw:
+        s = str(t).strip()
+        if s:
+            out.append(s)
+    return out or None
+
+
+def _strip_display_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s or None
+
+
+def _compose_sqns_client_display_name(pii: dict[str, Any], raw: dict[str, Any] | None) -> str | None:
+    """
+    Полное имя для UI: фамилия, имя, отчество (как в SQNS), плюс запасные ключи в raw_data.
+    Раньше в API отдавали только lastname из PII — из-за этого в списке была одна фамилия.
+    """
+    r = raw if isinstance(raw, dict) else {}
+    last = _strip_display_str(
+        pii.get("lastname") or r.get("lastname") or r.get("lastName"),
+    )
+    first = _strip_display_str(
+        pii.get("firstname") or r.get("firstname") or r.get("firstName"),
+    )
+    pat = _strip_display_str(
+        pii.get("patronymic") or r.get("patronymic") or r.get("middleName"),
+    )
+    parts = [p for p in (last, first, pat) if p]
+    if parts:
+        return " ".join(parts)
+    return _strip_display_str(
+        r.get("name")
+        or r.get("fullName")
+        or r.get("fio")
+        or r.get("title")
+        or r.get("displayName"),
+    )
+
+
+def _parse_external_exact(search: str) -> int | None:
+    t = search.strip()
+    if not t:
+        return None
+    up = t.upper()
+    if up.startswith("PT-"):
+        suffix = up[3:].strip()
+        if suffix.isdigit():
+            return int(suffix)
+        return None
+    if t.isdigit():
+        return int(t)
+    return None
+
+
+def _sqns_client_row_matches_search(
+    needle: str,
+    rec: SqnsClientRecord,
+    name_s: str | None,
+    phone_s: str | None,
+    tags: list[str] | None,
+) -> bool:
+    if not needle:
+        return True
+    n = needle.lower()
+    if name_s and n in name_s.lower():
+        return True
+    if phone_s:
+        pl = phone_s.lower()
+        if n in pl:
+            return True
+        digits_p = "".join(c for c in phone_s if c.isdigit())
+        digits_n = "".join(c for c in needle if c.isdigit())
+        if digits_n and digits_n in digits_p:
+            return True
+    if n in str(rec.external_id):
+        return True
+    ext_ex = _parse_external_exact(needle)
+    if ext_ex is not None and rec.external_id == ext_ex:
+        return True
+    ct = rec.client_type
+    if isinstance(ct, str) and n in ct.lower():
+        return True
+    if tags:
+        for tag in tags:
+            if n in tag.lower():
+                return True
+    return False
+
+
+def _sqns_clients_parse_tags_csv(tags_csv: str | None) -> list[str]:
+    if not tags_csv or not str(tags_csv).strip():
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in str(tags_csv).split(","):
+        t = _normalize_text(part)
+        if t and t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+def _sqns_clients_visits_channel_tag_filter(
+    visits: list[Any],
+    *,
+    clients_by_external_id: dict[int, SqnsClientRecord],
+    channel: str | None,
+    tags_csv: str | None,
+) -> list[Any]:
+    """Те же правила канала/тегов, что в AgentAnalyticsService._build_view."""
+    ch = (channel or "").strip()
+    normalized_channel = _normalize_channel(ch) if ch else ""
+    normalized_tags = set(_sqns_clients_parse_tags_csv(tags_csv))
+    out: list[Any] = []
+    for visit in visits:
+        cid = int(visit.client_external_id) if visit.client_external_id is not None else None
+        client = clients_by_external_id.get(cid) if cid is not None else None
+        client_tags = _extract_client_tags(client)
+        visit_channel = _extract_visit_channel(visit)
+        if normalized_channel and visit_channel != normalized_channel:
+            continue
+        if normalized_tags and not client_tags.intersection(normalized_tags):
+            continue
+        out.append(visit)
+    return out
+
+
+def _parse_payment_client_external_id(value: str | None) -> int | None:
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None
+    try:
+        return int(normalized)
+    except ValueError:
+        return None
+
+
+def _payments_for_patients_visit_cohort(
+    payments: list[SqnsPayment],
+    *,
+    allowed_visit_ext_strs: frozenset[str],
+    visit_client_by_ext: dict[str, int],
+    allowed_client_ids: frozenset[int],
+    normalized_channel: str,
+    normalized_tags: set[str],
+    clients_by_external_id: dict[int, SqnsClientRecord],
+    revenue_basis: AnalyticsRevenueBasis,
+    allowed_payment_methods: frozenset[str] | None,
+    allowed_revenue_handles: frozenset[str] | None,
+) -> list[SqnsPayment]:
+    deduped = _dedupe_payments_for_revenue(payments)
+    if revenue_basis == "clinical":
+        deduped = [p for p in deduped if _payment_allowed_for_revenue_basis(p, revenue_basis)]
+    if allowed_payment_methods:
+        deduped = [
+            p for p in deduped
+            if _normalize_text(p.payment_method) in allowed_payment_methods
+        ]
+    if allowed_revenue_handles is not None:
+        deduped = [
+            p for p in deduped
+            if (_normalize_text(p.payment_type_handle) or _normalize_text(p.payment_type_id) or "")
+            in allowed_revenue_handles
+        ]
+
+    out: list[SqnsPayment] = []
+    for payment in deduped:
+        pay_vid = _normalize_text(payment.visit_external_id)
+        if pay_vid and pay_vid in allowed_visit_ext_strs:
+            out.append(payment)
+            continue
+        if normalized_channel:
+            continue
+        if normalized_tags:
+            cid = _parse_payment_client_external_id(payment.client_external_id)
+            if cid is None:
+                continue
+            client = clients_by_external_id.get(cid)
+            if not client:
+                continue
+            tags = _extract_client_tags(client)
+            if tags.intersection(normalized_tags):
+                out.append(payment)
+            continue
+        cid = _parse_payment_client_external_id(payment.client_external_id)
+        if cid is not None and cid in allowed_client_ids:
+            out.append(payment)
+    return out
+
+
+@router.get("/{agent_id}/sqns/clients", response_model=SqnsClientsListResponse)
+async def sqns_list_clients(
+    agent_id: UUID,
+    search: str | None = Query(None),
+    client_type: str | None = Query(None),
+    visit_date_from: date | None = Query(None, alias="vf"),
+    visit_date_to: date | None = Query(None, alias="vt"),
+    visit_cohort: str | None = Query(None, alias="vc"),
+    slice_timezone: str | None = Query(
+        None,
+        alias="tz",
+        description="IANA TZ как в аналитике; границы vf/vt интерпретируются в этой зоне.",
+    ),
+    channel: str | None = Query(None, description="Канал записи, как в аналитике"),
+    tags: str | None = Query(None, description="Теги клиентов через запятую, как query tags в аналитике"),
+    revenue_basis: AnalyticsRevenueBasis = Query(
+        default="clinical",
+        description="При непустом payment_methods: какие типы платежей учитывать (как в аналитике).",
+    ),
+    payment_methods: list[str] = Query(
+        default_factory=list,
+        alias="payment_methods",
+        description="Фильтр по способу оплаты (cash, card, certificate). Пусто — срезовая выручка по сумме визита, как раньше.",
+    ),
+    revenue_categories: list[str] = Query(
+        default_factory=list,
+        alias="revenue_categories",
+        description="services, commodities — тип оплаты SQNS. Вместе с payment_methods или отдельно включает расчёт по платежам.",
+    ),
+    resource_external_id: int | None = Query(
+        None,
+        alias="resource",
+        description="Внешний ID сотрудника (SQNS); только визиты этого специалиста в срезе vf/vt/vc.",
+    ),
+    sort_by: str = Query("visits_count"),
+    sort_order: str = Query("desc"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> SqnsClientsListResponse:
+    """
+    Список кэшированных клиентов SQNS для страницы «Пациенты».
+    Поиск по имени/телефону/типу/тегам/external_id выполняется после расшифровки PII в памяти.
+    """
+    from app.services.sqns.client_pii import decrypt_client_pii
+
+    agent = await get_agent_or_404(agent_id, db, user)
+
+    stmt = select(SqnsClientRecord).where(SqnsClientRecord.agent_id == agent.id)
+    if client_type:
+        stmt = stmt.where(SqnsClientRecord.client_type == client_type)
+
+    result = await db.execute(stmt)
+    records = list(result.scalars().all())
+
+    needle = (search or "").strip()
+
+    rows_work: list[dict[str, Any]] = []
+    for rec in records:
+        pii = decrypt_client_pii(rec.pii_data)
+        raw_safe = rec.raw_data if isinstance(rec.raw_data, dict) else None
+        name_s = _compose_sqns_client_display_name(pii, raw_safe)
+        phone_raw = pii.get("phone")
+        phone_s = str(phone_raw).strip() if phone_raw is not None else None
+        if phone_s == "":
+            phone_s = None
+        birth_raw = pii.get("birthDate")
+        birth_str = str(birth_raw) if birth_raw is not None else None
+
+        client_tags = _sqns_client_tags_list(rec.tags if isinstance(rec.tags, list) else None)
+
+        if not _sqns_client_row_matches_search(needle, rec, name_s, phone_s, client_tags):
+            continue
+
+        rows_work.append(
+            {
+                "record": rec,
+                "name": name_s,
+                "phone": phone_s,
+                "birth": birth_str,
+                "tags": client_tags,
+            }
+        )
+
+    cohort_visits_for_revenue: list[Any] | None = None
+    cohort_require_arrived_for_revenue = False
+    cohort_revenue_from_payments = False
+    slice_visit_count: int | None = None
+    slice_revenue_by_client: dict[int, Decimal] = {}
+    slice_visits_count_by_client: dict[int, int] = {}
+
+    cohort_key = (visit_cohort or "").strip().lower()
+    valid_cohorts = frozenset(
+        {
+            "primary_bookings",
+            "primary_arrived",
+            "repeat_bookings",
+            "repeat_arrived",
+            "all_bookings",
+            "all_arrived",
+        }
+    )
+    if (
+        visit_date_from is not None
+        and visit_date_to is not None
+        and cohort_key in valid_cohorts
+    ):
+        from app.db.models.sqns_service import SqnsVisit
+
+        tz_name = (slice_timezone or "").strip() or None
+        period = build_analytics_period(
+            date_from=visit_date_from,
+            date_to=visit_date_to,
+            timezone_name=tz_name,
+            fallback_timezone=agent.timezone,
+        )
+        v_stmt = select(SqnsVisit).where(
+            SqnsVisit.agent_id == agent.id,
+            SqnsVisit.deleted.is_(False),
+            SqnsVisit.visit_datetime.is_not(None),
+            SqnsVisit.visit_datetime >= period.start_utc,
+            SqnsVisit.visit_datetime < period.end_utc,
+        )
+        if cohort_key in ("primary_bookings", "primary_arrived"):
+            v_stmt = v_stmt.where(SqnsVisit.is_primary_visit.is_(True))
+        elif cohort_key in ("repeat_bookings", "repeat_arrived"):
+            v_stmt = v_stmt.where(SqnsVisit.is_primary_visit.is_(False))
+
+        if resource_external_id is not None:
+            v_stmt = v_stmt.where(SqnsVisit.resource_external_id == resource_external_id)
+
+        visits = list((await db.execute(v_stmt)).scalars().all())
+        v_client_ids = {int(v.client_external_id) for v in visits if v.client_external_id is not None}
+        clients_by_ext: dict[int, SqnsClientRecord] = {}
+        if v_client_ids:
+            c_stmt = select(SqnsClientRecord).where(
+                SqnsClientRecord.agent_id == agent.id,
+                SqnsClientRecord.external_id.in_(v_client_ids),
+            )
+            for crec in (await db.execute(c_stmt)).scalars().all():
+                clients_by_ext[int(crec.external_id)] = crec
+
+        visits = _sqns_clients_visits_channel_tag_filter(
+            visits,
+            clients_by_external_id=clients_by_ext,
+            channel=channel,
+            tags_csv=tags,
+        )
+
+        require_arrived = cohort_key.endswith("_arrived")
+        cohort_visits_for_revenue = visits
+        cohort_require_arrived_for_revenue = require_arrived
+
+        normalized_channel = _normalize_channel(channel) if channel else ""
+        normalized_tags: set[str] = set()
+        if tags:
+            for raw_item in str(tags).split(","):
+                t = _normalize_text(raw_item)
+                if t:
+                    normalized_tags.add(t)
+
+        allowed_pm = frozenset(_normalize_text(m) for m in payment_methods if _normalize_text(m))
+        allow_rev_handles = resolve_revenue_category_handles(
+            [c for c in revenue_categories if _normalize_text(c)]
+        )
+        use_payment_slice = bool(allowed_pm) or (allow_rev_handles is not None)
+
+        allowed_external: set[int] = set()
+        allowed_visit_ext_strs: set[str] = set()
+        visit_client_by_ext: dict[str, int] = {}
+        slice_visit_count = 0
+        for v in visits:
+            cid = v.client_external_id
+            if cid is None:
+                continue
+            if require_arrived and not is_sqns_visit_arrived(v):
+                continue
+            slice_visit_count += 1
+            cid_int = int(cid)
+            allowed_external.add(cid_int)
+            vext = str(v.external_id)
+            allowed_visit_ext_strs.add(vext)
+            visit_client_by_ext[vext] = cid_int
+            if not use_payment_slice:
+                amt = v.total_cost if v.total_cost is not None else v.total_price
+                if amt is not None:
+                    slice_revenue_by_client[cid_int] = slice_revenue_by_client.get(cid_int, Decimal("0")) + amt
+            slice_visits_count_by_client[cid_int] = slice_visits_count_by_client.get(cid_int, 0) + 1
+
+        if use_payment_slice:
+            cohort_revenue_from_payments = True
+            pay_stmt = select(SqnsPayment).where(
+                SqnsPayment.agent_id == agent.id,
+                SqnsPayment.payment_date.is_not(None),
+                SqnsPayment.payment_date >= period.start_utc,
+                SqnsPayment.payment_date < period.end_utc,
+            )
+            raw_payments = list((await db.execute(pay_stmt)).scalars().all())
+            filtered_pay = _payments_for_patients_visit_cohort(
+                raw_payments,
+                allowed_visit_ext_strs=frozenset(allowed_visit_ext_strs),
+                visit_client_by_ext=visit_client_by_ext,
+                allowed_client_ids=frozenset(allowed_external),
+                normalized_channel=normalized_channel,
+                normalized_tags=normalized_tags,
+                clients_by_external_id=clients_by_ext,
+                revenue_basis=revenue_basis,
+                allowed_payment_methods=allowed_pm if allowed_pm else None,
+                allowed_revenue_handles=allow_rev_handles,
+            )
+            for p in filtered_pay:
+                amt = p.amount
+                if amt is None:
+                    continue
+                pay_vid = _normalize_text(p.visit_external_id)
+                cid_int: int | None
+                if pay_vid and pay_vid in visit_client_by_ext:
+                    cid_int = visit_client_by_ext[pay_vid]
+                else:
+                    cid_int = _parse_payment_client_external_id(p.client_external_id)
+                if cid_int is None or cid_int not in allowed_external:
+                    continue
+                slice_revenue_by_client[cid_int] = slice_revenue_by_client.get(cid_int, Decimal("0")) + amt
+
+        rows_work = [
+            row for row in rows_work if int(row["record"].external_id) in allowed_external
+        ]
+
+    allowed_sort = {"visits_count", "total_arrival", "synced_at", "external_id"}
+    if sort_by not in allowed_sort:
+        sort_by = "visits_count"
+    reverse = sort_order.lower() != "asc"
+
+    def sort_key(row: dict[str, Any]) -> Any:
+        r = row["record"]
+        if sort_by == "visits_count":
+            return r.visits_count if r.visits_count is not None else -1
+        if sort_by == "total_arrival":
+            return float(r.total_arrival) if r.total_arrival is not None else -1.0
+        if sort_by == "synced_at":
+            return r.synced_at.timestamp()
+        return r.external_id
+
+    rows_work.sort(key=sort_key, reverse=reverse)
+
+    total = len(rows_work)
+    visits_count_sum = sum(int(row["record"].visits_count or 0) for row in rows_work)
+
+    revenue_total = Decimal("0")
+    if cohort_visits_for_revenue is not None:
+        if cohort_revenue_from_payments:
+            revenue_total = sum(slice_revenue_by_client.values(), start=Decimal("0"))
+        else:
+            for v in cohort_visits_for_revenue:
+                cid = v.client_external_id
+                if cid is None:
+                    continue
+                if cohort_require_arrived_for_revenue and not is_sqns_visit_arrived(v):
+                    continue
+                amt = v.total_cost if v.total_cost is not None else v.total_price
+                if amt is not None:
+                    revenue_total += amt
+    else:
+        for row in rows_work:
+            ta = row["record"].total_arrival
+            if ta is not None:
+                revenue_total += ta
+
+    total_arrival_sum = Decimal("0")
+    for row in rows_work:
+        ta = row["record"].total_arrival
+        if ta is not None:
+            total_arrival_sum += ta
+
+    from app.db.models.sqns_service import SqnsResource, SqnsVisit
+    from app.services.sqns.mcp_server import _extract_resource_name, _extract_service_name
+
+    last_visit_total_price_sum = Decimal("0")
+    all_sel_external_ids = [int(row["record"].external_id) for row in rows_work]
+    if all_sel_external_ids:
+        now_dt = datetime.now(timezone.utc)
+        visit_chunk = 2000
+        for i in range(0, len(all_sel_external_ids), visit_chunk):
+            chunk = all_sel_external_ids[i : i + visit_chunk]
+            all_visits_totals_stmt = (
+                select(SqnsVisit)
+                .where(
+                    SqnsVisit.agent_id == agent.id,
+                    SqnsVisit.client_external_id.in_(chunk),
+                    SqnsVisit.deleted.is_(False),
+                    SqnsVisit.visit_datetime.is_not(None),
+                )
+                .order_by(SqnsVisit.visit_datetime)
+            )
+            all_visits_tot = list((await db.execute(all_visits_totals_stmt)).scalars().all())
+            by_client: dict[int, list[Any]] = {}
+            for v in all_visits_tot:
+                cex = v.client_external_id
+                if cex is not None:
+                    by_client.setdefault(int(cex), []).append(v)
+            for cid in chunk:
+                vlist = by_client.get(cid, [])
+                upcoming = [v for v in vlist if v.visit_datetime >= now_dt]
+                past_arrived = [v for v in vlist if v.visit_datetime < now_dt and is_sqns_visit_arrived(v)]
+                pick = upcoming[0] if upcoming else (past_arrived[-1] if past_arrived else None)
+                if pick is not None and pick.total_price is not None:
+                    last_visit_total_price_sum += pick.total_price
+
+    filtered_external_ids = [row["record"].external_id for row in rows_work]
+    top_service_name: str | None = None
+    top_service_bookings: int | None = None
+    if filtered_external_ids:
+        service_counts: Counter[str] = Counter()
+        chunk_size = 2000
+        for i in range(0, len(filtered_external_ids), chunk_size):
+            chunk = filtered_external_ids[i : i + chunk_size]
+            visits_for_top_stmt = select(SqnsVisit).where(
+                SqnsVisit.agent_id == agent.id,
+                SqnsVisit.client_external_id.in_(chunk),
+                SqnsVisit.deleted.is_(False),
+            )
+            for v in (await db.execute(visits_for_top_stmt)).scalars().all():
+                if not is_sqns_visit_arrived(v):
+                    continue
+                raw = v.raw_data if isinstance(v.raw_data, dict) else {}
+                svc = _extract_service_name(raw)
+                if svc:
+                    service_counts[svc] += 1
+        if service_counts:
+            top_service_name, top_bookings = service_counts.most_common(1)[0]
+            top_service_bookings = int(top_bookings)
+
+    page = rows_work[offset : offset + limit]
+
+    # Bulk-загрузка визитов для всей страницы одним запросом
+    page_external_ids = [row["record"].external_id for row in page]
+    visit_by_client: dict[int, Any] = {}
+    if page_external_ids:
+        all_visits_stmt = (
+            select(SqnsVisit)
+            .where(
+                SqnsVisit.agent_id == agent.id,
+                SqnsVisit.client_external_id.in_(page_external_ids),
+                SqnsVisit.deleted.is_(False),
+                SqnsVisit.visit_datetime.is_not(None),
+            )
+            .order_by(SqnsVisit.visit_datetime)
+        )
+        all_visits = list((await db.execute(all_visits_stmt)).scalars().all())
+
+        # Для каждого клиента: берём ближайший будущий визит, иначе последний прошедший
+        now_dt = datetime.now(timezone.utc)
+        tmp: dict[int, list[Any]] = {}
+        for v in all_visits:
+            cid = v.client_external_id
+            if cid is not None:
+                tmp.setdefault(cid, []).append(v)
+        for cid, vlist in tmp.items():
+            upcoming = [v for v in vlist if v.visit_datetime >= now_dt]
+            past_arrived = [v for v in vlist if v.visit_datetime < now_dt and is_sqns_visit_arrived(v)]
+            visit_by_client[cid] = upcoming[0] if upcoming else (past_arrived[-1] if past_arrived else None)
+
+        # Bulk-загрузка специалистов для найденных визитов
+        res_ids = {
+            v.resource_external_id
+            for v in visit_by_client.values()
+            if v is not None and v.resource_external_id is not None
+        }
+        name_by_res: dict[int, str] = {}
+        if res_ids:
+            r_stmt = select(SqnsResource.external_id, SqnsResource.name).where(
+                SqnsResource.agent_id == agent.id,
+                SqnsResource.external_id.in_(res_ids),
+            )
+            for ext_id, rname in (await db.execute(r_stmt)).all():
+                if ext_id is not None:
+                    name_by_res[int(ext_id)] = str(rname)
+    else:
+        name_by_res = {}
+
+    clients: list[SqnsClientListItem] = []
+    for row in page:
+        rec = row["record"]
+        v = visit_by_client.get(rec.external_id)
+
+        last_visit_dt = None
+        last_svc = None
+        last_spec = None
+        last_visit_total_price = None
+
+        if v:
+            last_visit_dt = v.visit_datetime
+            last_visit_total_price = v.total_price
+            raw = v.raw_data if isinstance(v.raw_data, dict) else {}
+            last_svc = _extract_service_name(raw)
+            if v.resource_external_id is not None:
+                last_spec = name_by_res.get(int(v.resource_external_id))
+            if not last_spec:
+                last_spec = _extract_resource_name(raw, None)
+
+        ext_id_int = int(rec.external_id)
+        clients.append(
+            SqnsClientListItem(
+                id=rec.id,
+                external_id=rec.external_id,
+                name=row["name"],
+                phone=row["phone"],
+                birth_date=row["birth"],
+                sex=rec.sex,
+                client_type=rec.client_type,
+                visits_count=rec.visits_count,
+                total_arrival=rec.total_arrival,
+                tags=row["tags"],
+                last_visit_datetime=last_visit_dt,
+                last_service_name=last_svc,
+                last_specialist_name=last_spec,
+                last_visit_total_price=last_visit_total_price,
+                slice_revenue=slice_revenue_by_client.get(ext_id_int),
+                slice_visits_count=slice_visits_count_by_client.get(ext_id_int),
+                synced_at=rec.synced_at,
+            )
+        )
+
+    has_more = offset + len(clients) < total
+    return SqnsClientsListResponse(
+        clients=clients,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=has_more,
+        revenue_total=revenue_total,
+        total_arrival_sum=total_arrival_sum,
+        visits_count_sum=visits_count_sum,
+        last_visit_total_price_sum=last_visit_total_price_sum,
+        slice_visit_count=slice_visit_count,
+        top_service_name=top_service_name,
+        top_service_bookings=top_service_bookings,
+    )
+
+
+async def _sqns_cached_visits_response_for_client(
+    *,
+    db: AsyncSession,
+    agent: Agent,
+    client_rec: SqnsClientRecord,
+    limit: int,
+) -> SqnsClientCachedVisitsResponse:
+    from app.db.models.sqns_service import SqnsResource, SqnsVisit
+    from app.services.sqns.mcp_server import _extract_resource_name, _extract_service_name
+    from app.services.sqns.visit_arrival import is_sqns_visit_arrived
+
+    v_stmt = (
+        select(SqnsVisit)
+        .where(
+            SqnsVisit.agent_id == agent.id,
+            SqnsVisit.client_external_id == client_rec.external_id,
+            SqnsVisit.deleted.is_(False),
+        )
+        .order_by(nulls_last(desc(SqnsVisit.visit_datetime)))
+        .limit(limit)
+    )
+    visits = list((await db.execute(v_stmt)).scalars().all())
+
+    res_ids = {v.resource_external_id for v in visits if v.resource_external_id is not None}
+    name_by_res: dict[int, str] = {}
+    if res_ids:
+        r_stmt = select(SqnsResource.external_id, SqnsResource.name).where(
+            SqnsResource.agent_id == agent.id,
+            SqnsResource.external_id.in_(res_ids),
+        )
+        for ext_id, name in (await db.execute(r_stmt)).all():
+            if ext_id is not None and name is not None:
+                name_by_res[int(ext_id)] = str(name)
+
+    out: list[SqnsClientCachedVisitItem] = []
+    for v in visits:
+        raw = v.raw_data if isinstance(v.raw_data, dict) else {}
+        svc = _extract_service_name(raw)
+        spec: str | None = None
+        if v.resource_external_id is not None:
+            spec = name_by_res.get(int(v.resource_external_id))
+        if not spec:
+            spec = _extract_resource_name(raw, None)
+        out.append(
+            SqnsClientCachedVisitItem(
+                id=v.id,
+                visit_external_id=v.external_id,
+                visit_datetime=v.visit_datetime,
+                visit_datetime_raw=sqns_visit_datetime_raw_string(raw),
+                service_name=svc,
+                specialist_name=spec,
+                attendance=v.attendance,
+                arrived=is_sqns_visit_arrived(v),
+                total_price=v.total_price,
+            )
+        )
+
+    return SqnsClientCachedVisitsResponse(visits=out)
+
+
+@router.get(
+    "/{agent_id}/sqns/clients/by-external/{external_client_id:int}/visits",
+    response_model=SqnsClientCachedVisitsResponse,
+)
+async def sqns_client_cached_visits_by_external(
+    agent_id: UUID,
+    external_client_id: int,
+    limit: int = Query(40, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> SqnsClientCachedVisitsResponse:
+    """
+    Визиты пациента по SQNS external_id клиента (надёжнее UUID записи в БД для UI).
+    """
+    agent = await get_agent_or_404(agent_id, db, user)
+    cr_stmt = select(SqnsClientRecord).where(
+        SqnsClientRecord.external_id == external_client_id,
+        SqnsClientRecord.agent_id == agent.id,
+    )
+    client_rec = (await db.execute(cr_stmt)).scalar_one_or_none()
+    if client_rec is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Client not found")
+    return await _sqns_cached_visits_response_for_client(
+        db=db, agent=agent, client_rec=client_rec, limit=limit
+    )
+
+
+@router.get(
+    "/{agent_id}/sqns/clients/{client_record_id}/visits",
+    response_model=SqnsClientCachedVisitsResponse,
+)
+async def sqns_client_cached_visits(
+    agent_id: UUID,
+    client_record_id: UUID,
+    limit: int = Query(40, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> SqnsClientCachedVisitsResponse:
+    """
+    Визиты пациента из локального кэша sqns_visits (после синхронизации).
+    """
+    agent = await get_agent_or_404(agent_id, db, user)
+
+    cr_stmt = select(SqnsClientRecord).where(
+        SqnsClientRecord.id == client_record_id,
+        SqnsClientRecord.agent_id == agent.id,
+    )
+    client_rec = (await db.execute(cr_stmt)).scalar_one_or_none()
+    if client_rec is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+    return await _sqns_cached_visits_response_for_client(
+        db=db, agent=agent, client_rec=client_rec, limit=limit
+    )
+
+
 # ============================================================================
 # Управление кэшем SQNS
 # ============================================================================
@@ -995,6 +1820,94 @@ async def sqns_list_cached_services(
         "has_more": has_more,
         "page": current_page,
         "pages": total_pages,
+    }
+
+
+@router.get("/{agent_id}/sqns/service-employee-links")
+async def sqns_list_service_employee_links(
+    agent_id: UUID,
+    limit: int = Query(5000, ge=1, le=10000),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+):
+    """
+    Плоский список связей услуга-сотрудник для отображения в таблице "Все записи".
+    Источник: sqns_service_resources (JOIN sqns_services + sqns_resources).
+    Услуги без сотрудников также включаются (employee = null).
+    """
+    from sqlalchemy import func, select
+    from app.db.models.sqns_service import SqnsResource, SqnsService, SqnsServiceResource
+
+    agent = await get_agent_or_404(agent_id, db, user)
+
+    # Все связи из link-таблицы
+    links_stmt = (
+        select(
+            SqnsService.id.label("service_id"),
+            SqnsService.name.label("service_name"),
+            SqnsService.category.label("category_name"),
+            SqnsService.updated_at.label("service_updated_at"),
+            SqnsResource.id.label("resource_id"),
+            SqnsResource.name.label("employee_name"),
+            SqnsResource.updated_at.label("resource_updated_at"),
+            SqnsServiceResource.updated_at.label("link_updated_at"),
+            SqnsServiceResource.created_at.label("link_created_at"),
+        )
+        .join(SqnsService, SqnsService.id == SqnsServiceResource.service_id)
+        .join(SqnsResource, SqnsResource.id == SqnsServiceResource.resource_id)
+        .where(SqnsService.agent_id == agent.id)
+        .order_by(SqnsService.name, SqnsResource.name)
+    )
+    link_rows = (await db.execute(links_stmt)).all()
+
+    # Услуги, у которых есть хотя бы одна связь
+    linked_service_ids: set = {row.service_id for row in link_rows}
+
+    all_items: list[dict[str, Any]] = []
+    for row in link_rows:
+        updated_at = max(
+            (dt for dt in [row.link_updated_at, row.service_updated_at, row.resource_updated_at, row.link_created_at] if dt is not None),
+            default=None,
+        )
+        all_items.append({
+            "service": row.service_name,
+            "employee": row.employee_name,
+            "category": row.category_name,
+            "updated_at": updated_at,
+        })
+
+    # Услуги без сотрудников
+    orphan_stmt = (
+        select(
+            SqnsService.name.label("service_name"),
+            SqnsService.category.label("category_name"),
+            SqnsService.updated_at.label("service_updated_at"),
+        )
+        .where(
+            SqnsService.agent_id == agent.id,
+            SqnsService.id.notin_(linked_service_ids) if linked_service_ids else True,
+        )
+        .order_by(SqnsService.name)
+    )
+    orphan_rows = (await db.execute(orphan_stmt)).all()
+    for row in orphan_rows:
+        all_items.append({
+            "service": row.service_name,
+            "employee": None,
+            "category": row.category_name,
+            "updated_at": row.service_updated_at,
+        })
+
+    total = len(all_items)
+    items = all_items[offset: offset + limit]
+
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(items) < total,
     }
 
 

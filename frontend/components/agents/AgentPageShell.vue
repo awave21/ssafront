@@ -1,6 +1,11 @@
 <template>
-  <div class="px-5 py-5 lg:h-full">
-    <div class="flex flex-col lg:h-full">
+  <div
+    :class="[
+      'px-5 py-5 min-h-0',
+      props.contained ? 'h-full overflow-hidden' : '',
+    ]"
+  >
+    <div :class="['flex flex-col min-h-0', props.contained ? 'h-full' : '']">
       <!-- Auth Status Banner -->
     <div v-if="!isAuthenticated" class="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
       <div class="flex items-center justify-between">
@@ -29,7 +34,7 @@
       <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
     </div>
 
-    <div v-else class="flex flex-col flex-1 min-h-0 gap-4">
+    <div v-else class="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
       <slot />
     </div>
 
@@ -64,6 +69,8 @@ import AgentTestChatWidget from '~/components/agents/AgentTestChatWidget.vue'
 type Props = {
   title: string
   hideActions?: boolean
+  /** Высота по main + без внешнего скролла (таблицы, внутренний overflow) */
+  contained?: boolean
 }
 
 const props = defineProps<Props>()

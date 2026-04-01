@@ -33,7 +33,8 @@ const normalizeRole = (
     const value = rawRole.toLowerCase()
     if (['user', 'human', 'client', 'customer', 'visitor', 'requester'].includes(value)) return 'user'
     if (['manager', 'operator', 'admin', 'support'].includes(value)) return 'manager'
-    if (['agent', 'assistant', 'bot', 'ai', 'system'].includes(value)) return 'agent'
+    if (value === 'system') return 'system'
+    if (['agent', 'assistant', 'bot', 'ai'].includes(value)) return 'agent'
   }
 
   return 'agent'
@@ -153,6 +154,14 @@ const normalizeMessage = (raw: any, fallbackDialogId: string): Message | null =>
       ? Number(durationSeconds)
       : undefined
 
+  const senderKind = typeof raw?.sender_kind === 'string' ? raw.sender_kind : undefined
+  let senderLabel = typeof raw?.sender_label === 'string' ? raw.sender_label.trim() : undefined
+  if (!senderLabel && raw?.user_info && typeof raw.user_info === 'object') {
+    const ui = raw.user_info as Record<string, unknown>
+    const fromUi = typeof ui.sender_display_label === 'string' ? ui.sender_display_label.trim() : ''
+    if (fromUi) senderLabel = fromUi
+  }
+
   return {
     id: String(id),
     dialog_id: String(dialogId),
@@ -162,6 +171,9 @@ const normalizeMessage = (raw: any, fallbackDialogId: string): Message | null =>
     status,
     duration_seconds: durationValue,
     created_at: String(createdAt),
+    sender_kind: senderKind || undefined,
+    sender_label: senderLabel || undefined,
+    user_info: raw?.user_info && typeof raw.user_info === 'object' ? raw.user_info : undefined,
     tool_name: raw?.tool_name ?? undefined,
     tool_call_id: raw?.tool_call_id ?? undefined,
     args: raw?.args ?? undefined,
@@ -301,7 +313,9 @@ export const useMessages = () => {
       type,
       content: content.trim(),
       status: 'sending',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      sender_kind: 'contact',
+      sender_label: 'Клиент',
     }
 
     // Add to messages immediately
@@ -399,7 +413,9 @@ export const useMessages = () => {
       type: 'text',
       content: content.trim(),
       status: 'sending',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      sender_kind: 'manager',
+      sender_label: 'Менеджер',
     }
 
     // Add to messages immediately
@@ -473,7 +489,9 @@ export const useMessages = () => {
       type,
       content: content.trim(),
       status: 'sending',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      sender_kind: 'contact',
+      sender_label: 'Клиент',
     }
 
     const messages = messagesMap[dialogId] || []
@@ -541,7 +559,9 @@ export const useMessages = () => {
       type: 'text',
       content: '',
       status: 'streaming',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      sender_kind: 'agent',
+      sender_label: 'Агент',
     }
 
     const messages = messagesMap[dialogId] || []
@@ -616,7 +636,9 @@ export const useMessages = () => {
       type: 'text',
       content: '',
       status: 'streaming',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      sender_kind: 'agent',
+      sender_label: 'Агент',
     }
 
     const messages = messagesMap[dialogId] || []

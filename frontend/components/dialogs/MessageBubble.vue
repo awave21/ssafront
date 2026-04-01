@@ -66,16 +66,12 @@
         isOutgoing ? 'order-1' : 'order-2'
       ]"
     >
-      <!-- Sender Label -->
+      <!-- Sender Label (сервер: sender_label / sender_kind; иначе по role) -->
       <div
         class="text-[11px] font-medium mb-1 px-1"
-        :class="[
-          isManager ? 'text-right text-emerald-600'
-            : isAgent ? 'text-right text-indigo-600'
-            : 'text-left text-slate-500'
-        ]"
+        :class="senderLabelClass"
       >
-        {{ isManager ? 'Менеджер' : isAgent ? 'Агент' : 'Пользователь' }}
+        {{ senderDisplayLabel }}
       </div>
 
       <!-- Message Bubble -->
@@ -230,12 +226,38 @@ const audioRef = ref<HTMLAudioElement | null>(null)
 // Computed
 const isAgent = computed(() => props.message.role === 'agent')
 const isManager = computed(() => props.message.role === 'manager')
+const isSystem = computed(() => props.message.role === 'system')
 const isOutgoing = computed(() => isAgent.value || isManager.value)
+
+const senderDisplayLabel = computed(() => {
+  const fromApi = props.message.sender_label?.trim()
+  if (fromApi) return fromApi
+  if (isSystem.value) return 'Система'
+  if (isManager.value) {
+    if (props.message.sender_kind === 'wappi_operator') {
+      return props.message.user_info?.integration_channel_label
+        ? `Оператор (${props.message.user_info.integration_channel_label})`
+        : 'Оператор (мессенджер)'
+    }
+    return 'Менеджер'
+  }
+  if (isAgent.value) return 'Агент'
+  if (props.message.sender_kind === 'contact') return 'Клиент'
+  return 'Пользователь'
+})
+
+const senderLabelClass = computed(() => {
+  if (isSystem.value) return 'text-left text-slate-400'
+  if (isManager.value) return 'text-right text-emerald-600'
+  if (isAgent.value) return 'text-right text-indigo-600'
+  return 'text-left text-slate-500'
+})
 const isToolMessage = computed(() => props.message.type === 'tool_call' || props.message.type === 'tool_result')
 
 const bubbleClasses = computed(() => {
   if (isManager.value) return 'bg-emerald-600 text-white rounded-br-sm'
   if (isAgent.value) return 'bg-indigo-600 text-white rounded-br-sm'
+  if (isSystem.value) return 'bg-slate-100 border border-slate-200 text-slate-700 rounded-bl-sm'
   return 'bg-white border border-slate-200 text-slate-900 rounded-bl-sm shadow-sm'
 })
 

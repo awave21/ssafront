@@ -88,12 +88,13 @@ fi
 
 case "$TARGET" in
   backend)
-    echo "Деплой backend: db/redis + пересборка api + sqns-sync-worker"
+    echo "Деплой backend: db/redis + сборка образов + миграции до старта api + запуск"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" up -d --build api sqns-sync-worker
+    "${DC[@]}" build api sqns-sync-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
+    "${DC[@]}" up -d api sqns-sync-worker
     ;;
   frontend)
     echo "Деплой frontend: пересборка frontend + проверка sqns-sync-worker"
@@ -101,12 +102,13 @@ case "$TARGET" in
     "${DC[@]}" up -d sqns-sync-worker
     ;;
   worker)
-    echo "Деплой worker: db/redis + пересборка sqns-sync-worker"
+    echo "Деплой worker: db/redis + сборка api+worker + миграции + запуск worker"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" up -d --build sqns-sync-worker
+    "${DC[@]}" build api sqns-sync-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
+    "${DC[@]}" up -d sqns-sync-worker
     ;;
   monitor)
     echo "Деплой monitor: перезапуск netdata + caddy + проверка sqns-sync-worker"
@@ -114,21 +116,23 @@ case "$TARGET" in
     "${DC[@]}" up -d sqns-sync-worker
     ;;
   all)
-    echo "Деплой all: db/redis + пересборка api/frontend/sqns-sync-worker + netdata + caddy"
+    echo "Деплой all: db/redis + сборка + миграции до api + запуск сервисов + netdata + caddy"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" up -d --build api frontend sqns-sync-worker
+    "${DC[@]}" build api frontend sqns-sync-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
+    "${DC[@]}" up -d api frontend sqns-sync-worker
     "${DC[@]}" up -d --remove-orphans netdata caddy
     ;;
   full)
-    echo "Деплой full: db/redis + api/frontend/sqns-sync-worker + netdata/caddy + pgadmin/watcher"
+    echo "Деплой full: db/redis + сборка + миграции до api + запуск + netdata/caddy + pgadmin/watcher"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" up -d --build api frontend sqns-sync-worker
+    "${DC[@]}" build api frontend sqns-sync-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
+    "${DC[@]}" up -d api frontend sqns-sync-worker
     "${DC[@]}" up -d --remove-orphans netdata caddy pgadmin watcher
     ;;
   *)

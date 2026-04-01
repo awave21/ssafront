@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_role, require_scope
+from app.api.deps import get_current_user, require_role, require_scope
 from app.db.models.tenant import Tenant
 from app.db.session import get_db
 from app.schemas.auth import AuthContext
@@ -90,9 +90,10 @@ async def update_tenant_function_rules(
 
 @router.get("/balance", response_model=TenantBalanceRead, status_code=status.HTTP_200_OK)
 async def get_tenant_balance_settings(
-    user: AuthContext = Depends(require_scope("settings:read")),
+    user: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Чтение остатка доступно любому участнику организации с валидной сессией."""
     balance = await get_tenant_balance(db, tenant_id=user.tenant_id)
     if balance is None:
         return TenantBalanceRead(

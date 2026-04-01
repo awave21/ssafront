@@ -155,17 +155,35 @@ async def list_dialogs(
         if not user_info:
             user_info = fallback_user_info
         
-        # Fallback: формируем базовый user_info из session_id для Telegram
+        # Fallback: формируем базовый user_info из session_id для Telegram / telegram_phone
         if not user_info and session_id.startswith("telegram:"):
             user_info = {
                 "platform": "telegram",
-                "platform_id": session_id.split(":")[1],
+                "platform_id": session_id.split(":", 1)[1],
                 "session_id": session_id,
             }
-        
+        if not user_info and session_id.startswith("telegram_phone:"):
+            user_info = {
+                "platform": "telegram_phone",
+                "platform_id": session_id.split(":", 1)[1],
+                "session_id": session_id,
+                "integration_channel_label": "Telegram (личный номер)",
+                "integration_channel_type": "telegram_phone",
+            }
+        if not user_info and session_id.startswith("max:"):
+            user_info = {
+                "platform": "max",
+                "platform_id": session_id.split(":", 1)[1],
+                "session_id": session_id,
+                "integration_channel_label": "MAX",
+                "integration_channel_type": "max",
+            }
+
         # Реальный статус из dialog_states (если нет записи — active)
         dialog_status = status_map.get(session_id, "active")
-        
+
+        dialog_platform = user_info.get("platform") if isinstance(user_info, dict) else None
+
         dialogs.append(
             {
                 "id": session_id,
@@ -176,6 +194,7 @@ async def list_dialogs(
                 "unread_count": 0,
                 "is_pinned": False,
                 "status": dialog_status,
+                "platform": dialog_platform,
                 "user_info": user_info,
             }
         )

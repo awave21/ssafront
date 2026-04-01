@@ -11,9 +11,15 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.sqns_service import SqnsService, SqnsServiceCategory, SqnsServiceResource
+from app.db.models.sqns_service import (
+    SqnsResource,
+    SqnsService,
+    SqnsServiceCategory,
+    SqnsServiceResource,
+)
 from app.services.sqns.client import SQNSClient, SQNSClientError
 from app.services.sqns.sync_handlers.common import coerce_number, parse_int, unwrap_payload_list
+from app.services.sqns.sync_handlers.employees import mark_stale_sqns_resources
 
 logger = structlog.get_logger(__name__)
 
@@ -104,6 +110,68 @@ async def merge_service_payload_from_booking_api(
     return service
 
 
+def resource_data_from_service_link(external_id: int, link: dict[str, Any]) -> dict[str, Any]:
+    """Минимальный payload для sqns_resources, если специалист есть в услуге (booking), но не в /employee."""
+    name = (
+        link.get("name")
+        or link.get("fullName")
+        or link.get("title")
+        or link.get("fio")
+        or link.get("displayName")
+    )
+    spec = (
+        link.get("specialization")
+        or link.get("specialty")
+        or link.get("position")
+    )
+    merged = dict(link)
+    merged["name"] = str(name).strip() if name else f"Специалист {external_id}"
+    if spec:
+        merged["specialization"] = spec
+    merged["isActive"] = True
+    return merged
+
+
+async def collect_resource_refs_from_services_payload(
+    client: SQNSClient,
+    services_data: list[Any],
+    booking_resources_by_id: dict[int, list[dict[str, Any]]],
+) -> tuple[set[int], dict[int, dict[str, Any]]]:
+    """
+    Все external_id специалистов из resources[] услуг (после merge с booking API).
+    Нужны, чтобы не помечать их устаревшими, если SQNS не вернул их в list_all_employees.
+    """
+    external_ids: set[int] = set()
+    first_link_by_id: dict[int, dict[str, Any]] = {}
+    for service in services_data:
+        if not isinstance(service, dict) or "id" not in service:
+            continue
+        try:
+            ext_svc = int(service["id"])
+        except (TypeError, ValueError):
+            continue
+        merged = await merge_service_payload_from_booking_api(
+            client,
+            service,
+            ext_svc,
+            booking_resources_by_id,
+        )
+        links = collect_service_resource_links(merged)
+        if not links:
+            continue
+        for link in links:
+            if not isinstance(link, dict) or "id" not in link:
+                continue
+            try:
+                rid = int(link["id"])
+            except (TypeError, ValueError):
+                continue
+            external_ids.add(rid)
+            if rid not in first_link_by_id:
+                first_link_by_id[rid] = link
+    return external_ids, first_link_by_id
+
+
 class SqnsServicesSyncHandler:
     def __init__(self, db: AsyncSession, client: SQNSClient, agent_id: UUID):
         self.db = db
@@ -154,19 +222,81 @@ class SqnsServicesSyncHandler:
             return 0
         return int(number)
 
+    async def _upsert_resource_from_booking_link(
+        self,
+        external_id: int,
+        link: dict[str, Any],
+        synced_at: datetime,
+    ) -> UUID:
+        """Специалист из онлайн-записи, которого нет в ответе /employee — минимальная проекция в sqns_resources."""
+        projection_payload = resource_data_from_service_link(external_id, link)
+        full_name = projection_payload["name"]
+        specialization = (
+            projection_payload.get("specialization")
+            or projection_payload.get("specialty")
+            or projection_payload.get("position")
+        )
+        stmt = insert(SqnsResource).values(
+            id=uuid4(),
+            agent_id=self.agent_id,
+            external_id=external_id,
+            name=full_name,
+            specialization=str(specialization) if specialization else None,
+            is_active=True,
+            active=True,
+            information=None,
+            raw_data=projection_payload,
+            synced_at=synced_at,
+            created_at=synced_at,
+        )
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_sqns_resources_agent_external",
+            set_={
+                "name": stmt.excluded.name,
+                "specialization": stmt.excluded.specialization,
+                "is_active": stmt.excluded.is_active,
+                "raw_data": stmt.excluded.raw_data,
+                "synced_at": stmt.excluded.synced_at,
+                "updated_at": synced_at,
+            },
+        ).returning(SqnsResource.id)
+        result = await self.db.execute(stmt)
+        return result.scalar_one()
+
     async def sync(
         self,
         *,
         modificate: int | None,
         resource_uuid_map: dict[int, UUID],
         employee_service_links: list[tuple[int, int]] | None = None,
+        employee_external_ids: set[int] | None = None,
+        employee_full_sync: bool = True,
     ) -> dict[str, int]:
         synced_at = datetime.now(timezone.utc)
         services_data = await self.client.list_all_services(per_page=100, modificate=modificate)
         booking_resources_by_id = await load_booking_resources_by_service_external_id(self.client)
+        resource_ids_from_services, link_by_resource_id = await collect_resource_refs_from_services_payload(
+            self.client,
+            services_data,
+            booking_resources_by_id,
+        )
+        emp_ids = employee_external_ids or set()
+        for ext_res in resource_ids_from_services:
+            if ext_res in resource_uuid_map:
+                continue
+            link = link_by_resource_id.get(ext_res, {})
+            resource_uuid = await self._upsert_resource_from_booking_link(ext_res, link, synced_at)
+            resource_uuid_map[ext_res] = resource_uuid
+            logger.info(
+                "sqns_resource_upserted_from_service_link",
+                agent_id=str(self.agent_id),
+                external_id=ext_res,
+            )
+
         services_synced = 0
         links_synced = 0
         categories_touched: set[str] = set()
+        services_with_authoritative_links: set[int] = set()
 
         for service in services_data:
             if not isinstance(service, dict):
@@ -189,6 +319,7 @@ class SqnsServicesSyncHandler:
 
             resource_links = collect_service_resource_links(service)
             if resource_links is not None:
+                services_with_authoritative_links.add(external_id_int)
                 links_synced += await self._sync_service_resources(
                     service_uuid=service_uuid,
                     resource_links=resource_links,
@@ -211,13 +342,29 @@ class SqnsServicesSyncHandler:
 
         for category_name in categories_touched:
             await self._upsert_category(category_name, synced_at)
+        # Удаляем устаревшие категории только при полной синхронизации.
+        # При инкрементальной services_data содержит лишь недавно изменённые услуги,
+        # поэтому categories_touched неполный — prune удалил бы валидные категории.
+        stale_categories = await self._prune_stale_categories(categories_touched) if modificate is None else 0
 
         augment = await self.merge_employee_service_resource_links(
             employee_service_links or [],
             resource_uuid_map,
             synced_at,
+            services_with_authoritative_links=services_with_authoritative_links,
+            full_sync=employee_full_sync,
         )
         links_synced += augment
+
+        stale_resources = 0
+        if modificate is None:
+            protected_ids = emp_ids | resource_ids_from_services
+            stale_resources = await mark_stale_sqns_resources(
+                self.db,
+                self.agent_id,
+                protected_ids,
+                synced_at,
+            )
 
         total_categories_stmt = select(func.count(SqnsServiceCategory.id)).where(
             SqnsServiceCategory.agent_id == self.agent_id
@@ -231,12 +378,16 @@ class SqnsServicesSyncHandler:
             categories_synced=categories_total,
             links_synced=links_synced,
             links_merged_from_employees=augment,
+            stale_resources=stale_resources,
+            stale_categories=stale_categories,
             modificate=modificate,
         )
         return {
             "services_synced": services_synced,
             "categories_synced": categories_total,
             "links_synced": links_synced,
+            "stale_resources": stale_resources,
+            "stale_categories": stale_categories,
         }
 
     async def _upsert_service(
@@ -348,13 +499,18 @@ class SqnsServicesSyncHandler:
         pairs: list[tuple[int, int]],
         resource_uuid_map: dict[int, UUID],
         synced_at: datetime,
+        *,
+        services_with_authoritative_links: set[int] | None = None,
+        full_sync: bool = True,
     ) -> int:
         """
-        Добавляет связи (сотрудник → услуга), если SQNS отдаёт их в карточке сотрудника,
-        а в объекте услуги поля resources нет или пустые.
+        Синхронизирует связи из карточек сотрудников как fallback-источник:
+        - для услуг с authoritative resources[] (booking API) ничего не трогаем;
+        - full_sync=True  → replace: удалить старые связи, вставить новые (полная синхронизация);
+        - full_sync=False → add-only: только добавить отсутствующие связи (инкрементальная синхронизация).
+          При инкрементальной синхронизации employee_service_links содержит только недавно изменённых
+          сотрудников, поэтому replace удалил бы связи других сотрудников с теми же услугами.
         """
-        if not pairs:
-            return 0
         svc_rows = (
             await self.db.execute(
                 select(SqnsService.id, SqnsService.external_id).where(
@@ -363,32 +519,69 @@ class SqnsServicesSyncHandler:
             )
         ).all()
         service_by_ext = {int(ext): sid for sid, ext in svc_rows}
-        inserted = 0
-        seen_pair: set[tuple[UUID, UUID]] = set()
+        authoritative_services = services_with_authoritative_links or set()
+        fallback_service_ext_ids = set(service_by_ext.keys()) - authoritative_services
+        touched_fallback_services: set[int] = set()
+        desired_by_service: dict[UUID, set[UUID]] = {}
+
         for resource_ext, service_ext in pairs:
+            if service_ext in authoritative_services:
+                continue
+            if service_ext not in fallback_service_ext_ids:
+                continue
+            touched_fallback_services.add(service_ext)
             resource_uuid = resource_uuid_map.get(resource_ext)
             service_uuid = service_by_ext.get(service_ext)
             if resource_uuid is None or service_uuid is None:
                 continue
-            dedupe = (service_uuid, resource_uuid)
-            if dedupe in seen_pair:
-                continue
-            seen_pair.add(dedupe)
-            stmt = (
-                insert(SqnsServiceResource)
-                .values(
-                    id=uuid4(),
-                    service_id=service_uuid,
-                    resource_id=resource_uuid,
-                    duration_seconds=None,
-                    created_at=synced_at,
+            desired_by_service.setdefault(service_uuid, set()).add(resource_uuid)
+
+        if not touched_fallback_services:
+            return 0
+
+        touched_service_uuids = [
+            service_by_ext[svc_ext]
+            for svc_ext in touched_fallback_services
+            if svc_ext in service_by_ext
+        ]
+        if not touched_service_uuids:
+            return 0
+
+        if full_sync:
+            # Replace: удаляем все существующие связи для затронутых услуг, затем вставляем полный набор.
+            # Корректно только при полной синхронизации, когда pairs содержит ВСЕ пары всех сотрудников.
+            await self.db.execute(
+                delete(SqnsServiceResource).where(
+                    SqnsServiceResource.service_id.in_(touched_service_uuids)
                 )
-                .on_conflict_do_nothing(constraint="uq_sqns_service_resources")
             )
-            result = await self.db.execute(stmt)
-            if result.rowcount:
-                inserted += int(result.rowcount)
-        return inserted
+
+        rows_to_insert: list[dict[str, Any]] = []
+        for service_uuid, resource_ids in desired_by_service.items():
+            for resource_uuid in resource_ids:
+                rows_to_insert.append(
+                    {
+                        "id": uuid4(),
+                        "service_id": service_uuid,
+                        "resource_id": resource_uuid,
+                        "duration_seconds": None,
+                        "created_at": synced_at,
+                    }
+                )
+
+        if not rows_to_insert:
+            return 0
+
+        if full_sync:
+            await self.db.execute(insert(SqnsServiceResource), rows_to_insert)
+        else:
+            # Add-only: вставляем только отсутствующие связи, существующие не трогаем.
+            stmt = insert(SqnsServiceResource).on_conflict_do_nothing(
+                constraint="uq_sqns_service_resources"
+            )
+            await self.db.execute(stmt, rows_to_insert)
+
+        return len(rows_to_insert)
 
     async def _upsert_category(self, category_name: str, synced_at: datetime) -> None:
         normalized_name = re.sub(r"\s+", " ", category_name).strip()
@@ -407,3 +600,12 @@ class SqnsServicesSyncHandler:
             set_={"updated_at": synced_at},
         )
         await self.db.execute(stmt)
+
+    async def _prune_stale_categories(self, active_names: set[str]) -> int:
+        stmt = delete(SqnsServiceCategory).where(
+            SqnsServiceCategory.agent_id == self.agent_id
+        )
+        if active_names:
+            stmt = stmt.where(SqnsServiceCategory.name.notin_(active_names))
+        result = await self.db.execute(stmt)
+        return int(result.rowcount or 0)

@@ -1,5 +1,9 @@
 <template>
-  <div class="group relative bg-white rounded-3xl border border-slate-100 p-8 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-all duration-500 hover:-translate-y-1.5 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)] overflow-hidden">
+  <div
+    class="group relative bg-white rounded-3xl border border-slate-100 p-8 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-all duration-500 hover:-translate-y-1.5 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)] overflow-hidden"
+    :class="staggerIndex != null ? 'motion-safe:animate-analytics-card-enter' : ''"
+    :style="staggerStyle"
+  >
     <!-- Background Accent -->
     <div 
       class="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-slate-50 transition-transform duration-700 group-hover:scale-150 group-hover:bg-primary/5"
@@ -80,9 +84,15 @@ interface Props {
   chartType: 'bar' | 'doughnut' | 'line'
   chartData: any
   chartOptions?: any
+  /** Порядковый номер для каскадного появления (аналитика) */
+  staggerIndex?: number
 }
 
 const props = defineProps<Props>()
+
+const staggerStyle = computed(() =>
+  props.staggerIndex != null ? { animationDelay: `${props.staggerIndex * 72}ms` } : undefined,
+)
 
 const baseChartOptions = {
   responsive: true,

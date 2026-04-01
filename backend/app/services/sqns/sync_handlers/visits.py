@@ -14,6 +14,7 @@ from app.db.models.sqns_service import SqnsVisit
 from app.services.sqns.client import SQNSClient
 from app.services.sqns.primary_visit_recalculator import PrimaryVisitRecalculator
 from app.services.sqns.sync_handlers.common import parse_bool, parse_datetime, parse_decimal, parse_int
+from app.services.sqns.sync_handlers.visit_commodity_lines import replace_visit_payload_commodity_lines
 
 logger = structlog.get_logger(__name__)
 _EXTERNAL_IDS_BATCH_SIZE = 1000
@@ -49,6 +50,28 @@ def _extract_client_external_id(visit: dict[str, Any]) -> int | None:
         if nested_value is not None:
             return nested_value
 
+    return None
+
+
+def _sqns_visit_datetime_raw(visit: dict[str, Any]) -> Any:
+    """По API SQNS момент приёма задаётся полем datetime у объекта визита (ещё встречается dateTime)."""
+    v = visit.get("datetime") or visit.get("dateTime")
+    if v is not None:
+        return v
+    inner = visit.get("visit")
+    if isinstance(inner, dict):
+        return inner.get("datetime") or inner.get("dateTime")
+    return None
+
+
+def sqns_visit_datetime_raw_string(visit: dict[str, Any] | None) -> str | None:
+    """Строка поля datetime из ответа SQNS (как пришла), для отображения без пересчёта TZ."""
+    if not isinstance(visit, dict):
+        return None
+    raw = _sqns_visit_datetime_raw(visit)
+    if isinstance(raw, str):
+        s = raw.strip()
+        return s or None
     return None
 
 
@@ -115,7 +138,7 @@ class SqnsVisitsSyncHandler:
                 external_id=external_id,
                 resource_external_id=parse_int(visit.get("resourceId")),
                 client_external_id=client_external_id,
-                visit_datetime=parse_datetime(visit.get("datetime")),
+                visit_datetime=parse_datetime(_sqns_visit_datetime_raw(visit)),
                 attendance=parse_int(visit.get("attendance")),
                 deleted=parse_bool(visit.get("deleted"), default=False),
                 online=parse_bool(visit.get("online"), default=False),
@@ -144,6 +167,12 @@ class SqnsVisitsSyncHandler:
                 },
             )
             await self.db.execute(stmt)
+            await replace_visit_payload_commodity_lines(
+                self.db,
+                agent_id=self.agent_id,
+                visit_external_id=external_id,
+                visit_raw=visit,
+            )
             visits_synced += 1
 
         primary_clients_recalculated = 0

@@ -1,3 +1,23 @@
+/** Вкладки базы знаний (совпадает с AgentKnowledgePanel) */
+export type KnowledgeBreadcrumbTab =
+  | 'sqns'
+  | 'directories'
+  | 'direct_questions'
+  | 'file_uploads'
+  | 'tables'
+  | 'dashboard'
+
+export type BreadcrumbNavAction =
+  | { type: 'route'; path: string }
+  | { type: 'knowledge-dashboard' }
+  | { type: 'knowledge-tab'; tab: KnowledgeBreadcrumbTab }
+
+export type LayoutBreadcrumbSegment = {
+  label: string
+  /** null — текущая страница (не кликабельно) */
+  action: BreadcrumbNavAction | null
+}
+
 export const useLayoutState = () => {
   // useState -- SSR-safe, shared across components (Nuxt auto-import)
   const isCollapsed = useState<boolean>('sidebar-collapsed', () => false)
@@ -9,6 +29,17 @@ export const useLayoutState = () => {
   const breadcrumbTitle = useState<string>('breadcrumb-title', () => '')
   const breadcrumbAgentName = useState<string>('breadcrumb-agent-name', () => '')
   const breadcrumbBackPath = useState<string | null>('breadcrumb-back-path', () => null)
+
+  /** Многоуровневые крошки (база знаний и др.); если задано — имеет приоритет над breadcrumbTitle */
+  const layoutBreadcrumbSegments = useState<LayoutBreadcrumbSegment[] | null>(
+    'layout-breadcrumb-segments',
+    () => null
+  )
+  /** Внутренняя навигация по клику крошки (обрабатывает AgentKnowledgePanel) */
+  const pendingBreadcrumbAction = useState<BreadcrumbNavAction | null>(
+    'pending-breadcrumb-action',
+    () => null
+  )
 
   // Hide Save/Cancel buttons in TopBar (e.g. for auto-saving pages)
   const hideTopBarActions = useState<boolean>('hide-topbar-actions', () => false)
@@ -73,10 +104,12 @@ export const useLayoutState = () => {
     isCollapsed, 
     toggleSidebar, 
     initSidebarState, 
-    pageTitle, 
+    pageTitle,
     breadcrumbTitle, 
     breadcrumbAgentName,
     breadcrumbBackPath,
+    layoutBreadcrumbSegments,
+    pendingBreadcrumbAction,
     hideTopBarActions,
     functionsRunAction,
     functionsDeleteAction,

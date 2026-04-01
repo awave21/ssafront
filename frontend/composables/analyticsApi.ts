@@ -1,4 +1,5 @@
 import { useApiFetch } from '~/composables/useApiFetch'
+import { usePermissions } from '~/composables/usePermissions'
 import type {
   AnalyticsAgentOption,
   AnalyticsBreakdown,
@@ -7,9 +8,11 @@ import type {
   AnalyticsFiltersMeta,
   AnalyticsOverview,
   AnalyticsResourceOption,
+  AnalyticsCommoditiesTableResponse,
   AnalyticsServicesTableResponse,
   AnalyticsTimeGroup,
   AnalyticsTimeseries,
+  CommoditiesTableQuery,
   ServicesTableQuery,
   ToolCallHistoryQuery,
   ToolCallHistoryResponse,
@@ -17,7 +20,15 @@ import type {
 
 type AnalyticsQueryInput = Pick<
   AnalyticsFilters,
-  'dateFrom' | 'dateTo' | 'timezone' | 'channel' | 'clientTags'
+  | 'dateFrom'
+  | 'dateTo'
+  | 'timezone'
+  | 'channel'
+  | 'clientTags'
+  | 'revenueBasis'
+  | 'paymentMethods'
+  | 'revenueCategories'
+  | 'resourceExternalId'
 >
 
 type AgentListItem = {
@@ -45,13 +56,19 @@ const toAnalyticsQuery = (
   filters: AnalyticsQueryInput,
   extra: Record<string, string | number | undefined> = {},
 ) => {
-  const query: Record<string, string | number> = {}
+  const query: Record<string, string | number | string[]> = {}
 
   if (filters.dateFrom) query.date_from = filters.dateFrom
   if (filters.dateTo) query.date_to = filters.dateTo
   if (filters.timezone) query.timezone = filters.timezone
   if (filters.channel) query.channel = filters.channel
   if (filters.clientTags.length) query.tags = filters.clientTags.join(',')
+  query.revenue_basis = filters.revenueBasis
+  if (filters.paymentMethods?.length) query.payment_methods = filters.paymentMethods
+  if (filters.revenueCategories?.length) query.revenue_categories = filters.revenueCategories
+  if (filters.resourceExternalId != null && Number.isFinite(filters.resourceExternalId)) {
+    query.resource_external_id = filters.resourceExternalId
+  }
 
   Object.entries(extra).forEach(([key, value]) => {
     if (value === undefined || value === null || value === '') return
@@ -61,8 +78,24 @@ const toAnalyticsQuery = (
   return query
 }
 
+const normalizeSqnsResourceItems = (rawItems: SqnsResourceRaw[]): AnalyticsResourceOption[] =>
+  rawItems
+    .filter((item) => {
+      const st = String(item.status || '').toLowerCase()
+      if (st && st !== 'active') return false
+      return true
+    })
+    .map((item) => {
+      const idValue = item.external_id ?? item.id
+      const name = item.name || item.full_name || ''
+      if (idValue === undefined || idValue === null || !name) return null
+      return { id: idValue, name }
+    })
+    .filter((item): item is AnalyticsResourceOption => item !== null)
+
 export const useAnalyticsApi = () => {
   const apiFetch = useApiFetch()
+  const { canEditAgents } = usePermissions()
 
   const getAgentsForFilter = async (limit = 200): Promise<AnalyticsAgentOption[]> => {
     const response = await apiFetch<AgentListItem[]>('/agents', {
@@ -121,46 +154,64 @@ export const useAnalyticsApi = () => {
       requestQuery.tags = query.clientTags.join(',')
       requestQuery.client_tags = query.clientTags
     }
+    requestQuery.revenue_basis = query.revenueBasis
+    if (query.paymentMethods?.length) requestQuery.payment_methods = query.paymentMethods
+    if (query.revenueCategories?.length) requestQuery.revenue_categories = query.revenueCategories
 
     return await apiFetch<AnalyticsServicesTableResponse>(`/agents/${agentId}/analytics/services-table`, {
       query: requestQuery,
     })
   }
 
-  const getSqnsResourcesForFilter = async (agentId: string): Promise<AnalyticsResourceOption[]> => {
-    const response = await apiFetch<any>(`/agents/${agentId}/sqns/resources`)
-
-    const rawItems: SqnsResourceRaw[] = Array.isArray(response)
-      ? response
-      : Array.isArray(response?.resources)
-        ? response.resources
-        : Array.isArray(response?.items)
-          ? response.items
-          : []
-
-    const normalizedResources = rawItems
-      .filter((item) => {
-        // Учитываем только активных сотрудников
-        const status = String(item.status || '').toLowerCase()
-        if (status && status !== 'active') return false
-        return true
-      })
-      .map((item) => {
-        const idValue = item.external_id ?? item.id
-        const name = item.name || item.full_name || ''
-        if (idValue === undefined || idValue === null || !name) return null
-        return {
-          id: idValue,
-          name,
-        }
-      })
-      .filter((item): item is AnalyticsResourceOption => item !== null)
-
-    if (normalizedResources.length > 0) {
-      return normalizedResources
+  const getCommoditiesTable = async (
+    agentId: string,
+    query: CommoditiesTableQuery,
+  ): Promise<AnalyticsCommoditiesTableResponse> => {
+    const requestQuery: Record<string, string | number | string[]> = {
+      date_from: query.dateFrom,
+      date_to: query.dateTo,
+      timezone: query.timezone,
+      sort_by: query.sortBy,
+      sort_order: query.sortOrder,
+      limit: query.limit,
+      offset: query.offset,
     }
 
-    // Fallback: for some agents employees are available only via specialists endpoint.
+    if (query.channel) requestQuery.channel = query.channel
+    if (query.resourceExternalId !== null) requestQuery.resource_external_id = query.resourceExternalId
+    if (query.clientTags.length) {
+      requestQuery.tags = query.clientTags.join(',')
+      requestQuery.client_tags = query.clientTags
+    }
+    requestQuery.revenue_basis = query.revenueBasis
+    if (query.paymentMethods?.length) requestQuery.payment_methods = query.paymentMethods
+    if (query.revenueCategories?.length) requestQuery.revenue_categories = query.revenueCategories
+
+    return await apiFetch<AnalyticsCommoditiesTableResponse>(`/agents/${agentId}/analytics/commodities-table`, {
+      query: requestQuery,
+    })
+  }
+
+  const getSqnsResourcesForFilter = async (agentId: string): Promise<AnalyticsResourceOption[]> => {
+    // Live SQNS /resources требует agents:write — у менеджера только analytics:view, иначе 403 и тосты.
+    if (canEditAgents.value) {
+      try {
+        const response = await apiFetch<any>(`/agents/${agentId}/sqns/resources`)
+        const rawItems: SqnsResourceRaw[] = Array.isArray(response)
+          ? response
+          : Array.isArray(response?.resources)
+            ? response.resources
+            : Array.isArray(response?.items)
+              ? response.items
+              : []
+        const normalizedResources = normalizeSqnsResourceItems(rawItems)
+        if (normalizedResources.length > 0) return normalizedResources
+      } catch {
+        // падаем на кэш specialists ниже
+      }
+    }
+
+    // Кэш специалистов в БД: доступен с analytics:view (см. бэкенд sqns_list_cached_specialists).
     const specialistsResponse = await apiFetch<SqnsSpecialistsResponse>(`/agents/${agentId}/sqns/specialists`, {
       query: { limit: 500, offset: 0, active: true },
     })
@@ -224,6 +275,7 @@ export const useAnalyticsApi = () => {
     getTimeseries,
     getBreakdown,
     getServicesTable,
+    getCommoditiesTable,
     getSqnsResourcesForFilter,
     getToolCallsHistory,
   }

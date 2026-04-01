@@ -5,6 +5,7 @@ import {
   ensureFreshAccessToken,
   getStoredAccessToken,
   isAccessTokenExpired,
+  isRefreshFailure,
   refreshAuthSession,
   setStoredAccessToken
 } from '~/composables/authSessionManager'
@@ -472,7 +473,7 @@ export const useAuth = () => {
 
     try {
       const refreshResult = await refreshAuthSession()
-      if (!refreshResult.success) {
+      if (isRefreshFailure(refreshResult)) {
         if (refreshResult.shouldLogout) {
           resetAuthState(false)
         }

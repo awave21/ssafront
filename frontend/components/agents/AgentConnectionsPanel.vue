@@ -25,17 +25,6 @@
         @sync="handleSqnsSync"
       />
 
-      <div v-if="isSqnsEnabled" class="mt-6">
-        <SQNSIntegrationManager
-          v-if="agent"
-          :agent-id="agent.id"
-          :status="sqnsStatus?.sqnsStatus === 'error' ? 'error' : 'active'"
-          :last-sync-at="sqnsStatus?.sqnsLastSyncAt"
-          :warning="sqnsStatus?.sqnsWarning"
-          @sync-complete="store.loadSqnsStatusForAgent"
-        />
-      </div>
-
       <IntegrationCard
         title="Klientiks CRM"
         description="Эффективный инструмент для управления медицинской клиникой и медицинскими работниками."
@@ -63,7 +52,6 @@ import { storeToRefs } from 'pinia'
 import { Database, Link } from 'lucide-vue-next'
 import IntegrationCard from '~/components/IntegrationCard.vue'
 import SQNSModal from '~/components/SQNSModal.vue'
-import SQNSIntegrationManager from '~/components/SQNSIntegrationManager.vue'
 
 const store = useAgentEditorStore()
 const {
@@ -73,8 +61,7 @@ const {
   sqnsStatusLabel,
   sqnsHostLabel,
   formattedSqnsSyncAt,
-  sqnsErrorMessage,
-  sqnsToolsList
+  sqnsErrorMessage
 } = storeToRefs(store)
 
 const showSqnsModal = ref(false)

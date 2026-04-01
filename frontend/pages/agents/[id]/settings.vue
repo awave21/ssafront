@@ -10,6 +10,6 @@ import AgentSettingsPanel from '~/components/agents/AgentSettingsPanel.vue'
 
 definePageMeta({
   layout: 'agent' as any,
-  middleware: 'auth'
+  middleware: 'auth',
 })
 </script>

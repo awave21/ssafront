@@ -402,7 +402,7 @@ const handleCreate = async () => {
       }
     }
 
-    router.push(`/agents/${newAgent.id}`)
+    router.push(`/agents/${newAgent.id}/prompt`)
   } catch (error) {
     console.error('Error creating agent:', error)
   } finally {

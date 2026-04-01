@@ -34,6 +34,7 @@ from app.db.models.sqns_service import (
     SqnsServiceResource,
     SqnsServiceCategory,
     SqnsVisit,
+    SqnsVisitCommodityLine,
 )
 from app.db.models.system_prompt_version import SystemPromptVersion
 from app.db.models.prompt_training_session import PromptTrainingSession
@@ -49,6 +50,7 @@ from app.db.models.direct_question_followup_job import DirectQuestionFollowupJob
 from app.db.models.knowledge_file import KnowledgeFile
 from app.db.models.knowledge_file_chunk import KnowledgeFileChunk
 from app.db.models.knowledge_index_job import KnowledgeIndexJob
+from app.db.models.user_table import UserTable, UserTableAttribute, UserTableRecord
 
 __all__ = [
     "Agent",
@@ -84,6 +86,7 @@ __all__ = [
     "SqnsCommodity",
     "SqnsEmployee",
     "SqnsVisit",
+    "SqnsVisitCommodityLine",
     "SqnsPayment",
     "SqnsClientRecord",
     "SqnsSyncCursor",
@@ -103,4 +106,7 @@ __all__ = [
     "KnowledgeFile",
     "KnowledgeFileChunk",
     "KnowledgeIndexJob",
+    "UserTable",
+    "UserTableAttribute",
+    "UserTableRecord",
 ]

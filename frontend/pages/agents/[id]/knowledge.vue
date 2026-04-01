@@ -1,5 +1,5 @@
 <template>
-  <AgentPageShell title="База знаний" :hide-actions="true">
+  <AgentPageShell title="База знаний" :hide-actions="true" :contained="true">
     <AgentKnowledgePanel />
   </AgentPageShell>
 </template>

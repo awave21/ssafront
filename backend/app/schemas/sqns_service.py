@@ -322,3 +322,121 @@ class SqnsServiceResourceRead(BaseModel):
     duration_seconds: int | None = Field(None, description="Override длительности для специалиста")
     created_at: datetime
     updated_at: datetime | None
+
+
+# ============================================================================
+# Client list (Patients page)
+# ============================================================================
+
+
+class SqnsClientListItem(BaseModel):
+    """Клиент SQNS для страницы «Пациенты»."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    external_id: int
+    name: str | None = None
+    phone: str | None = None
+    birth_date: str | None = None
+    sex: int | None = None
+    client_type: str | None = None
+    visits_count: int | None = None
+    total_arrival: Decimal | None = None
+    tags: list[str] | None = None
+    last_visit_datetime: datetime | None = None
+    last_service_name: str | None = None
+    last_specialist_name: str | None = None
+    last_visit_total_price: Decimal | None = Field(
+        default=None,
+        description="Сумма приёма (total_price) для визита в колонке «Визит».",
+    )
+    slice_revenue: Decimal | None = Field(
+        default=None,
+        description=(
+            "Выручка клиента за срез vf/vt/vc (сумма total_cost/total_price по его визитам периода). "
+            "None — срез не задан, используется total_arrival."
+        ),
+    )
+    slice_visits_count: int | None = Field(
+        default=None,
+        description=(
+            "Число визитов клиента в срезе vf/vt/vc (с учётом vc-фильтра). "
+            "None — срез не задан, используется visits_count (всё время)."
+        ),
+    )
+    synced_at: datetime
+
+
+class SqnsClientsListResponse(BaseModel):
+    clients: list[SqnsClientListItem]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    revenue_total: Decimal = Field(
+        default=Decimal("0"),
+        description=(
+            "Выручка по текущей выборке (все страницы): при срезе vf/vt/vc — сумма "
+            "total_cost/total_price по визитам периода, попавшим в когорту; иначе — сумма total_arrival по клиентам."
+        ),
+    )
+    total_arrival_sum: Decimal = Field(
+        default=Decimal("0"),
+        description="Сумма total_arrival по клиентам выборки (итого по колонке «Всего» в таблице).",
+    )
+    visits_count_sum: int = Field(
+        default=0,
+        description="Сумма поля visits_count по всем клиентам выборки (для строки «Итого» в таблице).",
+    )
+    last_visit_total_price_sum: Decimal = Field(
+        default=Decimal("0"),
+        description=(
+            "Сумма total_price «визита в строке» (ближайший будущий или последний прошедший состоявшийся) "
+            "по всем клиентам выборки."
+        ),
+    )
+    slice_visit_count: int | None = Field(
+        default=None,
+        description=(
+            "Число визитов в срезе vf/vt/vc с учётом tz, channel и tags (как KPI «Записи»/«Дошедшие» в аналитике). "
+            "None, если срез по визитам не задан."
+        ),
+    )
+    top_service_name: str | None = Field(
+        default=None,
+        description="Услуга с наибольшим числом визитов в кэше среди клиентов текущей выборки (после поиска).",
+    )
+    top_service_bookings: int | None = Field(
+        default=None,
+        description="Число визитов с этой услугой в выборке.",
+    )
+
+
+class SqnsClientCachedVisitItem(BaseModel):
+    """Визит из кэша sqns_visits для карточки пациента."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    visit_external_id: int
+    visit_datetime: datetime | None = Field(
+        default=None,
+        description="Дата и время приёма для сортировки/логики (парсинг поля datetime).",
+    )
+    visit_datetime_raw: str | None = Field(
+        default=None,
+        description="Строка datetime из SQNS как в ответе API — для отображения без пересчёта часового пояса.",
+    )
+    service_name: str | None = None
+    specialist_name: str | None = None
+    attendance: int | None = None
+    arrived: bool = Field(
+        default=False,
+        description="Визит считается состоявшимся (явка/завершён): attendance>0 или статус в raw_data.",
+    )
+    total_price: Decimal | None = None
+
+
+class SqnsClientCachedVisitsResponse(BaseModel):
+    visits: list[SqnsClientCachedVisitItem]

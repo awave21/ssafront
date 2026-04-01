@@ -3,14 +3,21 @@
     <h2 class="text-sm font-bold uppercase tracking-widest text-slate-400">Распределение</h2>
 
     <div v-if="loading && !hasData" class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-      <Skeleton class="h-[520px] rounded-3xl bg-white border-none shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]" />
-      <Skeleton class="h-[520px] rounded-3xl bg-white border-none shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]" />
-      <Skeleton class="h-[520px] rounded-3xl bg-white border-none shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]" />
+      <Skeleton
+        v-for="i in 3"
+        :key="i"
+        diagonal-shimmer
+        :shimmer-delay-ms="(i - 1) * 180"
+        class="h-[520px] rounded-3xl border-none shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]"
+      />
     </div>
 
     <div v-else class="grid grid-cols-1 gap-6 lg:grid-cols-3">
       <!-- Channel Breakdown -->
-      <div class="group relative bg-white p-8 rounded-3xl border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-all duration-500 hover:-translate-y-1.5 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)] overflow-hidden">
+      <div
+        class="group relative bg-white p-8 rounded-3xl border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-all duration-500 hover:-translate-y-1.5 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)] overflow-hidden motion-safe:animate-analytics-card-enter"
+        :style="{ animationDelay: '0ms' }"
+      >
         <div 
           class="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-slate-50 transition-transform duration-700 group-hover:scale-150 group-hover:bg-primary/5"
         />
@@ -50,7 +57,10 @@
       </div>
 
       <!-- Tag Breakdown -->
-      <div class="group relative bg-white p-8 rounded-3xl border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-all duration-500 hover:-translate-y-1.5 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)] overflow-hidden">
+      <div
+        class="group relative bg-white p-8 rounded-3xl border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-all duration-500 hover:-translate-y-1.5 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)] overflow-hidden motion-safe:animate-analytics-card-enter"
+        :style="{ animationDelay: '75ms' }"
+      >
         <div 
           class="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-slate-50 transition-transform duration-700 group-hover:scale-150 group-hover:bg-emerald-500/5"
         />
@@ -90,7 +100,10 @@
       </div>
 
       <!-- Visit Status -->
-      <div class="group relative bg-white p-8 rounded-3xl border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-all duration-500 hover:-translate-y-1.5 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)] overflow-hidden">
+      <div
+        class="group relative bg-white p-8 rounded-3xl border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-all duration-500 hover:-translate-y-1.5 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)] overflow-hidden motion-safe:animate-analytics-card-enter"
+        :style="{ animationDelay: '150ms' }"
+      >
         <div 
           class="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-slate-50 transition-transform duration-700 group-hover:scale-150 group-hover:bg-primary/5"
         />

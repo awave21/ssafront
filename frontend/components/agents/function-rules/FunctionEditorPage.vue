@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full px-5 py-5">
+  <div class="h-full overflow-y-auto px-5 py-5">
     <div class="space-y-4">
       <!-- Header -->
       <div class="flex items-center justify-between">

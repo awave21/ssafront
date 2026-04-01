@@ -3,10 +3,13 @@
     <h2 class="text-sm font-bold uppercase tracking-widest text-slate-400">Динамика</h2>
 
     <div v-if="loading && !timeseries" class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <Skeleton class="h-96 rounded-3xl bg-white border-none shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]" />
-      <Skeleton class="h-96 rounded-3xl bg-white border-none shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]" />
-      <Skeleton class="h-96 rounded-3xl bg-white border-none shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]" />
-      <Skeleton class="h-96 rounded-3xl bg-white border-none shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]" />
+      <Skeleton
+        v-for="i in 4"
+        :key="i"
+        diagonal-shimmer
+        :shimmer-delay-ms="(i - 1) * 150"
+        class="h-96 rounded-3xl border-none shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]"
+      />
     </div>
 
     <div v-else-if="timeseries && timeseries.points.length" class="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -16,13 +19,15 @@
         :icon="BarChart3"
         chart-type="bar"
         :chart-data="visitsChartData"
+        :stagger-index="0"
       />
       <ChartCard
-        title="Выручка по периодам"
+        title="Выручка по дате оплаты"
         subtitle="Сумма платежей по периодам"
         :icon="TrendingUp"
         chart-type="bar"
         :chart-data="revenueChartData"
+        :stagger-index="1"
       />
       <ChartCard
         title="Потери от недошедших"
@@ -31,6 +36,7 @@
         chart-type="bar"
         :chart-data="lossCombinedChartData"
         :chart-options="lossChartOptions"
+        :stagger-index="2"
       />
       <ChartCard
         title="Конверсия первичных"
@@ -38,6 +44,7 @@
         :icon="Zap"
         chart-type="line"
         :chart-data="primaryConversionChartData"
+        :stagger-index="3"
       />
     </div>
 

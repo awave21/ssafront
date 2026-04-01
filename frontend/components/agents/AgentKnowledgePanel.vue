@@ -1,24 +1,10 @@
 <template>
-  <div class="space-y-6">
-    <div v-if="knowledgeSubTab !== 'dashboard' && !selectedDirectory" class="flex items-center gap-4 mb-2">
-      <button
-        @click="knowledgeSubTab = 'dashboard'"
-        class="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
-        title="Назад к дашборду"
-      >
-        <ArrowLeft class="h-4 w-4" />
-      </button>
-      <div>
-        <h2 class="text-lg font-bold text-slate-900">
-          {{ knowledgeSubTabs.find(t => t.id === knowledgeSubTab)?.label }}
-        </h2>
-      </div>
-    </div>
-
+  <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-6">
     <div v-if="knowledgeSubTab === 'dashboard'">
       <KnowledgeDashboard
         :direct-questions="directQuestions"
         :directories="directories.filter(d => d.template !== 'custom')"
+        :tables="tables"
         :files="knowledgeFilesApi?.allItems.value ?? []"
         :sqns-tools="sqnsToolsList"
         :is-sqns-enabled="isSqnsEnabled"
@@ -44,7 +30,7 @@
       <KnowledgeRagTestWidget v-if="agent" :agent-id="agent.id" />
     </div>
 
-    <div v-else-if="knowledgeSubTab === 'directories' || knowledgeSubTab === 'tables'">
+    <div v-else-if="knowledgeSubTab === 'directories'">
       <div v-if="selectedDirectory">
         <DirectoryDetail
           :directory="selectedDirectory"
@@ -52,7 +38,6 @@
           :loading="directoryItemsLoading"
           :on-update-item="handleUpdateItem"
           :on-create-item="handleCreateItem"
-          @back="handleBackToList"
           @settings="showDirectorySettingsSheet = true"
           @delete="handleDeleteItem"
           @delete-selected="handleDeleteSelectedItems"
@@ -76,6 +61,23 @@
           @retry="loadDirectories"
         />
       </div>
+    </div>
+
+    <div v-else-if="knowledgeSubTab === 'tables'" class="flex min-h-0 w-full flex-1 flex-col min-w-0">
+      <TableDetail
+        v-if="selectedTableId && tablesApi"
+        :table-id="selectedTableId"
+        :tables-api="tablesApi"
+      />
+      <TablesList
+        v-else
+        :tables="tables"
+        :loading="tablesLoading"
+        :error="tablesError"
+        @create="showCreateTableModal = true"
+        @retry="loadTables"
+        @select="handleSelectTable"
+      />
     </div>
 
     <div v-else-if="knowledgeSubTab === 'sqns'">
@@ -117,6 +119,12 @@
       @close="showCreateDirectoryModal = false"
       @submit="handleCreateDirectory"
     />
+    <CreateTableModal
+      ref="createTableModalRef"
+      :is-open="showCreateTableModal"
+      @close="showCreateTableModal = false"
+      @submit="handleCreateTable"
+    />
 
     <ImportCsvModal
       v-if="selectedDirectory"
@@ -148,34 +156,44 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import KnowledgeDashboard from '~/components/knowledge/KnowledgeDashboard.vue'
-import { ArrowLeft, Database } from 'lucide-vue-next'
+import { Database } from 'lucide-vue-next'
 import { navigateTo, useRoute, useRouter } from '#app'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import { useToast } from '~/composables/useToast'
 import type { Directory } from '~/types/directories'
-import KnowledgeSubTabs from '~/components/knowledge/KnowledgeSubTabs.vue'
+import {
+  useLayoutState,
+  type LayoutBreadcrumbSegment,
+  type KnowledgeBreadcrumbTab,
+} from '~/composables/useLayoutState'
 import DirectoriesList from '~/components/knowledge/DirectoriesList.vue'
 import DirectoryDetail from '~/components/knowledge/DirectoryDetail.vue'
 import CreateDirectoryModal from '~/components/knowledge/CreateDirectoryModal.vue'
+import CreateTableModal from '~/components/knowledge/CreateTableModal.vue'
 import ImportCsvModal from '~/components/knowledge/ImportCsvModal.vue'
 import DirectorySettingsSheet from '~/components/knowledge/DirectorySettingsSheet.vue'
+import TablesList from '~/components/knowledge/TablesList.vue'
+import TableDetail from '~/components/knowledge/TableDetail.vue'
 import SQNSIntegrationManager from '~/components/SQNSIntegrationManager.vue'
 import FileUploadsWorkspace from '~/components/knowledge/FileUploadsWorkspace.vue'
 import KnowledgeRagTestWidget from '~/components/knowledge/KnowledgeRagTestWidget.vue'
 
 import { useKnowledge } from '~/composables/useKnowledge'
 import { useKnowledgeFiles } from '~/composables/useKnowledgeFiles'
+import { useTables } from '~/composables/useTables'
 import DirectQuestionsList from '~/components/knowledge/DirectQuestionsList.vue'
 import DirectQuestionEditor from '~/components/knowledge/DirectQuestionEditor.vue'
 import type { DirectQuestion, CreateDirectQuestionPayload } from '~/types/knowledge'
+import type { TableItem } from '~/types/tables'
 import { decodeCsvBuffer, estimateCyrillicDecodeScore } from '~/utils/csvTextDecode'
 
 const store = useAgentEditorStore()
 const route = useRoute()
 const router = useRouter()
+const { layoutBreadcrumbSegments, pendingBreadcrumbAction } = useLayoutState()
 const { agent, directoriesComposable, isSqnsEnabled, sqnsToolsList, sqnsStatus } = storeToRefs(store)
 const { success: toastSuccess, error: toastError } = useToast()
 
@@ -189,24 +207,30 @@ const isValidKnowledgeSubTab = (value: string): value is KnowledgeSubTabId =>
   value === 'tables' ||
   value === 'dashboard'
 
-const initialKnowledgeTabParam = route.query.knowledgeTab
-const initialKnowledgeTabStr =
-  typeof initialKnowledgeTabParam === 'string'
-    ? initialKnowledgeTabParam
-    : Array.isArray(initialKnowledgeTabParam)
-      ? initialKnowledgeTabParam[0]
-      : undefined
+const queryString = (value: unknown): string | undefined => {
+  if (typeof value === 'string' && value.length > 0) return value
+  if (Array.isArray(value) && typeof value[0] === 'string' && value[0].length > 0) return value[0]
+  return undefined
+}
+
+const initialTableId = queryString(route.query.tableId)
+const initialKnowledgeTabStr = queryString(route.query.knowledgeTab)
 
 const knowledgeSubTab = ref<KnowledgeSubTabId>(
-  initialKnowledgeTabStr && isValidKnowledgeSubTab(initialKnowledgeTabStr)
-    ? initialKnowledgeTabStr
-    : 'dashboard'
+  initialTableId
+    ? 'tables'
+    : initialKnowledgeTabStr && isValidKnowledgeSubTab(initialKnowledgeTabStr)
+      ? initialKnowledgeTabStr
+      : 'dashboard'
 )
 const showCreateDirectoryModal = ref(false)
 const showImportCsvModal = ref(false)
 const showDirectorySettingsSheet = ref(false)
 const directorySettingsSheetRef = ref<InstanceType<typeof DirectorySettingsSheet> | null>(null)
 const createDirectoryModalRef = ref<InstanceType<typeof CreateDirectoryModal> | null>(null)
+const createTableModalRef = ref<InstanceType<typeof CreateTableModal> | null>(null)
+const showCreateTableModal = ref(false)
+const selectedTableId = ref<string | null>(initialTableId ?? null)
 
 const showDirectQuestionEditor = ref(false)
 const selectedDirectQuestion = ref<DirectQuestion | null>(null)
@@ -215,12 +239,14 @@ const isSavingDirectQuestion = ref(false)
 /** Один экземпляр на agentId — иначе `useKnowledge` в computed создавал бы новый state и список не обновлялся */
 const knowledgeApi = shallowRef<ReturnType<typeof useKnowledge> | null>(null)
 const knowledgeFilesApi = shallowRef<ReturnType<typeof useKnowledgeFiles> | null>(null)
+const tablesApi = shallowRef<ReturnType<typeof useTables> | null>(null)
 
 watch(
   () => agent.value?.id,
   (id) => {
     knowledgeApi.value = id ? useKnowledge(id) : null
     knowledgeFilesApi.value = id ? useKnowledgeFiles(id) : null
+    tablesApi.value = id ? useTables() : null
     if (id) {
       knowledgeFilesApi.value?.fetchItems()
     }
@@ -232,10 +258,10 @@ const directQuestions = computed(() => knowledgeApi.value?.directQuestions.value
 const directQuestionsLoading = computed(() => knowledgeApi.value?.isLoading.value ?? false)
 
 const directories = computed(() => directoriesComposable.value?.directories ?? [])
-const visibleDirectories = computed(() => {
-  if (knowledgeSubTab.value === 'tables') return directories.value.filter((directory) => directory.template === 'custom')
-  return directories.value.filter((directory) => directory.template !== 'custom')
-})
+const visibleDirectories = computed(() => directories.value.filter((directory) => directory.template !== 'custom'))
+const tables = computed<TableItem[]>(() => tablesApi.value?.tables.value ?? [])
+const tablesLoading = computed(() => tablesApi.value?.isLoading.value ?? false)
+const tablesError = computed(() => tablesApi.value?.error.value ?? null)
 const directoriesLoading = computed(() => directoriesComposable.value?.isLoading ?? false)
 const directoriesError = computed(() => directoriesComposable.value?.error ?? null)
 const directoryItems = computed(() => directoriesComposable.value?.items ?? [])
@@ -245,7 +271,7 @@ const selectedDirectory = computed(() => directoriesComposable.value?.currentDir
 const knowledgeSubTabs = computed(() => [
   { id: 'direct_questions', label: 'Прямые вопросы', count: directQuestions.value.length },
   { id: 'directories', label: 'Справочники', count: directories.value.filter((directory) => directory.template !== 'custom').length },
-  { id: 'tables', label: 'Таблицы', count: directories.value.filter((directory) => directory.template === 'custom').length, disabled: true },
+  { id: 'tables', label: 'Таблицы', count: tables.value.length },
   { id: 'file_uploads', label: 'Загрузка файлов' },
   { id: 'sqns', label: 'SQNS', count: isSqnsEnabled.value ? sqnsToolsList.value.length : undefined }
 ])
@@ -260,10 +286,26 @@ const loadDirectQuestions = async () => {
   }
 }
 
-/** Данные для дашборда грузим сразу; вкладку в URL/localStorage не пишем — без «истории открытий». */
+const loadTables = async () => {
+  if (tablesApi.value) await tablesApi.value.fetchTables()
+}
+
+const handleSelectTable = (tableId: string) => {
+  selectedTableId.value = tableId
+  router.replace({ query: { ...route.query, knowledgeTab: 'tables', tableId } })
+}
+
+const handleBackFromTable = () => {
+  selectedTableId.value = null
+  const { tableId: _tid, ...rest } = route.query
+  router.replace({ query: { ...rest, knowledgeTab: 'tables' } })
+}
+
+/** Загрузка данных под вкладку. Активная вкладка и открытая таблица дублируются в query (`knowledgeTab`, `tableId`) для перезагрузки страницы. */
 const loadDataForKnowledgeSubTab = async (tab: KnowledgeSubTabId) => {
   if (tab === 'directories' || tab === 'tables') {
-    await store.ensureDirectoriesLoaded()
+    if (tab === 'directories') await store.ensureDirectoriesLoaded()
+    else await loadTables()
   } else if (tab === 'direct_questions') {
     await loadDirectQuestions()
   } else if (tab === 'file_uploads') {
@@ -272,12 +314,56 @@ const loadDataForKnowledgeSubTab = async (tab: KnowledgeSubTabId) => {
     await Promise.all([
       loadDirectQuestions(),
       store.ensureDirectoriesLoaded(),
+      loadTables(),
       store.ensureSqnsStatusLoaded(),
       store.ensureSqnsHints()
     ])
   } else {
     await store.ensureSqnsStatusLoaded()
     await store.ensureSqnsHints()
+  }
+}
+
+const handleCreateTable = async (data: {
+  name: string
+  description?: string
+  attributes: Array<{
+    name: string
+    label: string
+    attribute_type: string
+    type_config: Record<string, unknown>
+    is_required: boolean
+    is_searchable: boolean
+    is_unique: boolean
+  }>
+}) => {
+  if (!tablesApi.value) {
+    createTableModalRef.value?.setSubmitting(false)
+    return
+  }
+  try {
+    await tablesApi.value.createTable({
+      name: data.name,
+      description: data.description,
+      attributes: data.attributes.map((attribute, index) => ({
+        name: attribute.name,
+        label: attribute.label,
+        attribute_type: attribute.attribute_type as any,
+        type_config: attribute.type_config ?? {},
+        is_required: !!attribute.is_required,
+        is_searchable: !!attribute.is_searchable,
+        is_unique: !!attribute.is_unique,
+        order_index: index,
+      })),
+    })
+    showCreateTableModal.value = false
+    toastSuccess('Таблица создана')
+  } catch (err: any) {
+    const message = err.message || 'Не удалось создать таблицу'
+    createTableModalRef.value?.setError(message)
+    toastError(message)
+  } finally {
+    createTableModalRef.value?.setSubmitting(false)
   }
 }
 
@@ -318,7 +404,45 @@ watch(agent, async (value) => {
 
 watch(knowledgeSubTab, async (value) => {
   if (!agent.value) return
+  if (value !== 'tables') {
+    selectedTableId.value = null
+    const q: Record<string, unknown> = { ...route.query }
+    delete q.tableId
+    if (value === 'dashboard') {
+      delete q.knowledgeTab
+    } else {
+      q.knowledgeTab = value
+    }
+    router.replace({ query: q as Record<string, string | string[] | undefined> })
+  } else {
+    const q: Record<string, unknown> = { ...route.query }
+    q.knowledgeTab = 'tables'
+    if (selectedTableId.value) {
+      q.tableId = selectedTableId.value
+    } else {
+      delete q.tableId
+    }
+    router.replace({ query: q as Record<string, string | string[] | undefined> })
+  }
   await loadDataForKnowledgeSubTab(value)
+})
+
+onMounted(() => {
+  nextTick(() => {
+    if (selectedTableId.value && queryString(route.query.knowledgeTab) !== 'tables') {
+      router.replace({ query: { ...route.query, knowledgeTab: 'tables' } })
+    }
+  })
+})
+
+watch([tables, tablesLoading, tablesError], () => {
+  const tid = selectedTableId.value
+  if (!tid || tablesLoading.value || tablesError.value) return
+  if (!tables.value.some((t) => t.id === tid)) {
+    selectedTableId.value = null
+    const { tableId: _t, ...rest } = route.query
+    router.replace({ query: { ...rest, knowledgeTab: 'tables' } })
+  }
 })
 
 const handleOpenCreateDirectQuestion = () => {
@@ -540,9 +664,9 @@ const handleCreateDirectory = async (data: any) => {
     // Список уже обновлён в createDirectory (push); повторный GET не обязателен и при 500
     // на списке раньше оставлял модалку в странном состоянии вместе с ошибкой.
     showCreateDirectoryModal.value = false
-    toastSuccess('Справочник создан')
+    toastSuccess(knowledgeSubTab.value === 'tables' ? 'Таблица создана' : 'Справочник создан')
   } catch (err: any) {
-    const message = err.message || 'Не удалось создать справочник'
+    const message = err.message || (knowledgeSubTab.value === 'tables' ? 'Не удалось создать таблицу' : 'Не удалось создать справочник')
     createDirectoryModalRef.value?.setError(message)
     toastError(message)
   } finally {
@@ -617,6 +741,114 @@ const handleBackToList = () => {
     router.replace({ query: rest })
   }
 }
+
+const applyKnowledgeDashboard = () => {
+  knowledgeSubTab.value = 'dashboard'
+  selectedTableId.value = null
+  if (directoriesComposable.value?.currentDirectory) {
+    directoriesComposable.value.setCurrentDirectory(null)
+  }
+  const { directoryId: _d, tableId: _t, knowledgeTab: _k, ...rest } = route.query
+  router.replace({ query: rest })
+}
+
+const applyKnowledgeTab = (tab: KnowledgeBreadcrumbTab) => {
+  if (tab === 'dashboard') {
+    applyKnowledgeDashboard()
+    return
+  }
+  knowledgeSubTab.value = tab
+  if (tab === 'tables') {
+    if (selectedTableId.value) handleBackFromTable()
+    return
+  }
+  if (tab === 'directories') {
+    if (selectedTableId.value) {
+      selectedTableId.value = null
+      const { tableId: _tid, ...rest } = route.query
+      router.replace({ query: rest })
+    }
+    if (selectedDirectory.value) handleBackToList()
+    return
+  }
+  if (selectedTableId.value) handleBackFromTable()
+  if (selectedDirectory.value && directoriesComposable.value) {
+    directoriesComposable.value.setCurrentDirectory(null)
+    const { directoryId: _did, ...rest } = route.query
+    router.replace({ query: rest })
+  }
+}
+
+const buildKnowledgeBreadcrumbs = (): LayoutBreadcrumbSegment[] | null => {
+  const id = agent.value?.id
+  const agentLabel = agent.value?.name?.trim() || 'Агент'
+  if (!id) return null
+
+  const agentSegment: LayoutBreadcrumbSegment = {
+    label: agentLabel,
+    action: { type: 'route', path: `/agents/${id}/prompt` },
+  }
+
+  if (knowledgeSubTab.value === 'dashboard') {
+    return [agentSegment, { label: 'База знаний', action: null }]
+  }
+
+  const tabLabel =
+    knowledgeSubTabs.value.find((t) => t.id === knowledgeSubTab.value)?.label ?? 'Раздел'
+
+  const prefix: LayoutBreadcrumbSegment[] = [
+    agentSegment,
+    { label: 'База знаний', action: { type: 'knowledge-dashboard' } },
+  ]
+
+  if (knowledgeSubTab.value === 'tables' && selectedTableId.value) {
+    const t = tables.value.find((x) => x.id === selectedTableId.value)
+    return [
+      ...prefix,
+      { label: 'Таблицы', action: { type: 'knowledge-tab', tab: 'tables' } },
+      { label: t?.name ?? 'Таблица', action: null },
+    ]
+  }
+
+  if (knowledgeSubTab.value === 'directories' && selectedDirectory.value) {
+    return [
+      ...prefix,
+      { label: 'Справочники', action: { type: 'knowledge-tab', tab: 'directories' } },
+      { label: selectedDirectory.value.name, action: null },
+    ]
+  }
+
+  return [...prefix, { label: tabLabel, action: null }]
+}
+
+watch(
+  [
+    () => agent.value?.id,
+    () => agent.value?.name,
+    () => knowledgeSubTab.value,
+    () => selectedTableId.value,
+    () => selectedDirectory.value?.id,
+    () => selectedDirectory.value?.name,
+    () => tables.value,
+    () => knowledgeSubTabs.value,
+  ],
+  () => {
+    layoutBreadcrumbSegments.value = buildKnowledgeBreadcrumbs()
+  },
+  { immediate: true }
+)
+
+watch(pendingBreadcrumbAction, (action) => {
+  if (!action) return
+  if (action.type === 'knowledge-dashboard') applyKnowledgeDashboard()
+  else if (action.type === 'knowledge-tab') applyKnowledgeTab(action.tab)
+  pendingBreadcrumbAction.value = null
+})
+
+onUnmounted(() => {
+  layoutBreadcrumbSegments.value = null
+  pendingBreadcrumbAction.value = null
+})
 
 const handleCreateItem = async (data: Record<string, any>) => {
   if (!directoriesComposable.value || !selectedDirectory.value) {

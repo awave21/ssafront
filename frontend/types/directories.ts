@@ -4,6 +4,10 @@ export type DirectoryColumn = {
   type: string
   required: boolean
   searchable?: boolean
+  /** Для type === 'select' */
+  options?: string[]
+  /** Для type === 'text' (varchar): максимальное количество символов */
+  maxLength?: number
 }
 
 export type Directory = {

@@ -118,7 +118,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const navigateToAgent = () => {
   if (props.agentId) {
-    navigateTo(`/agents/${props.agentId}`)
+    navigateTo(`/agents/${props.agentId}/prompt`)
   }
 }
 

@@ -5,6 +5,7 @@
       :agents="agents"
       :channels="channels"
       :tags="tags"
+      :resources="resources"
       :loading="loading"
       @update-filters="value => emit('update-filters', value)"
       @refresh="emit('refresh')"
@@ -20,6 +21,7 @@ import type {
   AnalyticsAgentOption,
   AnalyticsFilterOption,
   AnalyticsFilters,
+  AnalyticsResourceOption,
 } from '~/types/analytics'
 
 defineProps<{
@@ -27,6 +29,7 @@ defineProps<{
   agents: AnalyticsAgentOption[]
   channels: AnalyticsFilterOption[]
   tags: AnalyticsFilterOption[]
+  resources: AnalyticsResourceOption[]
   loading: boolean
 }>()
 

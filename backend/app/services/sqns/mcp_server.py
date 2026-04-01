@@ -430,7 +430,7 @@ def _extract_service_name(visit: dict[str, Any]) -> str | None:
         return None
     if len(names) == 1:
         return names[0]
-    return f"{names[0]} (+{len(names) - 1})"
+    return ", ".join(names)
 
 
 def _extract_resource_name(visit: dict[str, Any], resource_name_by_id: dict[str, str] | None) -> str | None:

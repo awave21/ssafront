@@ -61,6 +61,7 @@ class ChannelConnectionPayload(BaseModel):
     type: PublicChannelType = Field(..., description="Тип канала")
     telegram_bot_token: str | None = Field(None, max_length=100, description="Токен Telegram-бота")
     whatsapp_phone: str | None = Field(None, description="Телефон WhatsApp")
+    max_bot_id: str | None = Field(None, max_length=64, description="ID бота Wappi MAX (query bot_id при отправке)")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -85,6 +86,8 @@ class ChannelConnectionPayload(BaseModel):
             raise ValueError("telegram_bot_token is only allowed for Telegram_Bot")
         if self.type != "Whatsapp_Phone" and self.whatsapp_phone:
             raise ValueError("whatsapp_phone is only allowed for Whatsapp_Phone")
+        if self.type != "Max_Phone" and self.max_bot_id:
+            raise ValueError("max_bot_id is only allowed for Max_Phone")
         return self
 
 
@@ -99,13 +102,39 @@ class ChannelRead(ChannelBase):
 
     id: UUID
     is_authorized: bool = Field(default=False, validation_alias="phone_is_authorized")
+    wappi_profile_id: str | None = None
+    wappi_max_bot_id: str | None = None
     created_at: datetime
     updated_at: datetime | None
 
 
 class ChannelAuthQrRead(BaseModel):
     status: str
-    qr_code: str = Field(..., description="QR код в формате data URL")
+    qr_code: str | None = Field(None, description="QR код в формате data URL")
+    requires_2fa: bool = Field(False, description="Требуется ввод 2FA пароля")
+    detail: str | None = Field(None, description="Дополнительная информация от сервиса авторизации")
+    uuid: str | None = None
+    time: str | None = None
+    timestamp: int | None = None
+
+
+class ChannelAuth2FAPayload(BaseModel):
+    pwd_code: str = Field(..., min_length=1, max_length=256, description="Пароль двухфакторной авторизации")
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("pwd_code")
+    @classmethod
+    def validate_pwd_code(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("pwd_code must not be empty")
+        return normalized
+
+
+class ChannelAuth2FARead(BaseModel):
+    status: str
+    detail: str | None = None
     uuid: str | None = None
     time: str | None = None
     timestamp: int | None = None
