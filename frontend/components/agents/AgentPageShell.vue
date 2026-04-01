@@ -2,10 +2,16 @@
   <div
     :class="[
       'px-5 py-5 min-h-0',
-      props.contained ? 'h-full overflow-hidden' : '',
+      /* h-full + overflow-hidden без внутреннего скролла обрезали контент (база знаний и др.) */
+      props.contained ? 'flex h-full min-h-0 flex-col overflow-hidden' : '',
     ]"
   >
-    <div :class="['flex flex-col min-h-0', props.contained ? 'h-full' : '']">
+    <div
+      :class="[
+        'flex min-h-0 flex-col',
+        props.contained ? 'min-h-0 flex-1 overflow-y-auto overflow-x-hidden' : '',
+      ]"
+    >
       <!-- Auth Status Banner -->
     <div v-if="!isAuthenticated" class="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
       <div class="flex items-center justify-between">
