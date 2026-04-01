@@ -7,6 +7,8 @@ ROLE_SCOPES: dict[str, list[str]] = {
         # Агенты
         "agents:read",
         "agents:write",
+        # Биллинг / стартовый баланс (только владелец)
+        "billing:write",
         # Участники организации
         "members:manage",
         # Диалоги

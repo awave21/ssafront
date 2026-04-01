@@ -29,6 +29,7 @@ export type Tenant = {
   id: string
   name: string
   is_active: boolean
+  owner_user_id?: string | null
   created_at: string
   updated_at: string | null
 }

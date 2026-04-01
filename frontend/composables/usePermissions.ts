@@ -6,6 +6,7 @@ const ROLE_PERMISSIONS = {
   owner: [
     'agents:read',
     'agents:write',
+    'billing:write',
     'members:manage',
     'dialogs:read',
     'dialogs:write',
@@ -36,7 +37,7 @@ const ROLE_PERMISSIONS = {
 } as const
 
 export const usePermissions = () => {
-  const { user } = useAuth()
+  const { user, tenant } = useAuth()
 
   // Текущая роль пользователя
   const role = computed(() => user.value?.role ?? null)
@@ -85,6 +86,16 @@ export const usePermissions = () => {
   const canManageOrganization = computed(() => hasScope('organization:manage'))
   const canReadSettings = computed(() => hasScope('settings:read'))
   const canManageApiKeys = computed(() => hasScope('settings:write'))
+  /** Только владелец организации (tenant.owner_user_id); при отсутствии поля — роль owner. */
+  const canManageTenantBalance = computed(() => {
+    const u = user.value
+    if (!u) return false
+    const ownerId = tenant.value?.owner_user_id
+    if (ownerId != null && ownerId !== '') {
+      return u.id === ownerId
+    }
+    return u.role === 'owner'
+  })
 
   return {
     // Роли
@@ -108,6 +119,7 @@ export const usePermissions = () => {
     canManageOrganization,
     canReadSettings,
     canManageApiKeys,
+    canManageTenantBalance,
     
     // Для отладки
     rolePermissions

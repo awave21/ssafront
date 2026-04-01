@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, require_role, require_scope
+from app.api.deps import get_current_user, require_scope
 from app.db.models.tenant import Tenant
 from app.db.session import get_db
 from app.schemas.auth import AuthContext
@@ -116,10 +116,24 @@ async def get_tenant_balance_settings(
 @router.patch("/balance", response_model=TenantBalanceRead, status_code=status.HTTP_200_OK)
 async def update_tenant_balance_settings(
     body: TenantBalanceUpdate,
-    _: AuthContext = Depends(require_scope("settings:write")),
-    user: AuthContext = Depends(require_role("admin", "owner")),
+    user: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    tenant = await db.get(Tenant, user.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    if tenant.owner_user_id is not None:
+        if tenant.owner_user_id != user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the organization owner can update the balance",
+            )
+    elif user.role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the organization owner can update the balance",
+        )
+
     balance = await set_tenant_initial_balance(
         db,
         tenant_id=user.tenant_id,

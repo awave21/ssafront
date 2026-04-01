@@ -138,7 +138,7 @@
             {{ balanceInputError }}
           </p>
           <p v-else-if="!canEditBalance" class="text-xs text-muted-foreground">
-            У вас нет прав на изменение стартового баланса.
+            Изменять стартовый баланс может только владелец организации.
           </p>
         </div>
       </div>
@@ -251,7 +251,7 @@ const { pageTitle } = useLayoutState()
 
 // Auth state
 const { isAuthenticated, tenant, fetchCurrentUser } = useAuth()
-const { canManageMembers, canManageApiKeys, canManageOrganization, isOwnerOrAdmin, hasScope } = usePermissions()
+const { canManageMembers, canManageApiKeys, canManageOrganization, canManageTenantBalance } = usePermissions()
 const showAuthModal = ref(false)
 const apiFetch = useApiFetch()
 const toast = useToast()
@@ -281,7 +281,7 @@ const isSaveOrganizationDisabled = computed(() =>
   || trimmedOrganizationName.value.length > 200
   || trimmedOrganizationName.value === currentOrganizationName.value,
 )
-const canEditBalance = computed(() => isOwnerOrAdmin.value && hasScope('settings:write'))
+const canEditBalance = computed(() => canManageTenantBalance.value)
 
 const toNormalizedRubInput = (rawValue: string | number): string | null => {
   if (rawValue === null || rawValue === undefined) return null

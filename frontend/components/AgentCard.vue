@@ -1,6 +1,6 @@
 <template>
   <NuxtLink
-    :to="{ path: '/dialogs', query: { agentId: agent.id } }"
+    :to="cardTarget"
     class="group relative block cursor-pointer overflow-hidden rounded-3xl border border-slate-100 bg-white p-5 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-all duration-500 hover:-translate-y-1 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)]"
   >
     <div class="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-primary/5 transition-transform duration-700 group-hover:scale-150" />
@@ -63,12 +63,22 @@
 import { computed } from 'vue'
 import { Bot } from 'lucide-vue-next'
 import type { Agent } from '~/composables/useAgents'
+import { usePermissions } from '~/composables/usePermissions'
 
 type Props = {
   agent: Agent
 }
 
 const props = defineProps<Props>()
+
+const { isManager } = usePermissions()
+
+/** Менеджер — в диалоги; владелец/админ — в редактор агента */
+const cardTarget = computed(() =>
+  isManager.value
+    ? { path: '/dialogs', query: { agentId: props.agent.id } }
+    : `/agents/${props.agent.id}/prompt`,
+)
 
 const gradients = [
   'from-sky-500 to-cyan-500',

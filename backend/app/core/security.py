@@ -58,12 +58,10 @@ def decode_token(token: str) -> AuthContext:
 
     token_payload = TokenPayload.model_validate(payload)
     role = getattr(token_payload, "role", "manager")
-    
-    # Backward compatibility: если scopes пустые, берём из роли
-    scopes = token_payload.scopes
-    if not scopes:
-        scopes = get_scopes_for_role(role)
-    
+    # Всегда берём scopes из актуальной матрицы роли: в JWT мог остаться устаревший
+    # список (до смены роли или обновления прав), иначе владелец мог терять billing:write и др.
+    scopes = get_scopes_for_role(role)
+
     return AuthContext(
         user_id=token_payload.user_id,
         tenant_id=token_payload.tenant_id,
