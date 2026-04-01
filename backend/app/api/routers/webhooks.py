@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 import structlog
 from typing import Any
@@ -264,6 +265,7 @@ async def telegram_webhook(
             if reply and bot_token:
                 reply_text = sanitize_agent_reply_text(reply)
                 if reply_text:
+                    sent = False
                     try:
                         await send_telegram_message(
                             bot_token=bot_token,
@@ -271,6 +273,7 @@ async def telegram_webhook(
                             text=reply_text,
                             parse_mode="Markdown",
                         )
+                        sent = True
                     except TelegramWebhookError:
                         try:
                             await send_telegram_message(
@@ -278,6 +281,7 @@ async def telegram_webhook(
                                 chat_id=chat_id,
                                 text=reply_text,
                             )
+                            sent = True
                         except TelegramWebhookError as exc:
                             logger.warning(
                                 "telegram_send_reply_failed",
@@ -285,18 +289,74 @@ async def telegram_webhook(
                                 agent_id=str(agent_id),
                                 error=str(exc),
                             )
+                            webhook_logger.warning(
+                                "telegram_send_reply_failed",
+                                chat_id=chat_id,
+                                agent_id=str(agent_id),
+                                session_id=session_id,
+                                error=str(exc),
+                            )
+                    if sent:
+                        webhook_logger.info(
+                            "telegram_reply_sent",
+                            chat_id=chat_id,
+                            agent_id=str(agent_id),
+                            session_id=session_id,
+                            reply_len=len(reply_text),
+                        )
+                else:
+                    logger.warning(
+                        "telegram_agent_reply_empty_after_sanitize",
+                        chat_id=chat_id,
+                        agent_id=str(agent_id),
+                        session_id=session_id,
+                        raw_reply_len=len(reply) if isinstance(reply, str) else None,
+                    )
+                    webhook_logger.warning(
+                        "telegram_agent_reply_empty_after_sanitize",
+                        chat_id=chat_id,
+                        agent_id=str(agent_id),
+                        session_id=session_id,
+                        raw_reply_len=len(reply) if isinstance(reply, str) else None,
+                    )
+            elif bot_token:
+                logger.warning(
+                    "telegram_agent_reply_empty",
+                    chat_id=chat_id,
+                    agent_id=str(agent_id),
+                    session_id=session_id,
+                )
+                webhook_logger.warning(
+                    "telegram_agent_reply_empty",
+                    chat_id=chat_id,
+                    agent_id=str(agent_id),
+                    session_id=session_id,
+                )
         else:
-            # Агент не запускается: диалог неактивен ИЛИ менеджер на паузе.
-            # Сохраняем сообщение пользователя без ответа агента.
+            # Агент не запускается: политика чата / канал / пауза.
+            # Важно: раньше при отсутствии bot_token попадали в ветку с reason=dialog_inactive — это вводило в заблуждение.
             if agent.is_disabled:
                 skip_reason = "agent_disabled"
             elif user_disabled:
                 skip_reason = "agent_user_disabled"
             elif manager_paused:
                 skip_reason = "manager_paused"
-            else:
+            elif not dialog_active:
                 skip_reason = "dialog_inactive"
+            elif not (bot_token and str(bot_token).strip()):
+                skip_reason = "missing_bot_token"
+            elif not (input_text and str(input_text).strip()):
+                skip_reason = "empty_message"
+            else:
+                skip_reason = "unknown_skip"
             logger.info(
+                "telegram_message_skipped",
+                reason=skip_reason,
+                chat_id=chat_id,
+                agent_id=str(agent_id),
+                session_id=session_id,
+            )
+            webhook_logger.info(
                 "telegram_message_skipped",
                 reason=skip_reason,
                 chat_id=chat_id,
