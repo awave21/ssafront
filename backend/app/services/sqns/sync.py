@@ -56,6 +56,25 @@ class SQNSSyncService:
         self.sqns_client = sqns_client
         self.agent_id = agent_id
 
+    def _service_category_matches(self, category: str) -> Any:
+        """
+        Подстрока категории: колонка category, совпадение с именами из справочника категорий,
+        типичные ключи в raw_data SQNS (часто category заполнен только в JSON).
+        """
+        pat = f"%{category}%"
+        rd = SqnsService.raw_data
+        canonical = select(SqnsServiceCategory.name).where(
+            SqnsServiceCategory.agent_id == self.agent_id,
+            SqnsServiceCategory.name.ilike(pat),
+        )
+        return or_(
+            SqnsService.category.ilike(pat),
+            SqnsService.category.in_(canonical),
+            rd["categoryName"].astext.ilike(pat),
+            rd["category"].astext.ilike(pat),
+            rd["category"]["name"].astext.ilike(pat),
+        )
+
     def _booking_service_predicates(self, *, category: str | None) -> list[Any]:
         """
         Условия для выборки услуг в sqns_find_booking_options: активная услуга,
@@ -78,7 +97,7 @@ class SQNSSyncService:
             ),
         ]
         if category:
-            preds.append(SqnsService.category.ilike(f"%{category}%"))
+            preds.append(self._service_category_matches(category))
         return preds
 
     async def _list_booking_services(self, *, category: str | None = None) -> list[SqnsService]:
@@ -91,6 +110,19 @@ class SQNSSyncService:
         )
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
+
+    @staticmethod
+    def _services_to_booking_alternatives(services: list[SqnsService]) -> list[BookingAlternative]:
+        return [
+            BookingAlternative(
+                id=svc.external_id,
+                name=svc.name,
+                additional_info=(
+                    f"{svc.category or 'Без категории'} • {svc.duration_seconds // 60} мин"
+                ),
+            )
+            for svc in services
+        ]
 
     @staticmethod
     def _coerce_number(value: Any) -> float | None:
@@ -832,16 +864,6 @@ class SQNSSyncService:
             if category:
                 in_category = await self._list_booking_services(category=category)
                 if in_category:
-                    alternatives = [
-                        BookingAlternative(
-                            id=svc.external_id,
-                            name=svc.name,
-                            additional_info=(
-                                f"{svc.category or 'Без категории'} • {svc.duration_seconds // 60} мин"
-                            ),
-                        )
-                        for svc in in_category
-                    ]
                     return BookingOptionsOutput(
                         ready=False,
                         message=(
@@ -850,7 +872,20 @@ class SQNSSyncService:
                             f"выберите подходящую и вызовите sqns_find_booking_options с уточнённым service_name "
                             f"(category можно оставить или убрать)."
                         ),
-                        alternatives={"services": alternatives},
+                        alternatives={
+                            "services": self._services_to_booking_alternatives(in_category),
+                        },
+                    )
+                top = await self._list_booking_services(category=None)
+                if top:
+                    return BookingOptionsOutput(
+                        ready=False,
+                        message=(
+                            f"По названию «{service_name}» совпадений нет; по категории «{category}» в кэше тоже "
+                            f"не нашлось услуг (сверь имя с sqns_list_categories и данные SQNS). "
+                            f"Ниже до {len(top)} популярных услуг без фильтра по категории — выберите ближайшее или уточните запрос."
+                        ),
+                        alternatives={"services": self._services_to_booking_alternatives(top)},
                     )
             return BookingOptionsOutput(
                 ready=False,
@@ -995,16 +1030,6 @@ class SQNSSyncService:
             if category:
                 in_category = await self._list_booking_services(category=category)
                 if in_category:
-                    alternatives = [
-                        BookingAlternative(
-                            id=svc.external_id,
-                            name=svc.name,
-                            additional_info=(
-                                f"{svc.category or 'Без категории'} • {svc.duration_seconds // 60} мин"
-                            ),
-                        )
-                        for svc in in_category
-                    ]
                     return BookingOptionsOutput(
                         ready=False,
                         message=(
@@ -1013,7 +1038,20 @@ class SQNSSyncService:
                             f"Сначала выберите услугу из alternatives.services ({len(in_category)} вариантов в категории), "
                             f"затем вызовите sqns_find_booking_options с уточнённым service_name и тем же specialist_name."
                         ),
-                        alternatives={"services": alternatives},
+                        alternatives={
+                            "services": self._services_to_booking_alternatives(in_category),
+                        },
+                    )
+                top = await self._list_booking_services(category=None)
+                if top:
+                    return BookingOptionsOutput(
+                        ready=False,
+                        message=(
+                            f"По названию «{service_name}» и категории «{category}» услуга не найдена; "
+                            f"по категории в кэше пусто. Указан специалист «{specialist_name}». "
+                            f"Ниже до {len(top)} популярных услуг без фильтра по категории — выберите услугу и повторите вызов с тем же specialist_name."
+                        ),
+                        alternatives={"services": self._services_to_booking_alternatives(top)},
                     )
             return BookingOptionsOutput(
                 ready=False,
