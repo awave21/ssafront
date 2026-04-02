@@ -230,6 +230,7 @@ class BookingOptionsInput(BaseModel):
     - Только specialist_name → найти услуги специалиста
     - Оба параметра → проверить совместимость и вернуть ID для записи
     - Ничего → топ услуг по priority (см. лимит выдачи в реализации)
+    - category (опционально) → сузить выборку по полю category услуги (ILIKE); точные имена — sqns_list_categories
     """
 
     service_name: str | None = Field(
@@ -239,6 +240,14 @@ class BookingOptionsInput(BaseModel):
     specialist_name: str | None = Field(
         None,
         description="ФИО специалиста для поиска (ILIKE поиск по содержанию, например: 'Иванов' найдет 'Иванов Иван Иванович')",
+    )
+    category: str | None = Field(
+        None,
+        description=(
+            "Необязательный фильтр по категории услуги (ILIKE по полю category в локальном кэше). "
+            "Можно передать только category (топ услуг в подходящих категориях) или вместе с service_name/specialist_name. "
+            "Точные названия категорий — sqns_list_categories."
+        ),
     )
 
 

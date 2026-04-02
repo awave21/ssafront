@@ -166,31 +166,10 @@
 
         <!-- Status (outgoing messages: agent + manager) -->
         <template v-if="isOutgoing">
-          <!-- Sending -->
-          <Loader2
-            v-if="message.status === 'sending'"
-            class="w-3 h-3 text-slate-400 animate-spin"
+          <MessageDeliveryStatus
+            :status="message.status"
+            @retry="$emit('retry')"
           />
-          
-          <!-- Sent -->
-          <Check
-            v-else-if="message.status === 'sent'"
-            class="w-3 h-3 text-slate-400"
-          />
-          
-          <!-- Failed -->
-          <div
-            v-else-if="message.status === 'failed'"
-            class="flex items-center gap-1"
-          >
-            <AlertCircle class="w-3 h-3 text-red-500" />
-            <button
-              @click="$emit('retry')"
-              class="text-[10px] text-red-500 hover:text-red-600 font-medium"
-            >
-              Повторить
-            </button>
-          </div>
         </template>
       </div>
     </div>
@@ -199,8 +178,9 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Play, Pause, Check, Loader2, AlertCircle, Wrench, CheckSquare } from 'lucide-vue-next'
+import { Play, Pause, Wrench, CheckSquare } from 'lucide-vue-next'
 import type { Message } from '../../types/dialogs'
+import MessageDeliveryStatus from './MessageDeliveryStatus.vue'
 import { createSafeMarkdownRenderer } from '~/utils/safe-markdown'
 
 const props = defineProps<{

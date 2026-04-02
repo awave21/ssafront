@@ -628,10 +628,49 @@ def build_sqns_legacy_tools(agent: Agent, user: AuthContext) -> list[PydanticToo
                             input_data = BookingOptionsInput(
                                 service_name=kwargs.get("service_name"),
                                 specialist_name=kwargs.get("specialist_name"),
+                                category=kwargs.get("category"),
                             )
                             sync_service = SQNSSyncService(db, client, agent_obj.id)
                             result = await sync_service.find_booking_options(input_data)
                             return result.model_dump()
+
+                        if method_name == "list_service_categories":
+                            from sqlalchemy import func
+
+                            from app.db.models.sqns_service import SqnsService, SqnsServiceCategory
+
+                            stmt = (
+                                select(
+                                    SqnsServiceCategory,
+                                    func.count(SqnsService.id).label("services_count"),
+                                )
+                                .outerjoin(
+                                    SqnsService,
+                                    (SqnsService.agent_id == SqnsServiceCategory.agent_id)
+                                    & (SqnsService.category == SqnsServiceCategory.name),
+                                )
+                                .where(SqnsServiceCategory.agent_id == agent_obj.id)
+                                .group_by(SqnsServiceCategory.id)
+                                .order_by(
+                                    SqnsServiceCategory.priority.desc(),
+                                    SqnsServiceCategory.name,
+                                )
+                            )
+                            result = await db.execute(stmt)
+                            rows = result.all()
+                            categories: list[dict[str, Any]] = []
+                            for row in rows:
+                                cat = row[0]
+                                categories.append(
+                                    {
+                                        "id": str(cat.id),
+                                        "name": cat.name,
+                                        "is_enabled": cat.is_enabled,
+                                        "priority": cat.priority,
+                                        "services_count": int(row[1] or 0),
+                                    }
+                                )
+                            return {"categories": categories}
 
                         method = getattr(client, method_name, None)
                         if not method:

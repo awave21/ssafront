@@ -10,7 +10,10 @@ from app.services.wappi.client import (
     WappiProfileCreateResult,
     WappiProfileDeleteResult,
     WappiProfileLogoutResult,
+    WappiWebhookUrlSetResult,
+    WappiWebhookTypesSetResult,
     WappiSyncMessageSendResult,
+    WappiAsyncMessageSendResult,
 )
 from app.services.wappi.binding import (
     ChannelProfileAlreadyBoundError,
@@ -21,7 +24,10 @@ from app.services.wappi.binding import (
     ChannelProfileUnsupportedTypeError,
     bind_profile_to_channel,
     build_wappi_client,
+    configure_channel_webhook,
     request_channel_auth_qr,
+    resolve_wappi_async_timeout_range,
+    resolve_wappi_max_bot_id,
     submit_channel_auth_2fa,
     unbind_profile_from_channel,
 )
@@ -36,7 +42,10 @@ __all__ = [
     "WappiProfileCreateResult",
     "WappiProfileDeleteResult",
     "WappiProfileLogoutResult",
+    "WappiWebhookUrlSetResult",
+    "WappiWebhookTypesSetResult",
     "WappiSyncMessageSendResult",
+    "WappiAsyncMessageSendResult",
     "ChannelProfileAlreadyBoundError",
     "ChannelProfileBindingError",
     "ChannelProfileConfigError",
@@ -45,7 +54,10 @@ __all__ = [
     "ChannelProfileUnsupportedTypeError",
     "bind_profile_to_channel",
     "build_wappi_client",
+    "configure_channel_webhook",
     "request_channel_auth_qr",
+    "resolve_wappi_async_timeout_range",
+    "resolve_wappi_max_bot_id",
     "submit_channel_auth_2fa",
     "unbind_profile_from_channel",
 ]

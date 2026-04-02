@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
-from sqlalchemy import delete, select, func, update
+from sqlalchemy import and_, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
 
@@ -55,6 +55,31 @@ class SQNSSyncService:
         self.db = db
         self.sqns_client = sqns_client
         self.agent_id = agent_id
+
+    def _booking_service_predicates(self, *, category: str | None) -> list[Any]:
+        """
+        Условия для выборки услуг в sqns_find_booking_options: активная услуга,
+        категория не отключена в sqns_service_categories, опционально ILIKE по category.
+        """
+        category_disabled = exists(
+            select(1).where(
+                SqnsServiceCategory.agent_id == self.agent_id,
+                SqnsServiceCategory.name == SqnsService.category,
+                SqnsServiceCategory.is_enabled.is_(False),
+            )
+        )
+        preds: list[Any] = [
+            SqnsService.agent_id == self.agent_id,
+            SqnsService.is_enabled.is_(True),
+            or_(
+                SqnsService.category.is_(None),
+                SqnsService.category == "",
+                ~category_disabled,
+            ),
+        ]
+        if category:
+            preds.append(SqnsService.category.ilike(f"%{category}%"))
+        return preds
 
     @staticmethod
     def _coerce_number(value: Any) -> float | None:
@@ -635,33 +660,36 @@ class SQNSSyncService:
         2. specialist_name only → список услуг специалиста
         3. Оба параметра → валидация совместимости + ID для записи
         4. Ничего → топ услуг по priority (см. BOOKING_OPTIONS_RESULT_LIMIT)
+        5. category (опционально ко всем сценариям) → фильтр по полю category услуги (ILIKE)
         """
-        service_name = input_data.service_name
-        specialist_name = input_data.specialist_name
+        service_name = (input_data.service_name or "").strip() or None
+        specialist_name = (input_data.specialist_name or "").strip() or None
+        category = (input_data.category or "").strip() or None
 
         # Сценарий 4: Ничего не указано → топ услуг
         if not service_name and not specialist_name:
-            return await self._get_top_services()
+            return await self._get_top_services(category=category)
 
         # Сценарий 2: Только специалист → услуги специалиста
         if specialist_name and not service_name:
-            return await self._find_services_by_specialist(specialist_name)
+            return await self._find_services_by_specialist(specialist_name, category=category)
 
         # Сценарий 1: Только услуга → специалисты для услуги
         if service_name and not specialist_name:
-            return await self._find_specialists_by_service(service_name)
+            return await self._find_specialists_by_service(service_name, category=category)
 
         # Сценарий 3: Оба параметра → проверка совместимости
-        return await self._validate_compatibility(service_name, specialist_name)
+        return await self._validate_compatibility(
+            service_name,
+            specialist_name,
+            category=category,
+        )
 
-    async def _get_top_services(self) -> BookingOptionsOutput:
+    async def _get_top_services(self, *, category: str | None = None) -> BookingOptionsOutput:
         """Возвращает топ услуг по приоритету (лимит BOOKING_OPTIONS_RESULT_LIMIT)."""
         stmt = (
             select(SqnsService)
-            .where(
-                SqnsService.agent_id == self.agent_id,
-                SqnsService.is_enabled == True,
-            )
+            .where(and_(*self._booking_service_predicates(category=category)))
             .order_by(SqnsService.priority.desc(), SqnsService.name)
             .limit(BOOKING_OPTIONS_RESULT_LIMIT)
         )
@@ -671,7 +699,12 @@ class SQNSSyncService:
         if not services:
             return BookingOptionsOutput(
                 ready=False,
-                message="Нет доступных услуг. Пожалуйста, синхронизируйте данные из SQNS.",
+                message=(
+                    "Нет доступных услуг по заданным условиям. "
+                    "Проверьте категорию (sqns_list_categories) или синхронизируйте данные из SQNS."
+                    if category
+                    else "Нет доступных услуг. Пожалуйста, синхронизируйте данные из SQNS."
+                ),
             )
 
         alternatives = [
@@ -683,15 +716,21 @@ class SQNSSyncService:
             for svc in services
         ]
 
+        msg = f"Доступно {len(services)} услуг. Выберите услугу или специалиста для продолжения."
+        if category:
+            msg = f"В категории (по фильтру «{category}») доступно {len(services)} услуг. Выберите услугу или специалиста."
+
         return BookingOptionsOutput(
             ready=False,
-            message=f"Доступно {len(services)} услуг. Выберите услугу или специалиста для продолжения.",
+            message=msg,
             alternatives={"services": alternatives},
         )
 
     async def _find_services_by_specialist(
         self,
         specialist_name: str,
+        *,
+        category: str | None = None,
     ) -> BookingOptionsOutput:
         """Поиск услуг, которые может выполнять специалист."""
         # Поиск специалиста по имени (ILIKE)
@@ -726,7 +765,7 @@ class SQNSSyncService:
             )
             .where(
                 SqnsServiceResource.resource_id == resource.id,
-                SqnsService.is_enabled == True,
+                and_(*self._booking_service_predicates(category=category)),
             )
             .order_by(SqnsService.priority.desc(), SqnsService.name)
             .limit(BOOKING_OPTIONS_RESULT_LIMIT)
@@ -766,14 +805,17 @@ class SQNSSyncService:
     async def _find_specialists_by_service(
         self,
         service_name: str,
+        *,
+        category: str | None = None,
     ) -> BookingOptionsOutput:
         """Поиск специалистов по услуге (одна или несколько услуг по ILIKE)."""
         service_stmt = (
             select(SqnsService)
             .where(
-                SqnsService.agent_id == self.agent_id,
-                SqnsService.is_enabled == True,
-                SqnsService.name.ilike(f"%{service_name}%"),
+                and_(
+                    SqnsService.name.ilike(f"%{service_name}%"),
+                    *self._booking_service_predicates(category=category),
+                ),
             )
             .order_by(SqnsService.priority.desc(), SqnsService.name)
             .limit(BOOKING_OPTIONS_RESULT_LIMIT)
@@ -903,14 +945,17 @@ class SQNSSyncService:
         self,
         service_name: str,
         specialist_name: str,
+        *,
+        category: str | None = None,
     ) -> BookingOptionsOutput:
         """Проверка совместимости: до N услуг и N врачей по ILIKE, пары только из M2M."""
         service_stmt = (
             select(SqnsService)
             .where(
-                SqnsService.agent_id == self.agent_id,
-                SqnsService.is_enabled == True,
-                SqnsService.name.ilike(f"%{service_name}%"),
+                and_(
+                    SqnsService.name.ilike(f"%{service_name}%"),
+                    *self._booking_service_predicates(category=category),
+                ),
             )
             .order_by(SqnsService.priority.desc(), SqnsService.name)
             .limit(BOOKING_OPTIONS_RESULT_LIMIT)
@@ -1054,8 +1099,8 @@ class SQNSSyncService:
             )
             .where(
                 SqnsServiceResource.resource_id == r0.id,
-                SqnsService.is_enabled == True,
                 SqnsService.id.notin_(service_ids),
+                and_(*self._booking_service_predicates(category=category)),
             )
             .order_by(SqnsService.priority.desc(), SqnsService.name)
             .limit(BOOKING_OPTIONS_RESULT_LIMIT)

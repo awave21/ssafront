@@ -422,8 +422,41 @@ async def append_session_messages(
     if user_info is None:
         effective_user_info: dict[str, Any] = {"session_id": session_id}
         if session_id.startswith("telegram:"):
-            effective_user_info["platform"] = "telegram"
-            effective_user_info["platform_id"] = session_id.split(":")[1]
+            effective_user_info.update(
+                {
+                    "platform": "telegram",
+                    "platform_id": session_id.split(":", 1)[1],
+                    "integration_channel_type": "telegram",
+                    "integration_channel_label": "Telegram бот",
+                }
+            )
+        elif session_id.startswith("telegram_phone:"):
+            effective_user_info.update(
+                {
+                    "platform": "telegram_phone",
+                    "platform_id": session_id.split(":", 1)[1],
+                    "integration_channel_type": "telegram_phone",
+                    "integration_channel_label": "Telegram номер",
+                }
+            )
+        elif session_id.startswith("max:"):
+            effective_user_info.update(
+                {
+                    "platform": "max",
+                    "platform_id": session_id.split(":", 1)[1],
+                    "integration_channel_type": "max",
+                    "integration_channel_label": "MAX",
+                }
+            )
+        elif session_id.startswith("whatsapp:"):
+            effective_user_info.update(
+                {
+                    "platform": "whatsapp",
+                    "platform_id": session_id.split(":", 1)[1],
+                    "integration_channel_type": "whatsapp",
+                    "integration_channel_label": "WhatsApp",
+                }
+            )
     else:
         effective_user_info = {**user_info, "session_id": session_id}
 
@@ -442,6 +475,7 @@ async def append_session_messages(
         )
 
     db.add_all(entries)
+    await db.flush()
 
     # Публикуем новые сообщения в шину для Real-time интерфейса менеджера
     if agent_id:

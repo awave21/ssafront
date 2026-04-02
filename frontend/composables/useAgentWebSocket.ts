@@ -2,6 +2,7 @@ import { ref, watch, onUnmounted, computed, type ComputedRef, unref } from 'vue'
 import { useDialogs } from './useDialogs'
 import { useMessages } from './useMessages'
 import { getStoredAccessToken } from '~/composables/authSessionManager'
+import { normalizeDialogUserInfo, resolveDialogPlatform } from '~/utils/dialogIdentity'
 import type {
   WsConnectionState,
   WsOutgoingMessage,
@@ -95,6 +96,7 @@ export const useAgentWebSocket = (
       switch (message.type) {
         case 'message_created': {
           const msgData = message.data
+          const msgDataRecord = msgData as Record<string, unknown>
           
           const rawDialogId = msgData.dialog_id ?? msgData.session_id
           const dialogId = resolveDialogId(rawDialogId) ?? (rawDialogId ? String(rawDialogId) : null)
@@ -113,9 +115,17 @@ export const useAgentWebSocket = (
 
           const isActiveDialog = dialogId === activeDialogId.value
 
-          // Extract user_info from message data
-          const userInfo = msgData.user_info
-          const platform = userInfo?.platform || (dialogId.startsWith('telegram:') ? 'telegram' : undefined)
+          const rawUserInfo = msgData.user_info && typeof msgData.user_info === 'object'
+            ? msgData.user_info
+            : undefined
+          const rawPlatform = typeof msgDataRecord.platform === 'string'
+            ? msgDataRecord.platform
+            : undefined
+          const userInfo = normalizeDialogUserInfo(
+            { id: dialogId, platform: rawPlatform, user_info: rawUserInfo },
+            rawUserInfo as Record<string, unknown> | undefined
+          )
+          const platform = resolveDialogPlatform({ id: dialogId, platform: rawPlatform, user_info: userInfo })
 
           // Safely convert content to string for preview
           const contentStr = typeof msgData.content === 'string' ? msgData.content : ''
@@ -148,6 +158,25 @@ export const useAgentWebSocket = (
           if (isActiveDialog) {
             dialogsStore.markAsRead(dialogId)
           }
+          break
+        }
+
+        case 'message_updated': {
+          const eventData = message.data as Record<string, unknown>
+          const rawDialogId = eventData.session_id ?? eventData.dialog_id
+          const dialogId = resolveDialogId(rawDialogId) ?? (rawDialogId ? String(rawDialogId) : null)
+          const messageId = typeof eventData.id === 'string' ? eventData.id : ''
+          const status = typeof eventData.status === 'string' ? eventData.status.toLowerCase() : ''
+          if (!dialogId || !messageId || !status) {
+            break
+          }
+
+          const allowedStatuses = new Set(['sending', 'sent', 'delivered', 'read', 'failed', 'streaming', 'done'])
+          if (!allowedStatuses.has(status)) {
+            break
+          }
+
+          messagesStore.updateMessage(dialogId, messageId, { status: status as any })
           break
         }
 

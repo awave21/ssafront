@@ -7,6 +7,14 @@ from pathlib import Path
 import structlog
 
 
+_WAPPI_WEBHOOK_LOG_FILES: dict[str, Path] = {
+    "webhooks.wappi": Path("/logs/webhooks_wappi.log"),
+    "webhooks.wappi.telegram": Path("/logs/webhooks_wappi_telegram.log"),
+    "webhooks.wappi.whatsapp": Path("/logs/webhooks_wappi_whatsapp.log"),
+    "webhooks.wappi.max": Path("/logs/webhooks_wappi_max.log"),
+}
+
+
 def bind_trace_id(trace_id: str | None) -> None:
     if trace_id is None:
         return
@@ -41,7 +49,7 @@ def configure_logging() -> None:
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.add_log_level,
             structlog.processors.EventRenamer("message"),
-            structlog.processors.JSONRenderer(),
+            structlog.processors.JSONRenderer(ensure_ascii=False),
         ],
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
@@ -68,10 +76,14 @@ def _configure_webhook_logger() -> None:
 
 
 def _configure_wappi_webhook_logger() -> None:
-    log_file = Path("/logs/webhooks_wappi.log")
+    for logger_name, log_file in _WAPPI_WEBHOOK_LOG_FILES.items():
+        _configure_file_logger(logger_name, log_file)
+
+
+def _configure_file_logger(logger_name: str, log_file: Path) -> None:
     if not log_file.parent.exists():
         return
-    logger = logging.getLogger("webhooks.wappi")
+    logger = logging.getLogger(logger_name)
     logger.setLevel(logging.INFO)
     for handler in logger.handlers:
         if isinstance(handler, logging.FileHandler) and Path(handler.baseFilename) == log_file:

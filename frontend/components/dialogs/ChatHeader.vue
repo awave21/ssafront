@@ -39,12 +39,13 @@
         {{ dialogTitle }}
       </h2>
       
-      <!-- Username + канал -->
+      <!-- Идентификатор контакта + канал -->
       <p
-        v-if="isTelegram && username"
-        class="text-xs text-blue-600 truncate"
+        v-if="secondaryIdentity"
+        class="text-xs truncate"
+        :class="[isTelegram ? 'text-blue-600' : 'text-slate-600']"
       >
-        @{{ username }}
+        {{ secondaryIdentity }}
       </p>
       <p
         v-if="integrationChannelLabel"
@@ -99,6 +100,12 @@ import { ArrowLeft, Loader2 } from 'lucide-vue-next'
 import { useDialogs } from '../../composables/useDialogs'
 import type { Agent } from '../../composables/useAgents'
 import type { Dialog } from '../../types/dialogs'
+import {
+  isTelegramDialog,
+  resolveDialogSecondaryIdentity,
+  resolveDialogUserTitle,
+  resolveIntegrationChannelLabel
+} from '~/utils/dialogIdentity'
 
 const props = defineProps<{
   agent: Agent
@@ -117,37 +124,19 @@ const { toggleDialogAgentStatus } = useDialogs()
 const isEnabled = computed(() => (props.dialog?.agent_status ?? 'active') === 'active')
 
 const isTelegram = computed(() => {
-  const p = props.dialog?.platform || props.dialog?.user_info?.platform
-  return (
-    p === 'telegram' ||
-    p === 'telegram_phone' ||
-    props.dialog?.id?.startsWith('telegram:') ||
-    props.dialog?.id?.startsWith('telegram_phone:')
-  )
+  return isTelegramDialog(props.dialog || {})
 })
 
 const integrationChannelLabel = computed(() => {
-  return props.dialog?.user_info?.integration_channel_label?.trim() || ''
+  return resolveIntegrationChannelLabel(props.dialog || {})
 })
 
-const username = computed(() => {
-  return props.dialog?.user_info?.username || ''
+const secondaryIdentity = computed(() => {
+  return resolveDialogSecondaryIdentity(props.dialog || {}) || ''
 })
 
 const dialogTitle = computed(() => {
-  const userInfo = props.dialog?.user_info
-  // Prioritize user info for title
-  if (userInfo?.first_name || userInfo?.last_name) {
-    return [userInfo.first_name, userInfo.last_name].filter(Boolean).join(' ')
-  }
-  if (userInfo?.username) return `@${userInfo.username}`
-  // For Telegram / telegram_phone without user_info, extract ID from dialog ID
-  if (isTelegram.value && props.dialog?.id) {
-    const telegramId = props.dialog.id.replace(/^(telegram|telegram_phone):/, '')
-    return `Telegram #${telegramId}`
-  }
-  // Fallback - don't use dialog.title as it contains message preview
-  return 'Диалог'
+  return resolveDialogUserTitle(props.dialog || {}) || 'Диалог'
 })
 
 const userInitials = computed(() => {

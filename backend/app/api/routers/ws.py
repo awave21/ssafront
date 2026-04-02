@@ -29,6 +29,26 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
+_WS_MESSAGE_STATUS_ALIASES: dict[str, str] = {
+    "sending": "sending",
+    "failed": "failed",
+    "streaming": "streaming",
+    "done": "done",
+    "sent": "sent",
+    "delivered": "delivered",
+    "received": "delivered",
+    "read": "read",
+    "seen": "read",
+    "displayed": "read",
+}
+
+
+def _normalize_ws_message_status(raw_status: Any) -> str:
+    value = str(raw_status or "").strip().lower()
+    if not value:
+        return "done"
+    return _WS_MESSAGE_STATUS_ALIASES.get(value, "done")
+
 
 class ConnectionManager:
     """Менеджер WebSocket соединений."""
@@ -117,6 +137,7 @@ async def agent_websocket(
 
     Типы исходящих событий (от сервера):
     - message_created: новое сообщение
+    - message_updated: обновление существующего сообщения
     - dialog_updated: обновление диалога
     - run_start: начало выполнения агента
     - run_result: результат выполнения
@@ -230,6 +251,7 @@ def _map_pydantic_message_to_ws_format(
                 "role": mapped_role,
                 "content": str(part.get("content", "")) if kind == "text" else "",
                 "created_at": created_at,
+                "status": _normalize_ws_message_status(msg_data.get("status")),
                 "user_info": user_info,
                 "part_kind": part.get("part_kind"),
                 "tool_name": part.get("tool_name"),

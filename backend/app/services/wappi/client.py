@@ -33,6 +33,26 @@ class WappiProfileCreateResult:
 
 
 @dataclass(frozen=True)
+class WappiWebhookUrlSetResult:
+    status: str
+    detail: str | None = None
+    task_id: str | None = None
+    time: str | None = None
+    timestamp: int | None = None
+    raw: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class WappiWebhookTypesSetResult:
+    status: str
+    detail: str | None = None
+    task_id: str | None = None
+    time: str | None = None
+    timestamp: int | None = None
+    raw: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class WappiProfileDeleteResult:
     status: str
     detail: str | None = None
@@ -88,10 +108,33 @@ class WappiSyncMessageSendResult:
     raw: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class WappiAsyncMessageSendResult:
+    status: str
+    detail: str | None = None
+    task_id: str | None = None
+    time: str | None = None
+    timestamp: int | None = None
+    uuid: str | None = None
+    command_start: str | None = None
+    command_end: str | None = None
+    raw: dict[str, Any] | None = None
+
+
 _CREATE_PROFILE_PATHS: dict[WappiPlatform, str] = {
     WappiPlatform.WHATSAPP: "/api/profile/add",
     WappiPlatform.TELEGRAM_PHONE: "/tapi/profile/add",
     WappiPlatform.MAX: "/maxapi/profile/add",
+}
+_SET_WEBHOOK_URL_PATHS: dict[WappiPlatform, str] = {
+    WappiPlatform.WHATSAPP: "/api/webhook/url/set",
+    WappiPlatform.TELEGRAM_PHONE: "/tapi/webhook/url/set",
+    WappiPlatform.MAX: "/maxapi/webhook/url/set",
+}
+_SET_WEBHOOK_TYPES_PATHS: dict[WappiPlatform, str] = {
+    WappiPlatform.WHATSAPP: "/api/webhook/types/set",
+    WappiPlatform.TELEGRAM_PHONE: "/tapi/webhook/types/set",
+    WappiPlatform.MAX: "/maxapi/webhook/types/set",
 }
 
 _DELETE_PROFILE_PATHS: dict[WappiPlatform, str] = {
@@ -120,7 +163,10 @@ _AUTH_2FA_PATHS: dict[WappiPlatform, str] = {
     WappiPlatform.MAX: "/maxapi/sync/auth/2fa",
 }
 _TAPI_SYNC_MESSAGE_SEND_PATH = "/tapi/sync/message/send"
+_TAPI_ASYNC_MESSAGE_SEND_PATH = "/tapi/async/message/send"
+_API_ASYNC_MESSAGE_SEND_PATH = "/api/async/message/send"
 _MAXAPI_SYNC_MESSAGE_SEND_PATH = "/maxapi/sync/message/send"
+_MAXAPI_ASYNC_MESSAGE_SEND_PATH = "/maxapi/async/message/send"
 _BALANCE_ADD_DAYS_PATH = "/payments/balance/add_days"
 _AVAILABLE_TARIFF_IDS = {1, 2, 3, 4}
 _AUTH_2FA_REQUIRED_MARKERS = {
@@ -163,6 +209,22 @@ def _to_int_or_none(value: Any) -> int | None:
     if isinstance(value, str) and value.isdigit():
         return int(value)
     return None
+
+
+def _normalize_timeout_param(value: Any, *, field_name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise WappiClientError(f"{field_name} must be an integer")
+    if isinstance(value, int):
+        normalized = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        normalized = int(value.strip())
+    else:
+        raise WappiClientError(f"{field_name} must be an integer")
+    if normalized < 0:
+        raise WappiClientError(f"{field_name} must be greater than or equal to 0")
+    return normalized
 
 
 def _is_dashboard_payment_redirect(value: str) -> bool:
@@ -260,6 +322,96 @@ class WappiClient:
             profile_id=profile_id,
             status=str(payload.get("status") or "done"),
             detail=str(payload.get("detail")) if payload.get("detail") is not None else None,
+            time=str(payload.get("time")) if payload.get("time") is not None else None,
+            timestamp=_to_int_or_none(payload.get("timestamp")),
+            raw=payload,
+        )
+
+    async def set_webhook_url(
+        self,
+        *,
+        platform: WappiPlatform,
+        profile_id: str,
+        webhook_url: str,
+        auth: str | None = None,
+    ) -> WappiWebhookUrlSetResult:
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+        normalized_webhook_url = webhook_url.strip()
+        if not normalized_webhook_url:
+            raise WappiClientError("webhook_url is required")
+        normalized_auth = (auth or "").strip() or None
+
+        request_params: dict[str, Any] = {
+            "profile_id": normalized_profile_id,
+            "url": normalized_webhook_url,
+        }
+        if normalized_auth is not None:
+            request_params["auth"] = normalized_auth
+
+        payload = await self._request_json_or_text(
+            method="POST",
+            path=_SET_WEBHOOK_URL_PATHS[platform],
+            params=request_params,
+            accept="application/json, text/plain",
+        )
+        status = str(payload.get("status")).strip() if payload.get("status") is not None else ""
+        detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else None
+        if not status:
+            raise WappiClientError("Set webhook url response is missing status")
+        if status.lower() not in {"done", "ok", "success"}:
+            raise WappiClientError(detail or f"Set webhook url request returned status '{status}'")
+
+        return WappiWebhookUrlSetResult(
+            status=status,
+            detail=detail,
+            task_id=str(payload.get("task_id")).strip() if payload.get("task_id") is not None else None,
+            time=str(payload.get("time")) if payload.get("time") is not None else None,
+            timestamp=_to_int_or_none(payload.get("timestamp")),
+            raw=payload,
+        )
+
+    async def set_webhook_types(
+        self,
+        *,
+        platform: WappiPlatform,
+        profile_id: str,
+        webhook_types: list[str],
+    ) -> WappiWebhookTypesSetResult:
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+
+        normalized_types: list[str] = []
+        seen_types: set[str] = set()
+        for raw_type in webhook_types:
+            normalized_type = str(raw_type or "").strip()
+            if not normalized_type or normalized_type in seen_types:
+                continue
+            normalized_types.append(normalized_type)
+            seen_types.add(normalized_type)
+        if not normalized_types:
+            raise WappiClientError("At least one webhook type is required")
+
+        payload = await self._request_json_or_text(
+            method="POST",
+            path=_SET_WEBHOOK_TYPES_PATHS[platform],
+            params={"profile_id": normalized_profile_id},
+            json=normalized_types,
+            accept="application/json, text/plain",
+        )
+        status = str(payload.get("status")).strip() if payload.get("status") is not None else ""
+        detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else None
+        if not status:
+            raise WappiClientError("Set webhook types response is missing status")
+        if status.lower() not in {"done", "ok", "success"}:
+            raise WappiClientError(detail or f"Set webhook types request returned status '{status}'")
+
+        return WappiWebhookTypesSetResult(
+            status=status,
+            detail=detail,
+            task_id=str(payload.get("task_id")).strip() if payload.get("task_id") is not None else None,
             time=str(payload.get("time")) if payload.get("time") is not None else None,
             timestamp=_to_int_or_none(payload.get("timestamp")),
             raw=payload,
@@ -538,13 +690,181 @@ class WappiClient:
             raise WappiClientError(detail or f"Send message returned status '{status}'")
         return WappiSyncMessageSendResult(status=status or "done", detail=detail, raw=payload)
 
+    async def send_telegram_async_message(
+        self,
+        *,
+        profile_id: str,
+        body: str,
+        recipient: str,
+        timeout_from: int | None = None,
+        timeout_to: int | None = None,
+    ) -> WappiAsyncMessageSendResult:
+        """Отправка текста через Wappi Telegram (tapi) async API."""
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+        text = (body or "").strip()
+        if not text:
+            raise WappiClientError("body is required")
+        to_recipient = (recipient or "").strip()
+        if not to_recipient:
+            raise WappiClientError("recipient is required")
+
+        timeout_params = self._build_timeout_query_params(
+            timeout_from=timeout_from,
+            timeout_to=timeout_to,
+        )
+        payload = await self._request_json_or_text(
+            method="POST",
+            path=_TAPI_ASYNC_MESSAGE_SEND_PATH,
+            params={"profile_id": normalized_profile_id, **timeout_params},
+            json={"body": text, "recipient": to_recipient},
+            accept="application/json, text/plain",
+        )
+        return self._build_async_send_result(payload, operation_name="Telegram async send")
+
+    async def send_whatsapp_async_message(
+        self,
+        *,
+        profile_id: str,
+        body: str,
+        recipient: str,
+        timeout_from: int | None = None,
+        timeout_to: int | None = None,
+    ) -> WappiAsyncMessageSendResult:
+        """Отправка текста через Wappi WhatsApp (/api/async/message/send)."""
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+        text = (body or "").strip()
+        if not text:
+            raise WappiClientError("body is required")
+        to_recipient = (recipient or "").strip()
+        if not to_recipient:
+            raise WappiClientError("recipient is required")
+
+        timeout_params = self._build_timeout_query_params(
+            timeout_from=timeout_from,
+            timeout_to=timeout_to,
+        )
+        payload = await self._request_json_or_text(
+            method="POST",
+            path=_API_ASYNC_MESSAGE_SEND_PATH,
+            params={"profile_id": normalized_profile_id, **timeout_params},
+            json={"body": text, "recipient": to_recipient},
+            accept="application/json, text/plain",
+        )
+        return self._build_async_send_result(payload, operation_name="WhatsApp async send")
+
+    async def send_max_async_message(
+        self,
+        *,
+        profile_id: str,
+        body: str,
+        recipient: str | None = None,
+        chat_id: str | None = None,
+        bot_id: str | int | None = None,
+        manager: dict[str, Any] | None = None,
+        timeout_from: int | None = None,
+        timeout_to: int | None = None,
+    ) -> WappiAsyncMessageSendResult:
+        """Отправка текста через Wappi MAX (/maxapi/async/message/send)."""
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+        text = (body or "").strip()
+        if not text:
+            raise WappiClientError("body is required")
+
+        to_recipient = (recipient or "").strip() or None
+        to_chat_id = (chat_id or "").strip() or None
+        if not to_recipient and not to_chat_id:
+            raise WappiClientError("recipient or chat_id is required")
+
+        params: dict[str, Any] = {"profile_id": normalized_profile_id}
+        timeout_params = self._build_timeout_query_params(
+            timeout_from=timeout_from,
+            timeout_to=timeout_to,
+        )
+        params.update(timeout_params)
+
+        normalized_bot_id = str(bot_id).strip() if bot_id is not None else ""
+        if normalized_bot_id:
+            params["bot_id"] = normalized_bot_id
+
+        send_json: dict[str, Any] = {"body": text}
+        if to_recipient:
+            send_json["recipient"] = to_recipient
+        if to_chat_id:
+            send_json["chat_id"] = to_chat_id
+        if manager:
+            if not isinstance(manager, dict):
+                raise WappiClientError("manager must be a JSON object")
+            send_json["manager"] = manager
+
+        payload = await self._request_json_or_text(
+            method="POST",
+            path=_MAXAPI_ASYNC_MESSAGE_SEND_PATH,
+            params=params,
+            json=send_json,
+            accept="application/json, text/plain",
+        )
+        return self._build_async_send_result(payload, operation_name="MAX async send")
+
+    def _build_timeout_query_params(
+        self,
+        *,
+        timeout_from: int | None,
+        timeout_to: int | None,
+    ) -> dict[str, int]:
+        normalized_from = _normalize_timeout_param(timeout_from, field_name="timeout_from")
+        normalized_to = _normalize_timeout_param(timeout_to, field_name="timeout_to")
+        if normalized_from is None and normalized_to is None:
+            return {}
+        if normalized_from is None:
+            normalized_from = normalized_to
+        if normalized_to is None:
+            normalized_to = normalized_from
+        if normalized_from is None or normalized_to is None:
+            return {}
+        if normalized_from > normalized_to:
+            raise WappiClientError("timeout_from must be less than or equal to timeout_to")
+        return {
+            "timeout_from": normalized_from,
+            "timeout_to": normalized_to,
+        }
+
+    def _build_async_send_result(
+        self,
+        payload: dict[str, Any],
+        *,
+        operation_name: str,
+    ) -> WappiAsyncMessageSendResult:
+        status = str(payload.get("status")).strip() if payload.get("status") is not None else ""
+        detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else None
+        if not status:
+            raise WappiClientError(f"{operation_name} response is missing status")
+        if status.lower() not in {"done", "ok", "success"}:
+            raise WappiClientError(detail or f"{operation_name} returned status '{status}'")
+        return WappiAsyncMessageSendResult(
+            status=status,
+            detail=detail,
+            task_id=str(payload.get("task_id")).strip() if payload.get("task_id") is not None else None,
+            time=str(payload.get("time")) if payload.get("time") is not None else None,
+            timestamp=_to_int_or_none(payload.get("timestamp")),
+            uuid=str(payload.get("uuid")).strip() if payload.get("uuid") is not None else None,
+            command_start=str(payload.get("command_start")) if payload.get("command_start") is not None else None,
+            command_end=str(payload.get("command_end")) if payload.get("command_end") is not None else None,
+            raw=payload,
+        )
+
     async def _request_json(
         self,
         *,
         method: str,
         path: str,
         params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
+        json: Any | None = None,
         accept: str | None = None,
     ) -> dict[str, Any]:
         response = await self._request_response(
@@ -568,7 +888,7 @@ class WappiClient:
         method: str,
         path: str,
         params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
+        json: Any | None = None,
         accept: str | None = None,
     ) -> dict[str, Any]:
         response = await self._request_response(
@@ -599,7 +919,7 @@ class WappiClient:
         method: str,
         path: str,
         params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
+        json: Any | None = None,
         accept: str | None = None,
     ) -> httpx.Response:
         url = urljoin(f"{self._base_url}/", path.lstrip("/"))

@@ -13,10 +13,10 @@ from uuid import UUID
 import re
 from fastmcp import FastMCP
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.sqns_service import SqnsResource
+from app.db.models.sqns_service import SqnsResource, SqnsService, SqnsServiceCategory
 from app.services.sqns.client import SQNSClient
 from app.utils.phone import normalize_phone_number
 from app.services.sqns.sync import SQNSSyncService
@@ -541,6 +541,7 @@ def create_sqns_mcp_server(
     async def sqns_find_booking_options(
         service_name: str | None = None,
         specialist_name: str | None = None,
+        category: str | None = None,
     ) -> dict[str, Any]:
         """
         🎯 ГЛАВНЫЙ ИНСТРУМЕНТ для поиска услуг и специалистов.
@@ -549,6 +550,7 @@ def create_sqns_mcp_server(
         
         Этот инструмент автоматически:
         - Ищет услуги/специалистов по названию (нечеткий поиск)
+        - Может сузить выборку по category (категория услуги в кэше, ILIKE); точные имена — sqns_list_categories
         - Проверяет совместимость услуги и специалиста
         - Предлагает альтернативы, если выбор несовместим
         - Возвращает готовые service_id и resource_id для записи
@@ -570,11 +572,16 @@ def create_sqns_mcp_server(
            → sqns_find_booking_options()
            → Вернет до 50 популярных услуг по приоритету
         
+        5. Клиент: "Что есть в терапии?" / раздел каталога
+           → sqns_find_booking_options(category="терапия")
+           → или сначала sqns_list_categories() для точного name, затем find_booking_options(category=...)
+        
         Args:
             service_name: Название услуги (например: "чистка", "отбеливание", "консультация").
                          Поиск нечеткий - "чистка" найдет "Профессиональная чистка зубов".
             specialist_name: Имя специалиста (например: "Иванов", "Петрова").
                             Поиск нечеткий - "Иванов" найдет "Иванов Иван Иванович".
+            category: Необязательно — подстрока категории услуги (ILIKE). Сочетается с service_name/specialist_name или отдельно.
         
         Returns:
             - ready: bool - Готово ли для вызова sqns_list_slots
@@ -605,6 +612,7 @@ def create_sqns_mcp_server(
             input_data = BookingOptionsInput(
                 service_name=service_name,
                 specialist_name=specialist_name,
+                category=category,
             )
             result = await sync_service.find_booking_options(input_data)
             return result.model_dump()
@@ -674,6 +682,48 @@ def create_sqns_mcp_server(
             return result if isinstance(result, list) else []
         except Exception as exc:
             logger.error("sqns_list_services_error", error=str(exc))
+            raise
+
+    @mcp.tool(description=get_sqns_tool_description("sqns_list_categories"))
+    async def sqns_list_categories() -> dict[str, Any]:
+        """
+        Категории услуг из локального кэша (после синхронизации SQNS).
+        """
+        try:
+            stmt = (
+                select(
+                    SqnsServiceCategory,
+                    func.count(SqnsService.id).label("services_count"),
+                )
+                .outerjoin(
+                    SqnsService,
+                    (SqnsService.agent_id == SqnsServiceCategory.agent_id)
+                    & (SqnsService.category == SqnsServiceCategory.name),
+                )
+                .where(SqnsServiceCategory.agent_id == agent_id)
+                .group_by(SqnsServiceCategory.id)
+                .order_by(
+                    SqnsServiceCategory.priority.desc(),
+                    SqnsServiceCategory.name,
+                )
+            )
+            result = await db.execute(stmt)
+            rows = result.all()
+            categories: list[dict[str, Any]] = []
+            for row in rows:
+                cat = row[0]
+                categories.append(
+                    {
+                        "id": str(cat.id),
+                        "name": cat.name,
+                        "is_enabled": cat.is_enabled,
+                        "priority": cat.priority,
+                        "services_count": int(row[1] or 0),
+                    }
+                )
+            return {"categories": categories}
+        except Exception as exc:
+            logger.error("sqns_list_categories_error", error=str(exc))
             raise
     
     @mcp.tool(description=get_sqns_tool_description("sqns_find_client"))

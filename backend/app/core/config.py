@@ -314,6 +314,16 @@ class Settings(BaseSettings):
     wappi_retry_attempts: int = Field(default=2, ge=0, validation_alias="WAPPI_RETRY_ATTEMPTS")
     wappi_retry_min_seconds: float = Field(default=0.5, ge=0, validation_alias="WAPPI_RETRY_MIN_SECONDS")
     wappi_retry_max_seconds: float = Field(default=4.0, ge=0, validation_alias="WAPPI_RETRY_MAX_SECONDS")
+    wappi_async_timeout_from_seconds: int | None = Field(
+        default=None,
+        ge=0,
+        validation_alias="WAPPI_ASYNC_TIMEOUT_FROM_SECONDS",
+    )
+    wappi_async_timeout_to_seconds: int | None = Field(
+        default=None,
+        ge=0,
+        validation_alias="WAPPI_ASYNC_TIMEOUT_TO_SECONDS",
+    )
     wappi_profile_tariff_id: int = Field(default=1, ge=1, le=4, validation_alias="WAPPI_PROFILE_TARIFF_ID")
     wappi_profile_promo_code: str | None = Field(default=None, validation_alias="WAPPI_PROFILE_PROMO_CODE")
     wappi_max_default_bot_id: str | None = Field(

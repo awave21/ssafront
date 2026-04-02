@@ -26,6 +26,13 @@ webhook_logger = structlog.get_logger("webhooks")
 router = APIRouter()
 
 
+_TELEGRAM_INTEGRATION_LABELS: dict[str, str] = {
+    "telegram": "Telegram бот",
+}
+_TELEGRAM_PRIVATE_CHAT_TYPES = {"private", "user", "dialog", "direct", "dm", "personal"}
+_TELEGRAM_BLOCKED_CHAT_TYPES = {"group", "supergroup", "channel", "chat", "megagroup"}
+
+
 def _parse_telegram_message(body: dict[str, Any]) -> tuple[int, str, dict[str, Any]] | None:
     """Извлечь chat_id, text и user_info из update. Возвращает (chat_id, text, user_info) или None."""
     msg = body.get("message") or body.get("edited_message")
@@ -37,25 +44,52 @@ def _parse_telegram_message(body: dict[str, Any]) -> tuple[int, str, dict[str, A
     chat_id = chat.get("id")
     if chat_id is None or not isinstance(chat_id, (int, float)):
         return None
+    chat_id_int = int(chat_id)
+
+    from_user = msg.get("from")
+    if not isinstance(from_user, dict):
+        return None
+    is_bot_raw = from_user.get("is_bot")
+    if is_bot_raw is True:
+        return None
+    if isinstance(is_bot_raw, str) and is_bot_raw.strip().lower() in {"true", "1", "yes"}:
+        return None
+
+    chat_type = str(chat.get("type") or "").strip().lower()
+    if chat_type in _TELEGRAM_BLOCKED_CHAT_TYPES:
+        return None
+
+    # Разрешаем только личные чаты: либо явно private, либо совпадение chat.id и from.id.
+    is_private_chat = chat_type in _TELEGRAM_PRIVATE_CHAT_TYPES
+    from_id_raw = from_user.get("id")
+    from_id_int: int | None = int(from_id_raw) if isinstance(from_id_raw, (int, float)) else None
+    if from_id_int is not None and from_id_int == chat_id_int:
+        is_private_chat = True
+    if not is_private_chat:
+        return None
+
     text = msg.get("text")
     if not text or not isinstance(text, str):
         return None
-    
-    # Извлекаем информацию о пользователе из поля "from"
-    from_user = msg.get("from") or {}
+
+    platform_user_id = str(from_id_int) if from_id_int is not None else str(chat_id_int)
+    channel_label = _TELEGRAM_INTEGRATION_LABELS["telegram"]
     user_info: dict[str, Any] = {
         "platform": "telegram",
-        "platform_id": str(chat_id),
+        "platform_id": platform_user_id,
+        "integration_channel_type": "telegram",
+        "integration_channel_label": channel_label,
         "message_sender_kind": "contact",
+        "sender_display_label": f"Клиент ({channel_label})",
     }
-    if from_user.get("username"):
-        user_info["username"] = from_user["username"]
-    if from_user.get("first_name"):
-        user_info["first_name"] = from_user["first_name"]
-    if from_user.get("last_name"):
-        user_info["last_name"] = from_user["last_name"]
-    
-    return int(chat_id), text.strip(), user_info
+    if isinstance(from_user.get("username"), str) and from_user["username"].strip():
+        user_info["username"] = from_user["username"].strip()
+    if isinstance(from_user.get("first_name"), str) and from_user["first_name"].strip():
+        user_info["first_name"] = from_user["first_name"].strip()
+    if isinstance(from_user.get("last_name"), str) and from_user["last_name"].strip():
+        user_info["last_name"] = from_user["last_name"].strip()
+
+    return chat_id_int, text.strip(), user_info
 
 
 def _parse_my_chat_member(body: dict[str, Any]) -> tuple[int, str] | None:
@@ -96,7 +130,15 @@ async def _process_telegram_message(
 ) -> str | None:
     """Запустить агента и вернуть ответ. Возвращает None при ошибке."""
     session_id = f"telegram:{chat_id}"
-    base = user_info or {"platform": "telegram", "platform_id": str(chat_id)}
+    channel_label = _TELEGRAM_INTEGRATION_LABELS["telegram"]
+    base = user_info or {
+        "platform": "telegram",
+        "platform_id": str(chat_id),
+        "integration_channel_type": "telegram",
+        "integration_channel_label": channel_label,
+        "message_sender_kind": "contact",
+        "sender_display_label": f"Клиент ({channel_label})",
+    }
     return await process_webhook_inbound_agent_message(
         db,
         agent,

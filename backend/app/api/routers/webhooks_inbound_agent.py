@@ -29,6 +29,7 @@ async def append_wappi_linked_account_message(
     text: str,
     base_user_info: dict[str, Any],
     log_source: str = "wappi_operator",
+    message_metadata: dict[str, Any] | None = None,
 ) -> None:
     """
     Сохранить в диалог текст, отправленный вручную с привязанного номера (Wappi: from_me и т.п.).
@@ -69,12 +70,16 @@ async def append_wappi_linked_account_message(
         "manager_source": "wappi_linked_messenger",
     }
 
+    manager_message = build_manager_message(text)
+    if message_metadata:
+        manager_message.update(message_metadata)
+
     await append_session_messages(
         db,
         agent.tenant_id,
         session_id,
         run.id,
-        [build_manager_message(text)],
+        [manager_message],
         agent.max_history_messages,
         agent_id=agent.id,
         user_info=operator_info,

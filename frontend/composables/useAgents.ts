@@ -70,6 +70,7 @@ export type Agent = {
   system_prompt: string
   model: string
   timezone?: string
+  manager_pause_minutes?: number
   llm_params?: {
     temperature?: number
     max_tokens?: number
@@ -90,6 +91,7 @@ export type CreateAgentData = {
   system_prompt: string
   model: string
   timezone?: string
+  manager_pause_minutes?: number
   llm_params?: {
     temperature?: number
     max_tokens?: number

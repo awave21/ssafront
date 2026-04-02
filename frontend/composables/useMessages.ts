@@ -56,6 +56,8 @@ const normalizeStatus = (rawStatus: unknown): MessageStatus => {
   if (typeof rawStatus !== 'string') return 'sent'
   const value = rawStatus.toLowerCase()
   if (value === 'sending') return 'sending'
+  if (value === 'delivered' || value === 'received') return 'delivered'
+  if (value === 'read' || value === 'seen' || value === 'displayed') return 'read'
   if (value === 'failed') return 'failed'
   if (value === 'streaming') return 'streaming'
   if (value === 'done') return 'done'
@@ -138,7 +140,11 @@ const normalizeMessage = (raw: any, fallbackDialogId: string): Message | null =>
   // --- Normal message normalization ---
   const dialogId = raw?.dialog_id ?? raw?.dialogId ?? raw?.session_id ?? raw?.sessionId ?? fallbackDialogId
   const id = raw?.id ?? raw?.message_id ?? raw?.messageId ?? raw?.uuid ?? raw?._id ?? `${dialogId}-${raw?.created_at ?? raw?.createdAt ?? Date.now()}`
-  const role = normalizeRole(rawRoleValue, {
+  const serverIdRaw = raw?.server_id ?? raw?.serverId
+  const serverId = typeof serverIdRaw === 'string' && serverIdRaw.trim()
+    ? serverIdRaw.trim()
+    : undefined
+  let role = normalizeRole(rawRoleValue, {
     isUser: raw?.isUser,
     is_user: raw?.is_user,
     isAgent: raw?.isAgent,
@@ -156,6 +162,15 @@ const normalizeMessage = (raw: any, fallbackDialogId: string): Message | null =>
 
   const senderKind = typeof raw?.sender_kind === 'string' ? raw.sender_kind : undefined
   let senderLabel = typeof raw?.sender_label === 'string' ? raw.sender_label.trim() : undefined
+  const userInfo = raw?.user_info && typeof raw.user_info === 'object' ? raw.user_info : undefined
+  if (role === 'user' && userInfo) {
+    const ui = userInfo as Record<string, unknown>
+    const wappiDirection = typeof ui.wappi_direction === 'string' ? ui.wappi_direction.toLowerCase() : ''
+    const senderKindFromUi = typeof ui.message_sender_kind === 'string' ? ui.message_sender_kind.toLowerCase() : ''
+    if (wappiDirection === 'out' || senderKindFromUi === 'wappi_operator' || senderKind === 'wappi_operator') {
+      role = 'manager'
+    }
+  }
   if (!senderLabel && raw?.user_info && typeof raw.user_info === 'object') {
     const ui = raw.user_info as Record<string, unknown>
     const fromUi = typeof ui.sender_display_label === 'string' ? ui.sender_display_label.trim() : ''
@@ -164,6 +179,7 @@ const normalizeMessage = (raw: any, fallbackDialogId: string): Message | null =>
 
   return {
     id: String(id),
+    server_id: serverId,
     dialog_id: String(dialogId),
     role,
     type,
@@ -173,7 +189,7 @@ const normalizeMessage = (raw: any, fallbackDialogId: string): Message | null =>
     created_at: String(createdAt),
     sender_kind: senderKind || undefined,
     sender_label: senderLabel || undefined,
-    user_info: raw?.user_info && typeof raw.user_info === 'object' ? raw.user_info : undefined,
+    user_info: userInfo,
     tool_name: raw?.tool_name ?? undefined,
     tool_call_id: raw?.tool_call_id ?? undefined,
     args: raw?.args ?? undefined,
@@ -426,7 +442,7 @@ export const useMessages = () => {
       const body: SendManagerMessageData = { content: content.trim() }
       const encodedDialogId = encodeURIComponent(dialogId)
 
-      await apiFetch<Message>(
+      const response = await apiFetch<Record<string, unknown>>(
         `agents/${agentId}/dialogs/${encodedDialogId}/manager-message`,
         {
           method: 'POST',
@@ -434,13 +450,19 @@ export const useMessages = () => {
           body
         }
       )
+      const realIdRaw = response?.message_id ?? response?.id
+      const realId = typeof realIdRaw === 'string' ? realIdRaw : (realIdRaw ? String(realIdRaw) : '')
 
       // Keep temp ID stable — only update status to avoid TransitionGroup key change (prevents UI flicker)
       const currentMessages = messagesMap[dialogId] || []
       const index = currentMessages.findIndex(m => m.id === tempId)
       if (index !== -1) {
         const updatedMessages = [...currentMessages]
-        updatedMessages[index] = { ...updatedMessages[index], status: 'sent' }
+        updatedMessages[index] = {
+          ...updatedMessages[index],
+          status: 'sent',
+          server_id: realId || updatedMessages[index].server_id
+        }
         setMessages(dialogId, updatedMessages)
       }
 
@@ -505,7 +527,7 @@ export const useMessages = () => {
    * Mark optimistic message as sent (when server confirms via WebSocket)
    * Keeps the temp ID stable to avoid TransitionGroup key change (prevents UI flicker)
    */
-  const markMessageSent = (dialogId: string, tempId: string, _realId?: string) => {
+  const markMessageSent = (dialogId: string, tempId: string, realId?: string) => {
     const messages = messagesMap[dialogId] || []
     const index = messages.findIndex(m => m.id === tempId)
     
@@ -513,7 +535,8 @@ export const useMessages = () => {
       const updatedMessages = [...messages]
       updatedMessages[index] = {
         ...updatedMessages[index],
-        status: 'sent'
+        status: 'sent',
+        server_id: realId || updatedMessages[index].server_id
       }
       setMessages(dialogId, updatedMessages)
     }
@@ -772,7 +795,7 @@ export const useMessages = () => {
   const updateMessage = (dialogId: string, messageId: string, updates: Partial<Message>) => {
     const resolvedDialogId = resolveDialogId(dialogId) ?? dialogId
     const messages = messagesMap[resolvedDialogId] || []
-    const index = messages.findIndex(m => m.id === messageId)
+    const index = messages.findIndex(m => m.id === messageId || m.server_id === messageId)
     if (index !== -1) {
       const updatedMessages = [...messages]
       updatedMessages[index] = { ...updatedMessages[index], ...updates }
@@ -812,7 +835,7 @@ export const useMessages = () => {
     if (!normalizedMessage) return
 
     // Avoid duplicates by ID
-    if (currentMessages.some(m => m.id === normalizedMessage.id)) return
+    if (currentMessages.some(m => m.id === normalizedMessage.id || m.server_id === normalizedMessage.id)) return
 
     // Avoid duplicates by content+role for recent messages
     // (handles temp ID vs real ID mismatch from optimistic updates)

@@ -2,6 +2,11 @@ import { ref } from 'vue'
 import type { Dialog, DialogAgentStatus, CreateDialogData, UpdateDialogData, DialogsListResponse } from '../types/dialogs'
 import { useApiFetch } from './useApiFetch'
 import { getReadableErrorMessage } from '~/utils/api-errors'
+import {
+  normalizeDialogUserInfo,
+  resolveDialogPlatform,
+  resolveDialogUserTitle
+} from '~/utils/dialogIdentity'
 
 const AGENT_STATUSES = new Set<string>(['active', 'paused'])
 
@@ -55,21 +60,25 @@ const currentAgentId = ref<string | null>(null)
 export const useDialogs = () => {
   const apiFetch = useApiFetch()
 
+  const extractUserIdFromDialogId = (dialogId: string | undefined): string | null => {
+    if (!dialogId || !dialogId.includes(':')) return null
+    const [, ...parts] = dialogId.split(':')
+    const value = parts.join(':').trim()
+    return value || null
+  }
+
   const resolvePlatformAndUserId = (dialog: Dialog): { platform: string; platformUserId: string } | null => {
-    const platform = dialog.platform || dialog.user_info?.platform
-    const rawPlatformUserId = dialog.user_info?.platform_id || dialog.user_info?.session_id || null
+    const platform = resolveDialogPlatform(dialog)
+    const rawPlatformUserId = dialog.user_info?.platform_id || extractUserIdFromDialogId(dialog.id) || null
 
     if (platform && rawPlatformUserId) {
       return { platform, platformUserId: String(rawPlatformUserId) }
     }
 
-    // Fallback for legacy telegram dialog IDs like telegram:306597938
-    if (dialog.id?.includes(':')) {
-      const [derivedPlatform, ...idParts] = dialog.id.split(':')
-      const derivedId = idParts.join(':')
-      if (derivedPlatform && derivedId) {
-        return { platform: derivedPlatform, platformUserId: derivedId }
-      }
+    // Fallback для исторических кейсов, когда platform есть, а platform_id нет.
+    const fallbackUserId = extractUserIdFromDialogId(dialog.user_info?.session_id)
+    if (platform && fallbackUserId) {
+      return { platform, platformUserId: fallbackUserId }
     }
 
     return null
@@ -391,28 +400,22 @@ export const useDialogs = () => {
     const index = dialogs.value.findIndex(d => d.id === id)
     const existing = index !== -1 ? dialogs.value[index] : null
     
-    // Get user_info (prioritize new data over existing)
-    const userInfo = dialogData.user_info || existing?.user_info
-    
-    // Generate title from user_info (prioritize over backend title which often contains message preview)
-    let userTitle: string | null = null
-    if (userInfo) {
-      if (userInfo.first_name || userInfo.last_name) {
-        userTitle = [userInfo.first_name, userInfo.last_name].filter(Boolean).join(' ')
-      } else if (userInfo.username) {
-        userTitle = `@${userInfo.username}`
-      }
-    }
-    
-    // Determine platform
-    const platform = dialogData.platform || existing?.platform || (id.startsWith('telegram:') ? 'telegram' : undefined)
-    
-    // For Telegram dialogs without user_info, generate title from ID
-    const fallbackTitle = platform === 'telegram' || id.startsWith('telegram:')
-      ? `Telegram #${id.replace('telegram:', '')}`
-      : 'Диалог'
-    
-    const finalTitle = userTitle || existing?.title || fallbackTitle
+    const mergedRawUserInfo = dialogData.user_info || existing?.user_info
+    const platform = resolveDialogPlatform({
+      id,
+      platform: dialogData.platform || existing?.platform,
+      user_info: mergedRawUserInfo
+    })
+    const userInfo = normalizeDialogUserInfo(
+      {
+        id,
+        platform,
+        user_info: mergedRawUserInfo
+      },
+      mergedRawUserInfo
+    )
+    const userTitle = resolveDialogUserTitle({ id, platform, user_info: userInfo })
+    const finalTitle = userTitle || existing?.title || 'Диалог'
     
     // Map incoming data to Dialog type, then normalize status fields
     const updatedDialog = normalizeDialog({

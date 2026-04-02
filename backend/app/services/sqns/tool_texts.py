@@ -8,7 +8,9 @@ from __future__ import annotations
 SQNS_TOOL_DESCRIPTIONS: dict[str, str] = {
     "sqns_find_booking_options": (
         "Вызывай первым для подбора услуги и специалиста по словам клиента. "
-        "Передавай service_name и/или specialist_name из диалога. "
+        "Передавай service_name и/или specialist_name из диалога; при необходимости добавь category — "
+        "фильтр по категории услуги (ILIKE по полю category в кэше), можно только category без имён для списка услуг в разделе. "
+        "Точные названия категорий бери из sqns_list_categories. "
         "Нечёткий ILIKE может дать несколько услуг без специалиста: тогда в alternatives.services список услуг, уточни или выбери id. "
         "Если переданы оба параметра и совместимых пар несколько, смотри alternatives.compatible_pairs (для каждой пары в доп. поле оба SQNS id). "
         "Если ready=True, используй service_id и resource_id из корня ответа для sqns_list_slots. "
@@ -21,6 +23,10 @@ SQNS_TOOL_DESCRIPTIONS: dict[str, str] = {
     "sqns_list_services": (
         "Возвращает полный список услуг с service_id. "
         "Используй для показа полного каталога или ручного выбора услуги."
+    ),
+    "sqns_list_categories": (
+        "Возвращает категории услуг из синхронизированной базы (имя, is_enabled, priority, services_count). "
+        "Используй, чтобы перечислить направления/разделы каталога или понять, какие категории активны."
     ),
     "sqns_find_client": (
         "Ищи клиента по телефону из диалога. "

@@ -303,6 +303,13 @@ def get_sqns_tools_definitions() -> list[dict[str, Any]]:
                         "type": "string",
                         "description": "Имя/ФИО специалиста для нечеткого поиска (например: 'Иванов').",
                     },
+                    "category": {
+                        "type": "string",
+                        "description": (
+                            "Необязательно: фильтр по категории услуги (нечёткий ILIKE). "
+                            "Точные названия категорий — инструмент sqns_list_categories."
+                        ),
+                    },
                 },
                 "required": [],
             },
@@ -325,6 +332,16 @@ def get_sqns_tools_definitions() -> list[dict[str, Any]]:
                 "type": "object",
                 "properties": {},
                 "required": []
+            },
+        },
+        {
+            "name": "sqns_list_categories",
+            "method": "list_service_categories",
+            "description": get_sqns_tool_description("sqns_list_categories"),
+            "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
             },
         },
         {

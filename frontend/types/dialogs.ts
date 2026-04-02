@@ -8,11 +8,15 @@ export type DialogAgentStatus = 'active' | 'paused'
 export type DialogUserInfo = {
   platform?: string                 // 'telegram', 'telegram_phone', 'whatsapp', 'web', etc.
   platform_id?: string
+  phone?: string
+  contact_phone?: string
+  whatsapp_id?: string
+  whataspp_id?: string
   session_id?: string
   username?: string
   first_name?: string
   last_name?: string
-  /** Подпись канала интеграции (например «Telegram (личный номер)») */
+  /** Подпись канала интеграции (например «Telegram номер» или «Telegram бот») */
   integration_channel_label?: string
   integration_channel_type?: string
   message_sender_kind?: string
@@ -43,11 +47,12 @@ export type Dialog = {
 // Message types
 export type MessageRole = 'user' | 'agent' | 'manager' | 'system'
 export type MessageType = 'text' | 'image' | 'voice' | 'tool_call' | 'tool_result'
-export type MessageStatus = 'sending' | 'sent' | 'failed' | 'streaming' | 'done'
+export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'streaming' | 'done'
 
 // Message entity
 export type Message = {
   id: string
+  server_id?: string               // реальный ID сообщения на сервере (для optimistic UI)
   dialog_id: string
   role: MessageRole
   type: MessageType

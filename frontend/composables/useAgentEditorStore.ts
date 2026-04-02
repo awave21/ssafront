@@ -17,6 +17,7 @@ type AgentForm = {
   knowledge_tool_description: string
   model: string
   timezone: string
+  manager_pause_minutes: number
   status: AgentStatus
   is_disabled: boolean
   llm_params: {
@@ -438,6 +439,7 @@ const createEmptyForm = (): AgentForm => ({
   knowledge_tool_description: '',
   model: '',
   timezone: 'Europe/Moscow',
+  manager_pause_minutes: 10,
   status: 'draft',
   is_disabled: false,
   llm_params: {
@@ -452,6 +454,9 @@ const buildForm = (agent: Agent): AgentForm => ({
   knowledge_tool_description: String(agent.knowledge_tool_description ?? ''),
   model: agent.model,
   timezone: agent.timezone ?? 'Europe/Moscow',
+  manager_pause_minutes: Number.isFinite(Number(agent.manager_pause_minutes))
+    ? Math.min(1440, Math.max(1, Number(agent.manager_pause_minutes)))
+    : 10,
   status: agent.status,
   is_disabled: Boolean(agent.is_disabled),
   llm_params: {
@@ -1321,6 +1326,30 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
         if (newTimezone === (agent.value.timezone ?? 'Europe/Moscow')) return
         
         await autoSaveField({ timezone: newTimezone })
+      }
+    )
+
+    // Auto-save manager pause immediately
+    watch(
+      () => form.value.manager_pause_minutes,
+      async (newPause, oldPause) => {
+        if (!agent.value || !isLoaded.value) return
+        if (newPause === oldPause) return
+
+        const normalizedPause = Number.isFinite(Number(newPause))
+          ? Math.min(1440, Math.max(1, Number(newPause)))
+          : 10
+        if (normalizedPause !== newPause) {
+          form.value.manager_pause_minutes = normalizedPause
+          return
+        }
+
+        const currentPause = Number.isFinite(Number(agent.value.manager_pause_minutes))
+          ? Number(agent.value.manager_pause_minutes)
+          : 10
+        if (normalizedPause === currentPause) return
+
+        await autoSaveField({ manager_pause_minutes: normalizedPause })
       }
     )
 

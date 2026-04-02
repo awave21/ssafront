@@ -143,12 +143,33 @@ class WSMessageData(BaseModel):
     role: Literal["user", "agent", "system", "manager"] = Field(..., description="Роль")
     content: str = Field("", description="Текст сообщения")
     created_at: str = Field(..., description="Время создания ISO")
+    status: Literal["sending", "sent", "delivered", "read", "failed", "streaming", "done"] = Field(
+        "done",
+        description="Статус сообщения/доставки",
+    )
     user_info: dict[str, Any] | None = Field(None, description="Информация о пользователе")
     part_kind: str | None = Field(None, description="Тип части pydantic-ai (например tool-call)")
     tool_name: str | None = Field(None, description="Название вызванного инструмента")
     tool_call_id: str | None = Field(None, description="ID вызова инструмента для корреляции")
     args: dict[str, Any] | None = Field(None, description="Аргументы вызова инструмента")
     result: Any | None = Field(None, description="Результат выполнения инструмента")
+
+
+class WSMessageUpdated(BaseModel):
+    """Обновление статуса существующего сообщения."""
+    type: Literal["message_updated"] = "message_updated"
+    data: "WSMessageUpdatedData"
+
+
+class WSMessageUpdatedData(BaseModel):
+    id: str = Field(..., description="ID сообщения")
+    session_id: str = Field(..., description="ID сессии")
+    agent_id: str = Field(..., description="ID агента")
+    status: Literal["sending", "sent", "delivered", "read", "failed", "streaming", "done"] = Field(
+        ...,
+        description="Новый статус сообщения",
+    )
+    provider_message_id: str | None = Field(None, description="ID сообщения у провайдера")
 
 
 class WSToolCall(BaseModel):
@@ -218,6 +239,7 @@ WSRunStart.model_rebuild()
 WSRunResult.model_rebuild()
 WSRunError.model_rebuild()
 WSMessageCreated.model_rebuild()
+WSMessageUpdated.model_rebuild()
 WSToolCall.model_rebuild()
 WSToolResult.model_rebuild()
 WSDialogUpdated.model_rebuild()

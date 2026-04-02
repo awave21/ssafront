@@ -100,6 +100,25 @@
         </div>
       </div>
 
+      <div>
+        <label class="block text-sm font-bold text-slate-900 mb-3">Автопауза после ответа оператора</label>
+        <div class="flex items-center gap-3">
+          <input
+            v-model.number="form.manager_pause_minutes"
+            :disabled="!canEditAgents"
+            type="number"
+            min="1"
+            max="1440"
+            step="1"
+            class="w-40 px-4 py-3 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+          />
+          <span class="text-sm text-slate-500">минут</span>
+        </div>
+        <p class="mt-1.5 text-xs text-slate-400">
+          После сообщения оператора бот временно не отвечает в этом диалоге и автоматически возобновляет ответы по таймеру.
+        </p>
+      </div>
+
       <div class="rounded-md border border-slate-200 bg-slate-50/60 p-4">
         <div class="flex items-start justify-between gap-4">
           <div class="space-y-1">

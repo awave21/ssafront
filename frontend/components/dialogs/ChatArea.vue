@@ -38,7 +38,7 @@
     <MessageComposer
       :is-sending="isSending"
       :is-streaming="isStreaming"
-      :agent-enabled="isAgentEnabled"
+      :agent-enabled="!isManagerSendMode"
       @send="handleSend"
       @attach-image="handleAttachImage"
     />
@@ -51,6 +51,7 @@ import ChatHeader from './ChatHeader.vue'
 import MessagesFeed from './MessagesFeed.vue'
 import MessageComposer from './MessageComposer.vue'
 import { useMessages } from '../../composables/useMessages'
+import { useDialogOutboundSend } from '../../composables/useDialogOutboundSend'
 import { useDialogs } from '../../composables/useDialogs'
 import type { Agent } from '../../composables/useAgents'
 
@@ -69,17 +70,14 @@ defineEmits<{
 const {
   messagesMap,
   fetchMessages,
-  sendMessage,
-  sendManagerMessage,
   retryMessage,
-  createOptimisticMessage,
-  markMessageFailed,
   isLoading,
   isSending,
   isStreaming,
   error: messagesError,
   dialogHasMore
 } = useMessages()
+const { sendDialogOutbound, isPhoneOperatorDialog } = useDialogOutboundSend()
 
 const { markAsRead, getDialogById, syncDialogAgentStatus } = useDialogs()
 
@@ -88,6 +86,7 @@ const messages = computed(() => messagesMap[props.dialogId] ?? [])
 const currentDialog = computed(() => getDialogById(props.dialogId))
 const hasMore = computed(() => dialogHasMore(props.dialogId))
 const isAgentEnabled = computed(() => (currentDialog.value?.agent_status ?? 'active') === 'active')
+const isManagerSendMode = computed(() => isPhoneOperatorDialog(currentDialog.value) || !isAgentEnabled.value)
 const syncedStateDialogId = ref<string | null>(null)
 const isSyncingState = ref(false)
 
@@ -129,21 +128,15 @@ const loadMoreMessages = async () => {
 
 // Handlers
 const handleSend = async (content: string) => {
-  // When agent is paused — send as manager message
-  if (!isAgentEnabled.value) {
-    await sendManagerMessage(props.agent.id, props.dialogId, content)
-    return
-  }
-
-  if (props.isWsConnected && props.wsSendMessage) {
-    const tempId = createOptimisticMessage(props.dialogId, content, 'text')
-    const sent = props.wsSendMessage(props.dialogId, content)
-    if (!sent) {
-      markMessageFailed(props.dialogId, tempId, 'WebSocket отключен')
-    }
-  } else {
-    await sendMessage(props.agent.id, props.dialogId, content, 'text', isAgentEnabled.value)
-  }
+  await sendDialogOutbound({
+    agentId: props.agent.id,
+    dialogId: props.dialogId,
+    content,
+    dialog: currentDialog.value,
+    isAgentEnabled: isAgentEnabled.value,
+    isWsConnected: props.isWsConnected,
+    wsSendMessage: props.wsSendMessage
+  })
 }
 
 const handleAttachImage = async (_file: File) => {

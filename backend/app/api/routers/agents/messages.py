@@ -18,7 +18,6 @@ from app.api.deps import require_scope
 from app.api.routers.agents.deps import get_agent_or_404
 from app.api.routers.runs import create_run, stream_run
 from app.services.run_service import append_session_messages
-from app.db.models.channel import AgentChannel, Channel
 from app.db.models.run import Run
 from app.db.models.session_message import SessionMessage
 from app.db.session import get_db, async_session_factory
@@ -26,13 +25,35 @@ from app.schemas.auth import AuthContext
 from app.schemas.dialog import MessageRead, MessageCreate, ManagerMessageCreate, StreamRequest
 from app.schemas.run import RunCreate
 from app.services.dialog_state import update_last_manager_message
-from app.services.telegram import send_telegram_message, TelegramWebhookError
+from app.services.outbound import ManagerDispatchError, dispatch_manager_message
 from app.utils.broadcast import broadcaster
 from app.utils.message_mapping import build_manager_message
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+_MESSAGE_STATUS_ALIASES: dict[str, str] = {
+    "sending": "sending",
+    "failed": "failed",
+    "streaming": "streaming",
+    "done": "done",
+    "sent": "sent",
+    "delivered": "delivered",
+    "received": "delivered",
+    "read": "read",
+    "seen": "read",
+    "displayed": "read",
+}
+_MANAGER_SUPPORTED_DIALOG_PREFIXES = {"telegram", "telegram_phone", "whatsapp", "max"}
+
+
+def _normalize_message_status(raw_status: Any) -> str:
+    value = str(raw_status or "").strip().lower()
+    if not value:
+        return "done"
+    return _MESSAGE_STATUS_ALIASES.get(value, "done")
+
 
 @router.get("/events")
 async def agent_events(
@@ -99,6 +120,11 @@ async def agent_events(
                                 "event": "message_created",
                                 "data": m.model_dump_json()
                             }
+                    elif event_type == "message_updated":
+                        yield {
+                            "event": "message_updated",
+                            "data": json.dumps(event_data)
+                        }
                     
                     elif event_type == "dialog_updated":
                         yield {
@@ -155,7 +181,7 @@ def _map_session_message(msg_data: dict[str, Any], msg_id: UUID, created_at: dat
             role=mapped_role,
             type="text",
             content=content,
-            status="done",
+            status=_normalize_message_status(msg_data.get("status")),
             created_at=created_at,
             user_info=user_info,
             sender_kind=sender_kind,
@@ -163,6 +189,51 @@ def _map_session_message(msg_data: dict[str, Any], msg_id: UUID, created_at: dat
         )
         for content in contents
     ]
+
+
+async def _update_manager_message_delivery_state(
+    db: AsyncSession,
+    *,
+    agent_id: UUID,
+    dialog_id: str,
+    message_entry: SessionMessage | None,
+    status_value: str,
+    provider_message_id: str | None = None,
+    provider_task_id: str | None = None,
+    provider_uuid: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    if message_entry is None:
+        return
+
+    payload = message_entry.message if isinstance(message_entry.message, dict) else {}
+    payload = {**payload}
+    payload["status"] = status_value
+    payload["delivery_status_updated_at"] = datetime.utcnow().isoformat()
+    if provider_message_id:
+        payload["provider_message_id"] = provider_message_id
+    if provider_task_id:
+        payload["provider_task_id"] = provider_task_id
+    if provider_uuid:
+        payload["provider_uuid"] = provider_uuid
+    if error_message:
+        payload["outbound_error"] = error_message
+    message_entry.message = payload
+    await db.commit()
+
+    await broadcaster.publish(
+        agent_id,
+        {
+            "type": "message_updated",
+            "data": {
+                "id": str(message_entry.id),
+                "session_id": dialog_id,
+                "agent_id": str(agent_id),
+                "status": status_value,
+                "provider_message_id": provider_message_id,
+            },
+        },
+    )
 
 @router.get("/debug/session/{session_id}")
 async def debug_session_messages(
@@ -300,16 +371,23 @@ async def list_messages(
         if dialog_id.startswith("telegram:"):
             user_info["platform"] = "telegram"
             user_info["platform_id"] = dialog_id.split(":", 1)[1]
+            user_info["integration_channel_label"] = "Telegram бот"
+            user_info["integration_channel_type"] = "telegram"
         elif dialog_id.startswith("telegram_phone:"):
             user_info["platform"] = "telegram_phone"
             user_info["platform_id"] = dialog_id.split(":", 1)[1]
-            user_info["integration_channel_label"] = "Telegram (личный номер)"
+            user_info["integration_channel_label"] = "Telegram номер"
             user_info["integration_channel_type"] = "telegram_phone"
         elif dialog_id.startswith("max:"):
             user_info["platform"] = "max"
             user_info["platform_id"] = dialog_id.split(":", 1)[1]
             user_info["integration_channel_label"] = "MAX"
             user_info["integration_channel_type"] = "max"
+        elif dialog_id.startswith("whatsapp:"):
+            user_info["platform"] = "whatsapp"
+            user_info["platform_id"] = dialog_id.split(":", 1)[1]
+            user_info["integration_channel_label"] = "WhatsApp"
+            user_info["integration_channel_type"] = "whatsapp"
 
         for run in runs:
             if run.input_message:
@@ -417,41 +495,22 @@ async def send_manager_message(
     Отправить сообщение от менеджера в диалог.
 
     1. Сохраняет сообщение в session_messages с ролью "manager".
-    2. Отправляет сообщение пользователю в Telegram.
-    3. Обновляет last_manager_message_at для автопаузы агента.
+    2. Отправляет сообщение пользователю через канал диалога.
+    3. Обновляет статус доставки и last_manager_message_at для автопаузы агента.
     """
     agent = await get_agent_or_404(agent_id, db, user)
-
-    # --- Найти Telegram-канал агента для получения bot_token ---
-    channel_stmt = (
-        select(Channel)
-        .join(AgentChannel, AgentChannel.channel_id == Channel.id)
-        .where(
-            AgentChannel.agent_id == agent_id,
-            Channel.type == "telegram",
-            Channel.is_deleted.is_(False),
-        )
-        .limit(1)
-    )
-    channel = (await db.execute(channel_stmt)).scalar_one_or_none()
-    if not channel or not channel.telegram_bot_token:
+    normalized_content = payload.content.strip()
+    if not normalized_content:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Telegram channel not configured for this agent",
+            detail="Message content must not be empty",
         )
 
-    # --- Извлечь chat_id из dialog_id (формат: "telegram:306597938") ---
-    if not dialog_id.startswith("telegram:"):
+    dialog_prefix = dialog_id.split(":", 1)[0].strip().lower() if ":" in dialog_id else ""
+    if dialog_prefix not in _MANAGER_SUPPORTED_DIALOG_PREFIXES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Manager messages are only supported for Telegram dialogs",
-        )
-    try:
-        chat_id = int(dialog_id.split(":")[1])
-    except (IndexError, ValueError):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid dialog_id format: {dialog_id}",
+            detail=f"Manager messages are not supported for dialog '{dialog_id}'",
         )
 
     # --- Создать Run для менеджерского сообщения ---
@@ -463,18 +522,26 @@ async def send_manager_message(
         agent_id=agent_id,
         session_id=dialog_id,
         status="succeeded",
-        input_message=payload.content,
+        input_message=normalized_content,
         trace_id=trace_id,
     )
     db.add(run)
     await db.flush()
 
-    # --- Сохранить сообщение менеджера и броадкастить ---
-    manager_msg = build_manager_message(payload.content)
+    # --- Сохранить сообщение менеджера (пока в статусе sending) ---
+    manager_msg = build_manager_message(normalized_content)
+    manager_msg.update(
+        {
+            "status": "sending",
+            "outbound_channel_type": dialog_prefix,
+            "manager_source": "ui",
+        }
+    )
     manager_user_info = {
         "platform": "manager",
         "session_id": dialog_id,
         "manager_user_id": str(user.user_id),
+        "manager_source": "ui",
     }
     await append_session_messages(
         db,
@@ -487,44 +554,103 @@ async def send_manager_message(
         user_info=manager_user_info,
     )
 
+    manager_entry_stmt = (
+        select(SessionMessage)
+        .where(
+            SessionMessage.run_id == run.id,
+            SessionMessage.session_id == dialog_id,
+            SessionMessage.tenant_id == user.tenant_id,
+        )
+        .order_by(SessionMessage.message_index.desc())
+        .limit(1)
+    )
+    manager_entry = (await db.execute(manager_entry_stmt)).scalar_one_or_none()
+
     run.updated_at = datetime.utcnow()
     await db.commit()
 
-    # --- Обновить last_manager_message_at для автопаузы ---
-    await update_last_manager_message(db, agent_id=agent_id, tenant_id=user.tenant_id, session_id=dialog_id)
-
-    # --- Отправить в Telegram ---
-    telegram_ok = True
-    telegram_error = None
     try:
-        await send_telegram_message(
-            bot_token=channel.telegram_bot_token,
-            chat_id=chat_id,
-            text=payload.content,
+        dispatch_result = await dispatch_manager_message(
+            db,
+            agent_id=agent_id,
+            dialog_id=dialog_id,
+            content=normalized_content,
+            manager_user_id=user.user_id,
         )
-    except TelegramWebhookError as exc:
-        telegram_ok = False
-        telegram_error = str(exc)
+    except ManagerDispatchError as exc:
+        await _update_manager_message_delivery_state(
+            db,
+            agent_id=agent_id,
+            dialog_id=dialog_id,
+            message_entry=manager_entry,
+            status_value="failed",
+            error_message=str(exc),
+        )
         logger.warning(
-            "manager_message_telegram_send_failed",
-            chat_id=chat_id,
+            "manager_message_dispatch_failed",
             agent_id=str(agent_id),
+            dialog_id=dialog_id,
+            channel_type=dialog_prefix,
             error=str(exc),
         )
+        raise HTTPException(status_code=exc.http_status_code, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        await _update_manager_message_delivery_state(
+            db,
+            agent_id=agent_id,
+            dialog_id=dialog_id,
+            message_entry=manager_entry,
+            status_value="failed",
+            error_message=str(exc),
+        )
+        logger.exception(
+            "manager_message_dispatch_unexpected_error",
+            agent_id=str(agent_id),
+            dialog_id=dialog_id,
+            channel_type=dialog_prefix,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Не удалось отправить сообщение во внешний канал",
+        ) from exc
+
+    await _update_manager_message_delivery_state(
+        db,
+        agent_id=agent_id,
+        dialog_id=dialog_id,
+        message_entry=manager_entry,
+        status_value="sent",
+        provider_message_id=dispatch_result.provider_message_id,
+        provider_task_id=dispatch_result.provider_task_id,
+        provider_uuid=dispatch_result.provider_uuid,
+    )
+
+    # Пауза обновляется только при успешной отправке операторского сообщения.
+    await update_last_manager_message(
+        db,
+        agent_id=agent_id,
+        tenant_id=user.tenant_id,
+        session_id=dialog_id,
+    )
 
     logger.info(
         "manager_message_sent",
         agent_id=str(agent_id),
         dialog_id=dialog_id,
-        chat_id=chat_id,
-        telegram_ok=telegram_ok,
+        channel_type=dispatch_result.channel_type,
+        provider_message_id=dispatch_result.provider_message_id,
+        provider_task_id=dispatch_result.provider_task_id,
     )
 
     return {
         "ok": True,
-        "message_id": str(run.id),
+        "message_id": str(manager_entry.id) if manager_entry is not None else str(run.id),
         "dialog_id": dialog_id,
-        "telegram_sent": telegram_ok,
-        "telegram_error": telegram_error,
+        "delivery_status": "sent",
+        "channel_type": dispatch_result.channel_type,
+        "provider_message_id": dispatch_result.provider_message_id,
+        "provider_task_id": dispatch_result.provider_task_id,
+        "provider_uuid": dispatch_result.provider_uuid,
     }
 

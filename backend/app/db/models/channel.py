@@ -27,6 +27,7 @@ class Channel(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     )
     wappi_profile_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     wappi_max_bot_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    wappi_webhook_secret: Mapped[str | None] = mapped_column(String(120), nullable=True)
     phone_is_authorized: Mapped[bool] = mapped_column(
         Boolean,
         default=False,

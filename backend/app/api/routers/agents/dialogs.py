@@ -161,13 +161,15 @@ async def list_dialogs(
                 "platform": "telegram",
                 "platform_id": session_id.split(":", 1)[1],
                 "session_id": session_id,
+                "integration_channel_label": "Telegram бот",
+                "integration_channel_type": "telegram",
             }
         if not user_info and session_id.startswith("telegram_phone:"):
             user_info = {
                 "platform": "telegram_phone",
                 "platform_id": session_id.split(":", 1)[1],
                 "session_id": session_id,
-                "integration_channel_label": "Telegram (личный номер)",
+                "integration_channel_label": "Telegram номер",
                 "integration_channel_type": "telegram_phone",
             }
         if not user_info and session_id.startswith("max:"):

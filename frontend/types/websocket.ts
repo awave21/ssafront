@@ -53,7 +53,19 @@ export type WsMessageCreatedEvent = {
     role: string
     content: string
     created_at: string
+    status?: string
     user_info?: Record<string, unknown>
+  }
+}
+
+export type WsMessageUpdatedEvent = {
+  type: 'message_updated'
+  data: {
+    id: string
+    session_id: string
+    agent_id: string
+    status: string
+    provider_message_id?: string
   }
 }
 
@@ -149,6 +161,7 @@ export type WsDialogLeftEvent = {
 
 export type WsIncomingMessage =
   | WsMessageCreatedEvent
+  | WsMessageUpdatedEvent
   | WsDialogUpdatedEvent
   | WsRunStartEvent
   | WsRunResultEvent
@@ -169,6 +182,7 @@ export type WsEventHandler<T extends WsIncomingMessage['type']> = (
 
 export type WsEventHandlers = {
   onMessageCreated?: WsEventHandler<'message_created'>
+  onMessageUpdated?: WsEventHandler<'message_updated'>
   onDialogUpdated?: WsEventHandler<'dialog_updated'>
   onRunStart?: WsEventHandler<'run_start'>
   onRunResult?: WsEventHandler<'run_result'>

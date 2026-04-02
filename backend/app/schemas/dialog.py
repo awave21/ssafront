@@ -38,7 +38,10 @@ class MessageRead(BaseModel):
     role: Literal["user", "agent", "system", "manager"] = Field(..., description="Роль отправителя")
     type: Literal["text", "image", "voice", "tool_call", "tool_result"] = Field("text", description="Тип контента")
     content: str = Field("", description="Текст сообщения")
-    status: Literal["sent", "streaming", "done"] = Field("done", description="Статус доставки/генерации")
+    status: Literal["sending", "sent", "delivered", "read", "failed", "streaming", "done"] = Field(
+        "done",
+        description="Статус сообщения/доставки",
+    )
     created_at: datetime = Field(..., description="Время создания")
     # Дополнительная информация о пользователе (например, из Telegram)
     user_info: dict[str, Any] | None = Field(None, description="Информация об отправителе")

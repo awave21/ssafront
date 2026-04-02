@@ -70,12 +70,13 @@
           />
         </div>
         
-        <!-- Username -->
+        <!-- Идентификатор контакта -->
         <p
-          v-if="username"
-          class="text-xs text-blue-500 truncate"
+          v-if="secondaryIdentity"
+          class="text-xs truncate"
+          :class="[isTelegram ? 'text-blue-500' : 'text-slate-500']"
         >
-          @{{ username }}
+          {{ secondaryIdentity }}
         </p>
         
         <p class="text-xs text-slate-500 truncate mt-0.5">
@@ -227,6 +228,12 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { MessageSquare, MoreVertical, Pencil, Trash2, PauseCircle } from 'lucide-vue-next'
 import type { Dialog, DialogStatus } from '../../types/dialogs'
+import {
+  isTelegramDialog,
+  resolveDialogSecondaryIdentity,
+  resolveDialogUserTitle,
+  resolveIntegrationChannelLabel
+} from '~/utils/dialogIdentity'
 
 const props = defineProps<{
   dialog: Dialog
@@ -259,39 +266,19 @@ onClickOutside(contextMenuRef, () => {
 
 // Computed
 const isTelegram = computed(() => {
-  const p = props.dialog.platform || props.dialog.user_info?.platform
-  return (
-    p === 'telegram' ||
-    p === 'telegram_phone' ||
-    props.dialog.id?.startsWith('telegram:') ||
-    props.dialog.id?.startsWith('telegram_phone:')
-  )
+  return isTelegramDialog(props.dialog)
 })
 
 const channelBadgeText = computed(() => {
-  const label = props.dialog.user_info?.integration_channel_label?.trim()
-  if (label) return label
-  if (isTelegram.value) return 'TG'
-  return ''
+  return resolveIntegrationChannelLabel(props.dialog)
 })
 
-const username = computed(() => {
-  return props.dialog.user_info?.username || null
+const secondaryIdentity = computed(() => {
+  return resolveDialogSecondaryIdentity(props.dialog)
 })
 
 const dialogTitle = computed(() => {
-  // Prioritize user_info over title (title often contains message preview)
-  const userInfo = props.dialog.user_info
-  if (userInfo?.first_name || userInfo?.last_name) {
-    return [userInfo.first_name, userInfo.last_name].filter(Boolean).join(' ')
-  }
-  if (userInfo?.username) return `@${userInfo.username}`
-  // For Telegram / telegram_phone dialogs without user_info, show ID
-  if (isTelegram.value && props.dialog.id) {
-    const id = props.dialog.id.replace(/^(telegram|telegram_phone):/, '')
-    return `Telegram #${id}`
-  }
-  return 'Диалог'
+  return resolveDialogUserTitle(props.dialog) || 'Диалог'
 })
 
 const formattedTime = computed(() => {
