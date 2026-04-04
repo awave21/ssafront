@@ -420,12 +420,16 @@ export const useAgents = () => {
 
   const bulkUpdateSqnsServices = async (agentId: string, data: { ids: string[], is_enabled?: boolean, priority?: number }) => {
     try {
-      await apiFetch(`/agents/${agentId}/sqns/services/bulk`, {
+      await apiFetch(`/agents/${agentId}/sqns/services/bulk-update`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: data
+        body: {
+          service_ids: data.ids,
+          ...(data.is_enabled !== undefined ? { is_enabled: data.is_enabled } : {}),
+          ...(data.priority !== undefined ? { priority: data.priority } : {}),
+        },
       })
     } catch (err: any) {
       sqnsError.value = getReadableErrorMessage(err, 'Не удалось выполнить массовое обновление услуг')

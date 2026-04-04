@@ -40,9 +40,11 @@ def _tool_result_to_log_dict(value: Any) -> dict[str, Any] | None:
 
 
 DEFAULT_KNOWLEDGE_SEARCH_TOOL_DESCRIPTION = (
-    "Search uploaded knowledge files and return relevant text fragments for RAG. "
-    "Each result includes chunk_id, file_id, chunk_index, title, and excerpt — cite these when answering. "
-    "Use for factual questions covered by documentation, policies, prices, or instructions."
+    "Data tool: search indexed uploaded files (RAG). "
+    "Returns chunk_id, file_id, chunk_index, title, excerpt — cite when answering. "
+    "Prefer this for long documents and file-based guides. "
+    "The agent also has other data tools (named catalog searches and `search_direct_questions` / `get_direct_answer`); "
+    "pick whichever tool's description fits the question."
 )
 
 
@@ -372,12 +374,7 @@ def build_direct_answer_tool(
     tenant_id: UUID,
     agent_id: UUID,
 ) -> PydanticTool:
-    """
-    Runtime tool for direct question routing.
-
-    The model should call this tool with an ID from the injected
-    "Available Direct Answers" block to retrieve a prepared answer.
-    """
+    """Runtime data tool: одна карточка прямого вопроса по UUID (рядом с остальными data-тулами агента)."""
 
     async def _get_direct_answer(direct_question_id: str) -> dict[str, Any]:
         question_uuid = None
@@ -423,19 +420,17 @@ def build_direct_answer_tool(
         function=_get_direct_answer,
         name="get_direct_answer",
         description=(
-            "Retrieve a prepared answer from the knowledge base by topic UUID. "
-            "CALL after search_direct_questions returns chosen_candidate_id. "
-            "DO NOT call if no topic clearly matches. "
-            "After status=ok: use `content` as factual base, preserve exact data (numbers, addresses, prices, URLs). "
-            "If `system_instruction` is present — apply it as a behavioral directive for tone, format, or follow-up actions. "
-            "If `content` is incomplete — call other tools to fill the gaps."
+            "Data tool: load one curated Q&A / policy card by UUID (same family as the agent's catalog tools—pick by intent). "
+            "`direct_question_id` must come from `search_direct_questions` (or a retry after not_found); do not invent ids. "
+            "After status=ok: use `content` as facts; keep numbers, addresses, prices, URLs exact. "
+            "Apply `system_instruction` if present; call other tools if something is missing."
         ),
         json_schema={
             "type": "object",
             "properties": {
                 "direct_question_id": {
                     "type": "string",
-                    "description": "UUID from Available Direct Answers list.",
+                    "description": "UUID of the card (e.g. from search_direct_questions.chosen_candidate_id).",
                 }
             },
             "required": ["direct_question_id"],
@@ -483,9 +478,10 @@ def build_direct_questions_search_tool(
         function=_search_direct_questions,
         name="search_direct_questions",
         description=(
-            "Search direct questions semantically and return best candidate UUIDs with relevance scores. "
-            "ALWAYS call this first for FAQ-like/user-policy questions. "
-            "If status=ok and chosen_candidate_id is present, call get_direct_answer with that UUID."
+            "Data tool: semantic search over curated Q&A / policy cards (short fixed answers). "
+            "Same idea as catalog tools—one named tool per dataset; this one covers direct-question cards. "
+            "Use `search_knowledge_files` for long file-based docs; use other tools for live integrations. "
+            "Output may include `chosen_candidate_id` for `get_direct_answer`; do not make up ids."
         ),
         json_schema={
             "type": "object",
@@ -576,5 +572,50 @@ async def build_knowledge_search_tool(
         },
         takes_ctx=False,
     )
+
+
+async def build_directory_runtime_tools(
+    *,
+    db: AsyncSession,
+    agent_id: UUID,
+    openai_api_key: str | None,
+) -> list[PydanticTool]:
+    """По одному data-tool на справочник (как и прямые вопросы — обычные тулы агента, имя/описание из настроек)."""
+    from app.db.session import async_session_factory
+    from app.services.directory.service import get_agent_directory_tools
+
+    specs = await get_agent_directory_tools(
+        db,
+        agent_id,
+        async_session_factory,
+        openai_api_key=openai_api_key,
+    )
+    out: list[PydanticTool] = []
+    for spec in specs:
+        fn = spec["function"]
+        if not callable(fn):
+            continue
+        # Описание самого тула для LLM — из БД (directory.tool_description), см. create_directory_tool.
+        # Ниже только схема единственного параметра; без второго «описания каталога» из кода.
+        out.append(
+            PydanticTool.from_schema(
+                function=fn,
+                name=str(spec["name"]),
+                description=str(spec.get("description") or spec["name"]),
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Natural-language search query.",
+                        }
+                    },
+                    "required": [],
+                    "additionalProperties": False,
+                },
+                takes_ctx=False,
+            )
+        )
+    return out
 
 

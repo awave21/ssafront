@@ -1004,12 +1004,14 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
         payload.session_id = currentSessionId.value
       }
 
+      // Синхронный run на бэкенде часто >60s (тулы, большой контекст); дефолтный таймаут fetch короче → ложная «ошибка связи».
       const response = await apiFetch<any>('/runs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: payload
+        body: payload,
+        timeout: 900_000
       })
 
       if (response) {

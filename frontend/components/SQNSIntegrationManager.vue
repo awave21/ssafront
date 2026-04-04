@@ -253,22 +253,28 @@
                   <div class="h-4 w-px bg-indigo-200"></div>
                   <div class="flex items-center gap-2">
                     <button
+                      type="button"
+                      :disabled="bulkServicesInFlight"
                       @click="handleBulkUpdate(true)"
-                      class="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
+                      class="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors disabled:opacity-40 disabled:pointer-events-none"
                     >
                       Включить выбранные
                     </button>
                     <button
+                      type="button"
+                      :disabled="bulkServicesInFlight"
                       @click="handleBulkUpdate(false)"
-                      class="text-xs font-bold text-red-600 hover:text-red-800 transition-colors"
+                      class="text-xs font-bold text-red-600 hover:text-red-800 transition-colors disabled:opacity-40 disabled:pointer-events-none"
                     >
                       Отключить выбранные
                     </button>
                   </div>
                 </div>
                 <button
+                  type="button"
+                  :disabled="bulkServicesInFlight"
                   @click="selectedIds = []"
-                  class="text-xs font-medium text-slate-500 hover:text-slate-700"
+                  class="text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-40"
                 >
                   Сбросить выбор
                 </button>
@@ -342,16 +348,16 @@
                   <TableRow
                     v-else
                     v-for="service in sortedServices"
-                    :key="service.id"
+                    :key="`${serviceIdKey(service.id)}-${service.is_enabled ? 1 : 0}`"
                     :class="[
                       'hover:bg-slate-50/50 transition-colors',
-                      selectedIds.includes(service.id) ? 'bg-indigo-50/20' : ''
+                      isServiceRowSelected(service.id) ? 'bg-indigo-50/20' : ''
                     ]"
                   >
                     <TableCell>
                       <input
                         type="checkbox"
-                        :checked="selectedIds.includes(service.id)"
+                        :checked="isServiceRowSelected(service.id)"
                         @change="toggleSelect(service.id)"
                         class="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
                       />
@@ -399,7 +405,20 @@
                 </TableBody>
               </Table>
 
-            <div class="p-4 border-t border-slate-100 bg-slate-50/30 flex items-center justify-between">
+            <div class="p-4 border-t border-slate-100 bg-slate-50/30 flex flex-wrap items-center justify-between gap-4">
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-500">Услуг на странице:</span>
+                <select
+                  v-model.number="pagination.limit"
+                  @change="handleServicesPageSizeChange"
+                  class="px-2 py-1 bg-white border border-slate-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 transition-all"
+                >
+                  <option :value="25">25</option>
+                  <option :value="50">50</option>
+                  <option :value="100">100</option>
+                  <option :value="250">250</option>
+                </select>
+              </div>
               <p class="text-xs text-slate-500">
                 Показано {{ pagination.offset + 1 }}-{{ Math.min(pagination.offset + pagination.limit, total) }} из {{ total }} услуг
               </p>
@@ -904,7 +923,15 @@ const isValidActiveTab = (value: string): value is 'tools' | 'all-records' | 'se
   value === 'tools' || value === 'all-records' || value === 'services' || value === 'specialists' || value === 'categories'
 
 const currentPage = computed(() => Math.floor(pagination.value.offset / pagination.value.limit) + 1)
-const isAllSelected = computed(() => services.value.length > 0 && services.value.every(s => selectedIds.value.includes(s.id)))
+
+const serviceIdKey = (id: unknown) => String(id)
+const isServiceRowSelected = (id: unknown) => selectedIds.value.includes(serviceIdKey(id))
+
+const isAllSelected = computed(
+  () =>
+    services.value.length > 0 &&
+    services.value.every((s) => selectedIds.value.includes(serviceIdKey(s.id)))
+)
 
 const formattedSyncAt = computed(() => {
   if (!props.lastSyncAt) return 'нет данных'
@@ -1027,8 +1054,10 @@ const allRecordsColumns: ColumnDef<SqnsServiceEmployeeLink>[] = [
   },
 ]
 
+// Передаём Ref/ComputedRef в data — иначе isRef(initialOptions.data) === false и TanStack Table
+// не подписывается на обновления (после bulk/reload строки остаются со старым is_enabled).
 const servicesTable = useVueTable({
-  get data() { return services.value },
+  data: services,
   columns: servicesColumns,
   state: {
     get sorting() { return servicesSorting.value },
@@ -1039,7 +1068,7 @@ const servicesTable = useVueTable({
 })
 
 const specialistsTable = useVueTable({
-  get data() { return filteredSpecialists.value },
+  data: filteredSpecialists,
   columns: specialistsColumns,
   state: {
     get sorting() { return specialistsSorting.value },
@@ -1050,7 +1079,7 @@ const specialistsTable = useVueTable({
 })
 
 const categoriesTable = useVueTable({
-  get data() { return filteredCategories.value },
+  data: filteredCategories,
   columns: categoriesColumns,
   state: {
     get sorting() { return categoriesSorting.value },
@@ -1061,7 +1090,7 @@ const categoriesTable = useVueTable({
 })
 
 const allRecordsTable = useVueTable({
-  get data() { return filteredAllRecords.value },
+  data: filteredAllRecords,
   columns: allRecordsColumns,
   state: {
     get sorting() { return allRecordsSorting.value },
@@ -1080,6 +1109,16 @@ const toggleSort = (table: any, columnId: string) => {
   const column = table.getColumn(columnId)
   if (!column) return
   column.toggleSorting(column.getIsSorted() === 'asc')
+}
+
+/** Когда включён фильтр «только включённые / только выключенные», строка после переключения может не подходить — убираем без запроса к серверу. */
+const pruneServicesToMatchEnabledFilter = () => {
+  const fe = filters.value.is_enabled
+  if (fe === null || fe === undefined) return
+  const before = services.value.length
+  services.value = services.value.filter((s) => Boolean(s.is_enabled) === fe)
+  const removed = before - services.value.length
+  if (removed > 0) total.value = Math.max(0, total.value - removed)
 }
 
 // Actions
@@ -1149,36 +1188,24 @@ const formatRecordUpdatedAt = (value: string | null) => {
 const handleToggleService = async (service: any) => {
   const originalState = Boolean(service.is_enabled)
   const nextState = !originalState
-  
-  // Оптимистичное обновление UI сразу
+  const sid = serviceIdKey(service.id)
+
   service.is_enabled = nextState
-  
-  console.log('🔧 Toggle service:', {
-    serviceId: service.id,
-    serviceIdType: typeof service.id,
-    serviceName: service.name,
-    originalState,
-    nextState,
-    payload: { is_enabled: nextState }
-  })
-  
+
   try {
-    // Отправляем на сервер новое состояние
     await updateSqnsService(props.agentId, service.id, { is_enabled: nextState })
-    
-    console.log('✅ Toggle успешно, перезагружаем список...')
-    
-    // Перезагружаем список с сервера для финальной синхронизации (тихо)
-    await loadServices(true)
-    
+    // Новый массив/объекты — иначе TanStack Table не пересчитывает строки (свитч «залипает»).
+    services.value = services.value.map((s) =>
+      serviceIdKey(s.id) === sid ? { ...s, is_enabled: nextState } : s
+    )
+    pruneServicesToMatchEnabledFilter()
     toastSuccess('Статус обновлен', `Услуга "${service.name}" ${nextState ? 'включена' : 'отключена'}`)
   } catch (err: any) {
-    // Откатываем UI при ошибке
-    service.is_enabled = originalState
+    services.value = services.value.map((s) =>
+      serviceIdKey(s.id) === sid ? { ...s, is_enabled: originalState } : s
+    )
     toastError('Ошибка', getReadableErrorMessage(err, 'Не удалось изменить статус услуги'))
-    console.error('❌ Toggle error:', err)
-    // Перезагружаем список для отката к реальному состоянию
-    await loadServices()
+    await loadServices(true)
   }
 }
 
@@ -1192,7 +1219,6 @@ const handleUpdatePriority = async (service: any) => {
 
   try {
     await updateSqnsService(props.agentId, service.id, { priority: nextPriority })
-    await loadServices(true)
     toastSuccess('Приоритет обновлен', `Для услуги "${service.name}" установлен приоритет ${nextPriority}`)
   } catch (err: any) {
     toastError('Ошибка', getReadableErrorMessage(err, 'Не удалось обновить приоритет услуги'))
@@ -1200,20 +1226,37 @@ const handleUpdatePriority = async (service: any) => {
   }
 }
 
+const bulkServicesInFlight = ref(false)
+
 const handleBulkUpdate = async (is_enabled: boolean) => {
-  if (!confirm(`Вы уверены? ${selectedIds.value.length} услуг будут ${is_enabled ? 'включены' : 'отключены'}`)) return
-  
+  const count = selectedIds.value.length
+  if (!confirm(`Вы уверены? ${count} услуг будут ${is_enabled ? 'включены' : 'отключены'}`)) return
+  if (bulkServicesInFlight.value) return
+
+  const idSet = new Set(selectedIds.value.map(serviceIdKey))
+  const idsForApi = [...selectedIds.value]
+  // Снимок для отката: свитчи обновляем сразу (новый массив — TanStack/Vue видят изменение).
+  const snapshot = services.value.map((s) => ({ ...s }))
+
+  services.value = services.value.map((s) =>
+    idSet.has(serviceIdKey(s.id)) ? { ...s, is_enabled } : s
+  )
+
+  bulkServicesInFlight.value = true
   try {
     await bulkUpdateSqnsServices(props.agentId, {
-      ids: selectedIds.value,
+      ids: idsForApi,
       is_enabled
     })
     selectedIds.value = []
-    await loadServices(true)
-    toastSuccess('Массовое обновление', `Успешно обновлено ${selectedIds.value.length} услуг`)
+    pruneServicesToMatchEnabledFilter()
+    toastSuccess('Массовое обновление', `Успешно обновлено ${count} услуг`)
   } catch (err: any) {
+    services.value = snapshot.map((s) => ({ ...s }))
     toastError('Ошибка', getReadableErrorMessage(err, 'Не удалось выполнить массовое обновление'))
     await loadServices(true)
+  } finally {
+    bulkServicesInFlight.value = false
   }
 }
 
@@ -1226,11 +1269,8 @@ const handleToggleCategory = async (cat: any) => {
   
   try {
     await updateSqnsCategory(props.agentId, cat.id, { is_enabled: nextState })
-    // Тихое обновление данных с сервера
-    await loadCategories(true)
     toastSuccess('Статус категории обновлен', `Категория "${cat.name}" ${nextState ? 'включена' : 'отключена'}`)
   } catch (err: any) {
-    // Откат при ошибке
     cat.is_enabled = originalState
     toastError('Ошибка', getReadableErrorMessage(err, 'Не удалось изменить статус категории'))
     await loadCategories(true)
@@ -1247,8 +1287,6 @@ const handleUpdateCategoryPriority = async (cat: any) => {
 
   try {
     await updateSqnsCategory(props.agentId, cat.id, { priority: nextPriority })
-    // Тихое обновление данных с сервера
-    await loadCategories(true)
     toastSuccess('Приоритет категории обновлен', `Для категории "${cat.name}" установлен приоритет ${nextPriority}`)
   } catch (err: any) {
     toastError('Ошибка', getReadableErrorMessage(err, 'Не удалось обновить приоритет категории'))
@@ -1361,24 +1399,32 @@ const handleSaveTool = async () => {
   }
 }
 
-const toggleSelect = (id: string) => {
-  const index = selectedIds.value.indexOf(id)
-  if (index === -1) selectedIds.value.push(id)
+const toggleSelect = (id: unknown) => {
+  const key = serviceIdKey(id)
+  const index = selectedIds.value.indexOf(key)
+  if (index === -1) selectedIds.value.push(key)
   else selectedIds.value.splice(index, 1)
 }
 
 const toggleSelectAll = () => {
   if (isAllSelected.value) {
-    selectedIds.value = selectedIds.value.filter(id => !services.value.some(s => s.id === id))
+    const onPage = new Set(services.value.map((s) => serviceIdKey(s.id)))
+    selectedIds.value = selectedIds.value.filter((id) => !onPage.has(id))
   } else {
-    services.value.forEach(s => {
-      if (!selectedIds.value.includes(s.id)) selectedIds.value.push(s.id)
-    })
+    for (const s of services.value) {
+      const key = serviceIdKey(s.id)
+      if (!selectedIds.value.includes(key)) selectedIds.value.push(key)
+    }
   }
 }
 
 const handlePageChange = (delta: number) => {
   pagination.value.offset += delta * pagination.value.limit
+  loadServices()
+}
+
+const handleServicesPageSizeChange = () => {
+  pagination.value.offset = 0
   loadServices()
 }
 

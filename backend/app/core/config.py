@@ -183,6 +183,9 @@ class Settings(BaseSettings):
             "DIRECT_QUESTIONS_RETRIEVAL_ROUTER_ENABLED",
             "DIRECT_QUESTIONS_ROUTER_ENABLED",
         ),
+        description=(
+            "Подключать data-тулы search_direct_questions и get_direct_answer (как справочники — обычные инструменты агента)."
+        ),
     )
     direct_questions_max_results: int = Field(
         default=5,

@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable
 from uuid import UUID, uuid4
 
 import structlog
@@ -25,10 +25,6 @@ from app.schemas.directory import (
     ResponseMode,
     SearchType,
 )
-
-if TYPE_CHECKING:
-    from pydantic_ai import RunContext
-    from app.services.runtime.deps import AgentDeps
 
 logger = structlog.get_logger(__name__)
 
@@ -537,6 +533,8 @@ def format_search_results(
 def create_directory_tool(
     directory: Directory,
     db_session_factory: Callable[[], AsyncSession],
+    *,
+    openai_api_key: str | None = None,
 ) -> dict[str, Any]:
     """
     Создаёт tool из справочника для pydantic-ai агента.
@@ -546,12 +544,8 @@ def create_directory_tool(
     - description: описание
     - function: async функция для вызова
     """
-    async def tool_fn(ctx: "RunContext[AgentDeps]", query: str = "") -> dict[str, Any]:
+    async def tool_fn(query: str = "") -> dict[str, Any]:
         """Поиск по справочнику."""
-        # Читаем ключ из deps — единый DB-запрос на весь запуск агента.
-        deps: "AgentDeps | None" = getattr(ctx, "deps", None)
-        injected_key: str | None = deps.openai_api_key if deps is not None else None
-
         async with db_session_factory() as db:
             # Перезагружаем directory в текущей сессии
             from sqlalchemy import select
@@ -572,7 +566,7 @@ def create_directory_tool(
                 directory=current_directory,
                 query=query,
                 limit=5,
-                openai_api_key=injected_key,
+                openai_api_key=openai_api_key,
             )
             
             return format_search_results(results, current_directory)
@@ -593,6 +587,7 @@ async def get_agent_directory_tools(
     agent_id: UUID,
     db_session_factory: Callable[[], AsyncSession],
     *,
+    openai_api_key: str | None = None,
     only_catalog_templates: bool = False,
 ) -> list[dict[str, Any]]:
     """
@@ -616,7 +611,11 @@ async def get_agent_directory_tools(
     
     tools: list[dict[str, Any]] = []
     for directory in directories:
-        tool = create_directory_tool(directory, db_session_factory)
+        tool = create_directory_tool(
+            directory,
+            db_session_factory,
+            openai_api_key=openai_api_key,
+        )
         tools.append(tool)
     
     logger.info(

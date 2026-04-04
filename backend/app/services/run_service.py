@@ -32,16 +32,13 @@ from app.services.runtime import AgentRunResult, messages_adapter, run_agent_wit
 from app.services.runtime.tools import (
     build_direct_answer_tool,
     build_direct_questions_search_tool,
+    build_directory_runtime_tools,
     build_knowledge_search_tool,
 )
 from app.core.config import get_settings
 from app.services.logfire_cost_reconcile import schedule_logfire_cost_reconcile
 from app.services.agent_user_state import is_agent_user_disabled_by_session, normalize_identity
 from app.services.direct_questions import schedule_direct_question_followup
-from app.services.direct_questions.router_context import (
-    build_injection_context_block,
-    eager_inject_direct_answer,
-)
 from app.services.direct_questions.safety import sanitize_direct_question_content, split_direct_question_content
 from app.services.tenant_llm_config import get_decrypted_api_key
 from app.services.tenant_balance import sync_run_balance_charge
@@ -661,76 +658,26 @@ async def execute_agent_run(
 
     if settings.direct_questions_retrieval_router_enabled:
         try:
-            base_prompt = agent.system_prompt or ""
-
-            # Eager pre-retrieval: ищем подходящий прямой вопрос ДО запуска LLM.
-            # LLM получает готовый контент и тратит только 1 ход на форматирование.
-            injection = await eager_inject_direct_answer(
-                db,
-                tenant_id=run.tenant_id,
-                agent_id=agent.id,
-                input_message=input_message,
-                openai_api_key=openai_api_key,
-                min_match_percent=settings.direct_questions_min_match_percent,
-                rerank=settings.direct_questions_rerank_enabled,
+            dq_limit = getattr(agent, "direct_questions_limit", None) or settings.direct_questions_max_results
+            extra_runtime_tools.append(
+                build_direct_questions_search_tool(
+                    db=db,
+                    tenant_id=run.tenant_id,
+                    agent_id=agent.id,
+                    openai_api_key=openai_api_key,
+                    default_limit=dq_limit,
+                    min_match_percent=settings.direct_questions_min_match_percent,
+                    rerank=settings.direct_questions_rerank_enabled,
+                    analytics_sink=retrieval_decisions,
+                )
             )
-
-            if injection:
-                # Нашли совпадение — инжектируем контент прямо в system prompt.
-                # Тулы search/get_direct_answer не нужны — LLM сразу видит ответ.
-                context_block = build_injection_context_block(injection)
-                parts = [p for p in [base_prompt, context_block] if p]
-                system_prompt_override = "\n\n".join(parts) if parts else None
-
-                retrieval_decisions.append({
-                    "pipeline_kind": "direct_question_eager",
-                    "query": input_message,
-                    "direct_question_id": injection["direct_question_id"],
-                    "title": injection["title"],
-                    "relevance": injection["relevance"],
-                })
-                logger.info(
-                    "direct_question_eager_injected",
-                    agent_id=str(agent.id),
-                    direct_question_id=injection["direct_question_id"],
-                    title=injection["title"],
-                    relevance=injection["relevance"],
+            extra_runtime_tools.append(
+                build_direct_answer_tool(
+                    db=db,
+                    tenant_id=run.tenant_id,
+                    agent_id=agent.id,
                 )
-                # Тот же meta, что после get_direct_answer — чтобы followup / interrupt_dialog / UI работали.
-                direct_question_meta = {
-                    "source": "direct_question_eager",
-                    "question_id": injection["direct_question_id"],
-                    "title": injection["title"],
-                    "content": injection["content"],
-                    "system_instruction": injection.get("system_instruction"),
-                    "interrupt_dialog": injection["interrupt_dialog"],
-                    "notify_telegram": injection["notify_telegram"],
-                    "followup": injection.get("followup")
-                    if isinstance(injection.get("followup"), dict)
-                    else None,
-                }
-            else:
-                # Совпадений нет — добавляем тулы как fallback для уточняющих вопросов.
-                dq_limit = getattr(agent, "direct_questions_limit", None) or settings.direct_questions_max_results
-                extra_runtime_tools.append(
-                    build_direct_questions_search_tool(
-                        db=db,
-                        tenant_id=run.tenant_id,
-                        agent_id=agent.id,
-                        openai_api_key=openai_api_key,
-                        default_limit=dq_limit,
-                        min_match_percent=settings.direct_questions_min_match_percent,
-                        rerank=settings.direct_questions_rerank_enabled,
-                        analytics_sink=retrieval_decisions,
-                    )
-                )
-                extra_runtime_tools.append(
-                    build_direct_answer_tool(
-                        db=db,
-                        tenant_id=run.tenant_id,
-                        agent_id=agent.id,
-                    )
-                )
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("direct_question_router_setup_failed", agent_id=str(agent.id), error=str(exc))
 
@@ -752,6 +699,21 @@ async def execute_agent_run(
             extra_runtime_tools.append(knowledge_tool)
     except Exception as exc:  # noqa: BLE001
         logger.warning("knowledge_tool_setup_failed", agent_id=str(agent.id), error=str(exc))
+
+    try:
+        directory_tools = await build_directory_runtime_tools(
+            db=db,
+            agent_id=agent.id,
+            openai_api_key=openai_api_key,
+        )
+        if directory_tools:
+            extra_runtime_tools.extend(directory_tools)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "directory_runtime_tools_failed",
+            agent_id=str(agent.id),
+            error=str(exc),
+        )
 
     result = await run_agent_with_tools(
         agent,
