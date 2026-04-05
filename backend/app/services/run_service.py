@@ -28,7 +28,12 @@ from app.db.models.session_message import SessionMessage
 from app.db.models.tool import Tool
 from app.db.models.tool_call_log import ToolCallLog
 from app.schemas.auth import AuthContext
-from app.services.runtime import AgentRunResult, messages_adapter, run_agent_with_tools
+from app.services.runtime import (
+    AgentRunResult,
+    messages_adapter,
+    run_agent_with_tools,
+    serialize_assistant_text_for_session,
+)
 from app.services.runtime.tools import (
     build_direct_answer_tool,
     build_direct_questions_search_tool,
@@ -970,10 +975,7 @@ async def execute_agent_run(
     if out_text and not _session_messages_contain_output_text(messages_to_save, out_text):
         messages_to_save = [
             *messages_to_save,
-            {
-                "role": "assistant",
-                "parts": [{"content": out_text}],
-            },
+            serialize_assistant_text_for_session(out_text),
         ]
 
     await append_session_messages(

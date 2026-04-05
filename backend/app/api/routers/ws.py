@@ -23,6 +23,7 @@ from app.db.models.agent import Agent
 from app.db.models.run import Run
 from app.db.session import async_session_factory
 from app.schemas.auth import AuthContext
+from app.constants.user_messages import MESSENGER_AGENT_FAILURE_USER_MESSAGE
 from app.utils.broadcast import broadcaster
 
 logger = structlog.get_logger(__name__)
@@ -471,9 +472,10 @@ async def _run_agent_response(
             await session.refresh(run)
 
         except Exception as e:
+            runtime_logger.exception("ws_run_create_failed", trace_id=trace_id, error=str(e))
             await manager.send_json(websocket, {
                 "type": "run_error",
-                "data": {"error": f"Failed to create run: {e}"}
+                "data": {"error": MESSENGER_AGENT_FAILURE_USER_MESSAGE}
             })
             return
 
@@ -546,7 +548,7 @@ async def _run_agent_response(
                 "type": "run_error",
                 "data": {
                     "run_id": str(run.id),
-                    "error": str(e),
+                    "error": MESSENGER_AGENT_FAILURE_USER_MESSAGE,
                     "dialog_id": dialog_id,
                 }
             })

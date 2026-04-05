@@ -11,6 +11,7 @@ from app.services.runtime.orchestrator import (
     logger,
     messages_adapter,
     run_agent_with_tools,
+    serialize_assistant_text_for_session,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "logger",
     "messages_adapter",
     "run_agent_with_tools",
+    "serialize_assistant_text_for_session",
 ]

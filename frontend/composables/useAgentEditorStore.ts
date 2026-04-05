@@ -1080,9 +1080,12 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
         clearSessionId(agent.value.id)
         currentSessionId.value = null
       }
+      const chatFallback = 'Произошла ошибка при связи с агентом.'
+      const detail = getReadableErrorMessage(err, chatFallback)
+      toastError('Ошибка связи с агентом', detail)
       messages.value.push({
         role: 'agent',
-        content: 'Произошла ошибка при связи с агентом.',
+        content: detail,
         tokens: undefined,
         tools_called: undefined
       })

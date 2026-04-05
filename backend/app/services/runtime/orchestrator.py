@@ -8,7 +8,15 @@ from uuid import UUID
 import logfire
 import structlog
 from pydantic import TypeAdapter
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, RetryPromptPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+)
 from pydantic_ai.tools import Tool as PydanticTool
 from pydantic_ai.usage import UsageLimits
 
@@ -31,6 +39,17 @@ logger = structlog.get_logger(__name__)
 
 # Типы, которые реально возвращает pydantic-ai в new_messages() / all_messages()
 messages_adapter = TypeAdapter(list[ModelMessage | ModelRequest | ModelResponse])
+
+
+def serialize_assistant_text_for_session(content: str) -> dict[str, Any]:
+    """Текстовый ответ ассистента в JSON для session_messages — тот же формат, что у dump_python(new_messages)."""
+    row = messages_adapter.dump_python(
+        [ModelResponse(parts=[TextPart(content=content)])],
+        mode="json",
+    )
+    if not row or not isinstance(row[0], dict):
+        raise RuntimeError("session message dump produced unexpected shape")
+    return row[0]
 
 
 @dataclass

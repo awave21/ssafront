@@ -12,13 +12,61 @@ from uuid import uuid4
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants.user_messages import MESSENGER_AGENT_FAILURE_USER_MESSAGE
 from app.db.models.agent import Agent
 from app.db.models.run import Run
 from app.schemas.auth import AuthContext
+from app.services.dialog_state import set_dialog_status
 from app.services.tool_executor import ToolExecutionError
+from app.utils.broadcast import broadcaster
 from app.utils.message_mapping import build_user_prompt, filter_user_prompts
 
 logger = structlog.get_logger(__name__)
+
+
+async def _disable_messenger_dialog_after_agent_failure(
+    db: AsyncSession,
+    agent: Agent,
+    *,
+    session_id: str,
+) -> None:
+    """Отключить автоответы агента для этой сессии и уведомить CRM (broadcast)."""
+    try:
+        await set_dialog_status(
+            db,
+            agent_id=agent.id,
+            tenant_id=agent.tenant_id,
+            session_id=session_id,
+            new_status="disabled",
+        )
+    except Exception as exc:
+        logger.warning(
+            "messenger_disable_dialog_failed",
+            agent_id=str(agent.id),
+            session_id=session_id,
+            error=str(exc),
+        )
+        return
+    try:
+        await broadcaster.publish(
+            agent.id,
+            {
+                "type": "dialog_updated",
+                "data": {
+                    "id": session_id,
+                    "session_id": session_id,
+                    "agent_id": str(agent.id),
+                    "status": "disabled",
+                },
+            },
+        )
+    except Exception as exc:
+        logger.warning(
+            "messenger_dialog_disabled_broadcast_failed",
+            agent_id=str(agent.id),
+            session_id=session_id,
+            error=str(exc),
+        )
 
 
 async def append_wappi_linked_account_message(
@@ -211,7 +259,8 @@ async def process_webhook_inbound_agent_message(
         run.error_message = str(exc)
         run.logfire_reconcile_status = "skipped"
         run.logfire_reconcile_error = "run_failed"
-        return "Произошла ошибка при выполнении запроса. Попробуйте ещё раз."
+        await _disable_messenger_dialog_after_agent_failure(db, agent, session_id=session_id)
+        return MESSENGER_AGENT_FAILURE_USER_MESSAGE
     except Exception as exc:  # noqa: BLE001
         logger.exception(
             "webhook_inbound_agent_failed",
@@ -223,7 +272,8 @@ async def process_webhook_inbound_agent_message(
         run.error_message = f"Runtime error: {str(exc)}"
         run.logfire_reconcile_status = "skipped"
         run.logfire_reconcile_error = "run_failed"
-        return "Произошла ошибка при обработке сообщения. Попробуйте позже."
+        await _disable_messenger_dialog_after_agent_failure(db, agent, session_id=session_id)
+        return MESSENGER_AGENT_FAILURE_USER_MESSAGE
     finally:
         run.updated_at = datetime.utcnow()
         await db.commit()

@@ -8,7 +8,7 @@ import {
   resolveDialogUserTitle
 } from '~/utils/dialogIdentity'
 
-const AGENT_STATUSES = new Set<string>(['active', 'paused'])
+const AGENT_STATUSES = new Set<string>(['active', 'paused', 'disabled'])
 
 type UserAgentStateResponse = {
   agent_id: string
@@ -38,16 +38,23 @@ const coerceIsDisabled = (value: unknown): boolean => {
  */
 const normalizeDialog = (raw: any): Dialog => {
   const hasIsDisabled = raw?.is_disabled !== undefined && raw?.is_disabled !== null
-  const agentStatus: DialogAgentStatus =
-    hasIsDisabled
-      ? (coerceIsDisabled(raw.is_disabled) ? 'paused' : 'active')
-      : (raw.status && AGENT_STATUSES.has(raw.status) ? raw.status : (raw.agent_status ?? 'active'))
+  const backendSt = typeof raw?.status === 'string' ? raw.status.trim().toLowerCase() : ''
+
+  const agentStatus: DialogAgentStatus = hasIsDisabled
+    ? (coerceIsDisabled(raw.is_disabled) ? 'paused' : 'active')
+    : backendSt === 'disabled' || backendSt === 'paused'
+      ? 'paused'
+      : backendSt === 'active'
+        ? 'active'
+        : raw.agent_status === 'paused' || raw.agent_status === 'active'
+          ? raw.agent_status
+          : 'active'
 
   return {
     ...raw,
     agent_status: agentStatus,
-    // If backend returned 'active'/'paused' as status, reset to NORMAL for UI indicators
-    status: AGENT_STATUSES.has(raw.status) ? 'NORMAL' : (raw.status || 'NORMAL')
+    // Backend dialog list uses status = active|paused|disabled; UI indicator — отдельное поле
+    status: AGENT_STATUSES.has(backendSt) ? 'NORMAL' : (raw.status || 'NORMAL')
   }
 }
 

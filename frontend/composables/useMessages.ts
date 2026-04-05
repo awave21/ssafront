@@ -620,7 +620,9 @@ export const useMessages = () => {
    */
   const handleRunError = (runId: string, dialogId: string, errorMsg: string) => {
     const agentMessageId = `agent-${runId}`
-    
+    const displayContent =
+      typeof errorMsg === 'string' && errorMsg.trim().length > 0 ? errorMsg.trim() : 'Не удалось получить ответ агента.'
+
     const messages = messagesMap[dialogId] || []
     const index = messages.findIndex(m => m.id === agentMessageId)
     
@@ -628,16 +630,16 @@ export const useMessages = () => {
       const updatedMessages = [...messages]
       updatedMessages[index] = {
         ...updatedMessages[index],
-        content: `Ошибка: ${errorMsg}`,
+        content: displayContent,
         status: 'failed',
-        error_message: errorMsg
+        error_message: displayContent
       }
       setMessages(dialogId, updatedMessages)
     }
 
     isStreaming.value = false
     streamingMessageId.value = null
-    error.value = errorMsg
+    error.value = displayContent
   }
 
   /**
