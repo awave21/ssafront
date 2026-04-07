@@ -73,11 +73,14 @@ export type WsMessageUpdatedEvent = {
 export type WsDialogUpdatedEvent = {
   type: 'dialog_updated'
   data: {
-    id: string
+    id?: string
+    session_id?: string
     agent_id: string
-    title: string | null
-    last_message_preview: string | null
-    last_message_at: string | null
+    title?: string | null
+    last_message_preview?: string | null
+    last_message_at?: string | null
+    /** active | paused | disabled из dialog_states (broadcast после сбоя и т.п.) */
+    status?: string
     is_new?: boolean
   }
 }

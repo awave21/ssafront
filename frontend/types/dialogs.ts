@@ -4,6 +4,9 @@ export type DialogStatus = 'NEW' | 'IN_PROGRESS' | 'UNREAD' | 'ERROR' | 'NORMAL'
 // Per-dialog agent toggle status (active = agent responds, paused = agent silent)
 export type DialogAgentStatus = 'active' | 'paused'
 
+/** Статус из dialog_states на бэке (active / paused / disabled); для UI свитча и merge с agent_user_states */
+export type DialogStateStatus = 'active' | 'paused' | 'disabled'
+
 // User info from external platforms
 export type DialogUserInfo = {
   platform?: string                 // 'telegram', 'telegram_phone', 'whatsapp', 'web', etc.
@@ -42,6 +45,8 @@ export type Dialog = {
   user_info?: DialogUserInfo
   // Per-dialog agent status
   agent_status?: DialogAgentStatus  // 'active' (default) or 'paused'
+  /** Состояние чата в БД (dialog_states); не путать с status (индикатор UI) */
+  dialog_state_status?: DialogStateStatus
 }
 
 // Message types

@@ -1,5 +1,12 @@
 import { ref } from 'vue'
-import type { Dialog, DialogAgentStatus, CreateDialogData, UpdateDialogData, DialogsListResponse } from '../types/dialogs'
+import type {
+  Dialog,
+  DialogAgentStatus,
+  DialogStateStatus,
+  CreateDialogData,
+  UpdateDialogData,
+  DialogsListResponse
+} from '../types/dialogs'
 import { useApiFetch } from './useApiFetch'
 import { getReadableErrorMessage } from '~/utils/api-errors'
 import {
@@ -32,29 +39,42 @@ const coerceIsDisabled = (value: unknown): boolean => {
 
 /**
  * Normalize a raw dialog from the API:
- * backend returns agent toggle as `status: "active"|"paused"`,
+ * backend returns agent toggle as `status: "active"|"paused"|"disabled"`,
  * but frontend uses `status` for UI indicators (IN_PROGRESS, etc.)
- * so we move it to `agent_status` and reset `status` to 'NORMAL'.
+ * so we move it to `agent_status` + `dialog_state_status` and reset `status` to 'NORMAL'.
  */
 const normalizeDialog = (raw: any): Dialog => {
   const hasIsDisabled = raw?.is_disabled !== undefined && raw?.is_disabled !== null
-  const backendSt = typeof raw?.status === 'string' ? raw.status.trim().toLowerCase() : ''
+  const rawStatusLower = typeof raw?.status === 'string' ? raw.status.trim().toLowerCase() : ''
+  const fromStored = typeof raw?.dialog_state_status === 'string' ? raw.dialog_state_status.trim().toLowerCase() : ''
+
+  let agentRelatedSt = ''
+  if (AGENT_STATUSES.has(rawStatusLower)) {
+    agentRelatedSt = rawStatusLower
+  } else if (AGENT_STATUSES.has(fromStored)) {
+    agentRelatedSt = fromStored
+  }
 
   const agentStatus: DialogAgentStatus = hasIsDisabled
     ? (coerceIsDisabled(raw.is_disabled) ? 'paused' : 'active')
-    : backendSt === 'disabled' || backendSt === 'paused'
+    : agentRelatedSt === 'disabled' || agentRelatedSt === 'paused'
       ? 'paused'
-      : backendSt === 'active'
+      : agentRelatedSt === 'active'
         ? 'active'
         : raw.agent_status === 'paused' || raw.agent_status === 'active'
           ? raw.agent_status
           : 'active'
 
+  const dialogStateStatus: DialogStateStatus | undefined = agentRelatedSt
+    ? (agentRelatedSt as DialogStateStatus)
+    : undefined
+
   return {
     ...raw,
     agent_status: agentStatus,
+    dialog_state_status: dialogStateStatus,
     // Backend dialog list uses status = active|paused|disabled; UI indicator — отдельное поле
-    status: AGENT_STATUSES.has(backendSt) ? 'NORMAL' : (raw.status || 'NORMAL')
+    status: AGENT_STATUSES.has(rawStatusLower) ? 'NORMAL' : (raw.status || 'NORMAL')
   }
 }
 
@@ -242,11 +262,17 @@ export const useDialogs = () => {
     const currentStatus: DialogAgentStatus = idx !== -1
       ? (dialogs.value[idx].agent_status ?? 'active')
       : 'active'
+    const prevDialogStateStatus = idx !== -1 ? dialogs.value[idx].dialog_state_status : undefined
 
-    // Optimistic update
+    // Optimistic update (бэк для Telegram синхронизирует dialog_states: disabled | active)
     const optimisticStatus: DialogAgentStatus = currentStatus === 'active' ? 'paused' : 'active'
+    const optimisticDialogState: DialogStateStatus = optimisticStatus === 'paused' ? 'disabled' : 'active'
     if (idx !== -1) {
-      dialogs.value[idx] = { ...dialogs.value[idx], agent_status: optimisticStatus }
+      dialogs.value[idx] = {
+        ...dialogs.value[idx],
+        agent_status: optimisticStatus,
+        dialog_state_status: optimisticDialogState
+      }
     }
 
     try {
@@ -271,14 +297,23 @@ export const useDialogs = () => {
       })
 
       const finalStatus: DialogAgentStatus = nextIsDisabled ? 'paused' : 'active'
+      const finalDialogState: DialogStateStatus = nextIsDisabled ? 'disabled' : 'active'
       if (idx !== -1) {
-        dialogs.value[idx] = { ...dialogs.value[idx], agent_status: finalStatus }
+        dialogs.value[idx] = {
+          ...dialogs.value[idx],
+          agent_status: finalStatus,
+          dialog_state_status: finalDialogState
+        }
       }
       return finalStatus
     } catch (err: any) {
       // Rollback on failure
       if (idx !== -1) {
-        dialogs.value[idx] = { ...dialogs.value[idx], agent_status: currentStatus }
+        dialogs.value[idx] = {
+          ...dialogs.value[idx],
+          agent_status: currentStatus,
+          dialog_state_status: prevDialogStateStatus
+        }
       }
       error.value = getReadableErrorMessage(err, 'Не удалось изменить статус агента')
       console.error('[useDialogs] toggleDialogAgentStatus error:', err)
@@ -316,7 +351,11 @@ export const useDialogs = () => {
         disabled_at: currentState.disabled_at,
         disabled_by_user_id: currentState.disabled_by_user_id
       })
-      const normalized: DialogAgentStatus = coerceIsDisabled((currentState as any)?.is_disabled) ? 'paused' : 'active'
+      const userDisabled = coerceIsDisabled((currentState as any)?.is_disabled)
+      const ds = dialog.dialog_state_status
+      const dialogPausedFromDialogState = ds === 'disabled' || ds === 'paused'
+      // agent_user_states не обновляется при авто-disable после сбоя run — учитываем dialog_states
+      const normalized: DialogAgentStatus = userDisabled || dialogPausedFromDialogState ? 'paused' : 'active'
       const idx = dialogs.value.findIndex(d => d.id === dialog.id)
       if (idx !== -1) {
         dialogs.value[idx] = { ...dialogs.value[idx], agent_status: normalized }

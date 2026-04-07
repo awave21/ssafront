@@ -16,8 +16,8 @@ FROM agents
 WHERE deleted_at IS NULL
 ORDER BY updated_at DESC NULLS LAST;
 
--- Раскомментируйте и подставьте UUID агента, чтобы выгрузить полный system_prompt:
--- SELECT system_prompt FROM agents WHERE id = '00000000-0000-0000-0000-000000000000'::uuid;
+-- Полный system_prompt для агента Face Clinic (ЛК: …/agents/176548eb-cce1-4ca8-8775-1f24d45a1b6d/prompt):
+SELECT system_prompt FROM agents WHERE id = '176548eb-cce1-4ca8-8775-1f24d45a1b6d'::uuid;
 
 -- Активная версия из истории (если используете версионирование):
 -- SELECT v.id, v.version, v.is_active, length(v.system_prompt) AS len, left(v.system_prompt, 200)
