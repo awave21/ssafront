@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-ToolCallStatus = Literal["success", "error"]
+ToolCallStatus = Literal["success", "error", "skipped", "dry_run"]
 
 
 class ToolCallHistoryParamItem(BaseModel):
@@ -20,6 +20,7 @@ class ToolCallHistoryAgentRef(BaseModel):
 
 
 class ToolCallHistoryItem(BaseModel):
+    entry_type: Literal["tool", "scenario"] = "tool"
     id: str
     tool_name: str
     tool_description: str
@@ -33,6 +34,12 @@ class ToolCallHistoryItem(BaseModel):
     request_payload: dict[str, Any] | None = None
     response_payload: dict[str, Any] | None = None
     error_payload: dict[str, Any] | None = None
+    rule_id: str | None = None
+    rule_name: str | None = None
+    trigger_phase: str | None = None
+    matched: bool | None = None
+    rule_result_status: str | None = None
+    reason: str | None = None
 
 
 class ToolCallHistoryResponse(BaseModel):

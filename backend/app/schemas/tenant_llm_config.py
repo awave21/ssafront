@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field
 
 
 class TenantLLMConfigSet(BaseModel):
-    """Payload for setting the OpenAI API key."""
-    api_key: str = Field(..., min_length=10, max_length=512, description="OpenAI API key (sk-...)")
+    """Payload for setting a provider LLM API key."""
+    api_key: str = Field(..., min_length=10, max_length=512, description="API key for the selected provider")
     provider: str = Field(default="openai", pattern=r"^[a-z0-9_-]+$", max_length=50)
 
 

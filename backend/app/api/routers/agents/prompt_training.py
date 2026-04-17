@@ -29,6 +29,7 @@ from app.db.models.function_rule import FunctionRule
 from app.db.models.tool import Tool
 from app.services.audit import write_audit
 from app.services.prompt_trainer import ToolInfo, generate_improved_prompt
+from app.services.runtime.model_resolver import provider_prefix_from_model_name
 from app.services.tenant_llm_config import get_decrypted_api_key
 from app.services.prompt_training_crud import (
     add_feedback,
@@ -203,12 +204,24 @@ async def generate_prompt(
         session.meta_model = effective_model
 
     agent_tools = await _load_agent_tools(db, agent.id, agent.tenant_id)
-    openai_api_key = await get_decrypted_api_key(db, agent.tenant_id)
-
-    if not openai_api_key:
+    openai_api_key = await get_decrypted_api_key(db, agent.tenant_id, "openai")
+    anthropic_api_key = await get_decrypted_api_key(db, agent.tenant_id, "anthropic")
+    meta_provider = provider_prefix_from_model_name(effective_model) or "openai"
+    if meta_provider == "anthropic" and not anthropic_api_key:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="API-ключ OpenAI не настроен для организации. Установите его в Настройках организации → Ключ LLM.",
+            detail=(
+                "API-ключ Anthropic не настроен для организации. "
+                "Установите его в Настройках организации → Ключи LLM."
+            ),
+        )
+    if meta_provider == "openai" and not openai_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "API-ключ OpenAI не настроен для организации. "
+                "Установите его в Настройках организации → Ключи LLM."
+            ),
         )
 
     try:
@@ -218,6 +231,7 @@ async def generate_prompt(
             meta_model=effective_model,
             tools=agent_tools or None,
             openai_api_key=openai_api_key,
+            anthropic_api_key=anthropic_api_key,
         )
     except ValueError as exc:
         raise HTTPException(

@@ -9,14 +9,15 @@ import { useLayoutState, type LayoutBreadcrumbSegment } from '~/composables/useL
 
 const {
   initSidebarState,
-  isCollapsed,
-  toggleSidebar,
-  breadcrumbTitle,
-  breadcrumbAgentName,
-  breadcrumbBackPath,
-  layoutBreadcrumbSegments,
-  pendingBreadcrumbAction,
-  functionsRunAction,
+    isCollapsed,
+    toggleSidebar,
+    breadcrumbTitle,
+    breadcrumbAgentName,
+    breadcrumbBackPath,
+    layoutBreadcrumbSegments,
+    pendingBreadcrumbAction,
+    isEditorFullscreen,
+    functionsRunAction,
   functionsDeleteAction,
   functionsDuplicateAction,
   functionsToggleStatusAction,
@@ -54,7 +55,7 @@ onMounted(() => {
   <div class="h-screen flex overflow-hidden bg-muted">
     <!-- Sidebar управляется состоянием сворачивания -->
     <DashboardSidebar
-      v-if="!isPromptFullscreen"
+      v-if="!isPromptFullscreen && !isEditorFullscreen"
       :class="isCollapsed ? 'hidden lg:flex lg:w-16' : 'hidden lg:flex lg:w-64'"
     />
     
@@ -94,7 +95,7 @@ onMounted(() => {
     <!-- Основная область -->
     <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
       <!-- TopBar скрывается в fullscreen режиме -->
-      <DashboardTopBar v-if="!isPromptFullscreen">
+      <DashboardTopBar v-if="!isPromptFullscreen && !isEditorFullscreen">
         <template #left>
           <nav
             v-if="layoutBreadcrumbSegments?.length"

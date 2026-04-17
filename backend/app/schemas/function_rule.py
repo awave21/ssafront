@@ -7,11 +7,46 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-ConditionType = Literal["keyword", "regex", "semantic", "json_context", "always"]
-TriggerMode = Literal["pre_run", "post_tool", "post_run"]
+ConditionType = Literal[
+    "keyword",
+    "regex",
+    "semantic",
+    "json_context",
+    "always",
+    "schedule_time",
+    "schedule_weekday",
+    "dialog_source",
+    "start_param",
+    "after_scenario",
+    "client_return_gap",
+]
+TriggerMode = Literal[
+    "pre_run",
+    "post_tool",
+    "post_run",
+    "dialog_start",
+    "client_message",
+    "agent_message",
+    "manager_message",
+    "client_return",
+    "spend_limit",
+    "send_error",
+]
 ReactionMode = Literal["send_message", "ai_instruction", "ai_self_reply", "silent"]
 BehaviorMode = Literal["continue", "pause", "augment_prompt"]
-ActionType = Literal["set_tag", "send_message", "webhook", "pause_dialog", "augment_prompt", "set_result", "noop"]
+ActionType = Literal[
+    "set_tag",
+    "send_message",
+    "webhook",
+    "pause_dialog",
+    "augment_prompt",
+    "set_result",
+    "noop",
+    "block_user",
+    "unblock_user",
+    "resume_dialog",
+    "send_delayed",
+]
 ActionStatus = Literal["success", "error", "always"]
 
 REACTION_MODE_ALIASES: dict[str, ReactionMode] = {
@@ -111,6 +146,7 @@ class FunctionRuleUpdate(BaseModel):
     tool_id: UUID | None = None
     reaction_to_execution: ReactionMode | None = None
     behavior_after_execution: BehaviorMode | None = None
+    actions: list[FunctionPostActionCreate] | None = None
 
     @field_validator("reaction_to_execution", mode="before")
     @classmethod

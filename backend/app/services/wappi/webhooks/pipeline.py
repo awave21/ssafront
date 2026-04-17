@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,9 @@ from app.api.routers.webhooks_inbound_agent import process_webhook_inbound_agent
 from app.api.routers.webhooks_utils import sanitize_agent_reply_text
 from app.db.models.agent import Agent
 from app.db.models.channel import Channel
+from app.db.models.tenant import Tenant
+from app.schemas.auth import AuthContext
+from app.services.function_rules_runtime import run_rules_for_phase
 from app.services.agent_user_state import is_agent_user_disabled
 from app.services.dialog_state import is_dialog_active, is_manager_paused
 from app.services.wappi import WappiClientError
@@ -34,6 +37,61 @@ from app.services.wappi.webhooks.outgoing_status import (
 )
 
 logger = structlog.get_logger()
+
+
+async def _run_send_error_scenario_rules(
+    db: AsyncSession,
+    *,
+    agent: Agent,
+    session_id: str,
+    input_text: str,
+    user_info: dict[str, Any],
+    error_message: str,
+) -> None:
+    tenant = await db.get(Tenant, agent.tenant_id)
+    rules_enabled = bool(getattr(agent, "function_rules_enabled", True)) and bool(
+        getattr(tenant, "function_rules_enabled", True) if tenant else True
+    )
+    semantic_allowed = bool(getattr(agent, "function_rules_allow_semantic", True)) and bool(
+        getattr(tenant, "function_rules_allow_semantic", True) if tenant else True
+    )
+    if not rules_enabled:
+        return
+    webhook_user = AuthContext(
+        user_id=agent.owner_user_id,
+        tenant_id=agent.tenant_id,
+        scopes=["tools:write"],
+    )
+    trace_id = str(uuid4())
+    try:
+        await run_rules_for_phase(
+            db,
+            tenant_id=agent.tenant_id,
+            agent_id=agent.id,
+            session_id=session_id,
+            trace_id=trace_id,
+            phase="send_error",
+            message=input_text or "",
+            user=webhook_user,
+            run_id=None,
+            context={
+                "user_info": user_info,
+                "send_error": error_message,
+                "agent_timezone": getattr(agent, "timezone", None) or "UTC",
+                "input_message": input_text,
+                "message": input_text,
+            },
+            rules_enabled=True,
+            semantic_allowed=semantic_allowed,
+        )
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "send_error_scenario_rules_failed",
+            agent_id=str(agent.id),
+            session_id=session_id,
+            error=str(exc),
+        )
 
 
 @dataclass(frozen=True)
@@ -210,6 +268,14 @@ async def _handle_inbound_message(
                         channel_id=str(channel.id),
                         agent_id=str(agent_id),
                         error=str(exc),
+                    )
+                    await _run_send_error_scenario_rules(
+                        db,
+                        agent=agent,
+                        session_id=context.session_id,
+                        input_text=context.input_text,
+                        user_info=context.user_info,
+                        error_message=str(exc),
                     )
         return
 

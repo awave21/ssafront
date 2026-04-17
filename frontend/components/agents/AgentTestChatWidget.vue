@@ -63,6 +63,11 @@
               <div v-if="msg.role === 'user'" class="whitespace-pre-wrap">{{ msg.content }}</div>
               <div v-else v-html="renderAgentContent(msg.content)" />
             </div>
+            <AgentChatToolCallsStrip
+              v-if="msg.role === 'agent' && msg.tools_called?.length"
+              :tools="msg.tools_called"
+              class="mt-2"
+            />
             <div class="flex flex-col gap-1.5 mt-1.5">
               <div class="flex items-center gap-2">
                 <span class="text-[10px] text-slate-400 px-1 uppercase font-semibold tracking-wider">
@@ -148,6 +153,7 @@
 import { nextTick, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { MessageSquare, Send } from 'lucide-vue-next'
+import AgentChatToolCallsStrip from '~/components/agents/AgentChatToolCallsStrip.vue'
 import { Sheet, SheetContent } from '~/components/ui/sheet'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import { createSafeMarkdownRenderer } from '~/utils/safe-markdown'

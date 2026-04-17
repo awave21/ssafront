@@ -3,7 +3,7 @@
     <div class="mx-auto w-full max-w-7xl space-y-8">
       <section class="flex items-center justify-between">
         <div class="flex items-center gap-3">
-          <h2 class="text-xl font-black text-slate-900">История вызовов инструментов</h2>
+          <h2 class="text-xl font-black text-slate-900">История вызовов и сценариев</h2>
           <span class="inline-flex items-center rounded-xl border border-slate-100 bg-white px-3 py-1 text-xs font-bold text-slate-500 shadow-sm">
             Глобальный мониторинг
           </span>
@@ -142,7 +142,7 @@
         <template v-else-if="items.length">
           <article
             v-for="item in items"
-            :key="item.id"
+            :key="`${item.entryType}-${item.id}`"
             class="rounded-3xl border border-slate-100 bg-white shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]"
           >
             <button
@@ -159,6 +159,18 @@
 
               <div class="min-w-0 space-y-1">
                 <div class="flex min-w-0 items-center gap-2">
+                  <span
+                    v-if="item.entryType === 'scenario'"
+                    class="shrink-0 rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-800"
+                  >
+                    Сценарий
+                  </span>
+                  <span
+                    v-else
+                    class="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800"
+                  >
+                    Инструмент
+                  </span>
                   <component
                     :is="toolLinkComponent(item.toolSettingsUrl)"
                     v-bind="toolLinkProps(item.toolSettingsUrl)"
@@ -174,9 +186,9 @@
               <div class="space-y-1 text-right">
                 <span
                   class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
-                  :class="item.status === 'success' ? 'bg-emerald-100 text-emerald-700' : item.status === 'error' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'"
+                  :class="statusBadgeClass(item.status)"
                 >
-                  {{ item.status }}
+                  {{ statusLabel(item.status) }}
                 </span>
                 <p class="text-xs text-slate-500">{{ formatDateTime(item.invokedAt) }}</p>
                 <p class="text-xs text-slate-500">{{ item.durationMs !== null ? `${item.durationMs}мс` : '—' }}</p>
@@ -189,7 +201,9 @@
 
             <div class="px-5 pb-4" :class="isExpanded(item.id) ? 'block' : 'hidden'">
               <div class="mb-3 space-y-2 rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
-                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Параметры вызова</p>
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {{ item.entryType === 'scenario' ? 'Детали выполнения' : 'Параметры вызова' }}
+                </p>
                 <div v-if="item.params.length" class="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div
                     v-for="param in item.params"
@@ -274,6 +288,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ChevronDown, Search } from 'lucide-vue-next'
+import type { ToolCallHistoryStatus } from '~/types/analytics'
 import { useToolCallsHistory } from '~/composables/useToolCallsHistory'
 import type { ToolCallHistoryQuery } from '~/types/analytics'
 
@@ -307,11 +322,14 @@ const errorMessage = computed(() => {
 })
 
 const metrics = computed(() => {
-  const successCount = items.value.filter(item => item.status === 'success').length
+  const successCount = items.value.filter(item =>
+    item.status === 'success' || item.status === 'dry_run',
+  ).length
   const errorCount = items.value.filter(item => item.status === 'error').length
   const samples = items.value.filter(item => item.durationMs !== null).map(item => Number(item.durationMs))
   const avgDurationMs = samples.length ? Math.round(samples.reduce((sum, value) => sum + value, 0) / samples.length) : 0
-  const successRate = items.value.length ? Math.round((successCount / items.value.length) * 1000) / 10 : 0
+  const denom = items.value.filter(item => item.status !== 'skipped' && item.status !== 'unknown').length
+  const successRate = denom ? Math.round((successCount / denom) * 1000) / 10 : 0
 
   return {
     total: total.value,
@@ -321,6 +339,19 @@ const metrics = computed(() => {
     successRate,
   }
 })
+
+const statusBadgeClass = (status: ToolCallHistoryStatus) => {
+  if (status === 'success') return 'bg-emerald-100 text-emerald-700'
+  if (status === 'error') return 'bg-rose-100 text-rose-700'
+  if (status === 'dry_run') return 'bg-sky-100 text-sky-800'
+  if (status === 'skipped') return 'bg-slate-100 text-slate-600'
+  return 'bg-slate-100 text-slate-600'
+}
+
+const statusLabel = (status: ToolCallHistoryStatus) => {
+  if (status === 'dry_run') return 'dry_run'
+  return status
+}
 
 const isDateRangeInvalid = computed(() => {
   if (!query.dateFrom || !query.dateTo) return false
@@ -444,6 +475,6 @@ const applyDaysPreset = (days: number) => {
 await initialize()
 
 onMounted(() => {
-  pageTitle.value = 'История вызовов'
+  pageTitle.value = 'История вызовов и сценариев'
 })
 </script>

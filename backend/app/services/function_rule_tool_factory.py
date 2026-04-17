@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -34,6 +35,18 @@ def _extract_tool_description(rule_name: str, condition_config: dict[str, Any]) 
 
 def _extract_tool_schema(condition_config: dict[str, Any]) -> dict[str, Any]:
     raw_schema = condition_config.get("tool_args_schema")
+    if isinstance(raw_schema, str):
+        raw_schema = raw_schema.strip()
+        if not raw_schema:
+            raw_schema = None
+        else:
+            try:
+                raw_schema = json.loads(raw_schema)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="condition_config.tool_args_schema must be valid JSON object",
+                ) from exc
     if not isinstance(raw_schema, dict):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

@@ -108,7 +108,7 @@ const props = withDefaults(
     submitDisabled?: boolean
     submitText?: string
     cancelText?: string
-    size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
+    size?: 'sm' | 'md' | 'lg' | 'xl' | 'full' | 'viewport70'
     /**
      * Если true (по умолчанию), закрытие по оверлею / Esc / крестику шлёт `close` родителю.
      * Если false — только `update:open`, чтобы родитель сам решил (например автосохранение).
@@ -141,6 +141,8 @@ const widthClass = computed(() => {
     case 'lg': return 'max-w-3xl'
     case 'xl': return 'max-w-5xl'
     case 'full': return 'max-w-[95vw]'
+    /** На lg+ — 70% ширины окна (сценарии и др. широкие формы). */
+    case 'viewport70': return 'w-full max-w-full lg:w-[70vw] lg:max-w-[70vw]'
     default: return 'max-w-2xl'
   }
 })

@@ -1,8 +1,12 @@
 export const functionRuleActionTypes = {
   setTag: 'set_tag',
   sendMessage: 'send_message',
+  sendDelayed: 'send_delayed',
   webhook: 'webhook',
   pauseDialog: 'pause_dialog',
+  resumeDialog: 'resume_dialog',
+  blockUser: 'block_user',
+  unblockUser: 'unblock_user',
   augmentPrompt: 'augment_prompt',
   setResult: 'set_result',
   noop: 'noop',

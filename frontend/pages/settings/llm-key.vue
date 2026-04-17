@@ -1,19 +1,16 @@
 <template>
   <div class="w-full px-5 py-5 flex flex-col gap-5">
-    <!-- Permission Check -->
     <div v-if="!canManageApiKeys" class="bg-background rounded-xl border border-border p-8 text-center">
       <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
         <ShieldAlert class="h-8 w-8 text-red-600" />
       </div>
       <h3 class="text-lg font-semibold text-foreground mb-2">Нет доступа</h3>
-      <p class="text-muted-foreground text-sm">
+      <p class="text-sm text-muted-foreground">
         Управление API-ключами доступно только владельцам и администраторам.
       </p>
     </div>
 
-    <!-- Content -->
     <template v-else>
-      <!-- Back link -->
       <div>
         <NuxtLink
           to="/settings"
@@ -24,137 +21,67 @@
         </NuxtLink>
       </div>
 
-      <!-- Loading -->
-      <div v-if="isLoading" class="bg-background rounded-xl border border-border p-12 text-center">
+      <div v-if="pageLoading" class="bg-background rounded-xl border border-border p-12 text-center">
         <Loader2 class="h-8 w-8 text-primary animate-spin mx-auto mb-4" />
         <p class="text-muted-foreground">Загрузка...</p>
       </div>
 
       <template v-else>
-        <!-- Current Status Card -->
-        <div class="bg-background rounded-xl border border-border overflow-hidden">
-          <div class="px-6 py-4 border-b border-border">
-            <h2 class="text-base font-semibold text-foreground">Статус API-ключа OpenAI</h2>
-            <p class="text-sm text-muted-foreground mt-0.5">
-              Собственный ключ используется вместо системного для генерации ответов
-            </p>
-          </div>
-          <div class="px-6 py-5">
-            <div v-if="keyStatus?.has_key" class="flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-lg flex items-center justify-center"
-                  :class="keyStatus.is_active ? 'bg-emerald-100' : 'bg-amber-100'">
-                  <KeyRound class="w-5 h-5"
-                    :class="keyStatus.is_active ? 'text-emerald-600' : 'text-amber-600'" />
-                </div>
-                <div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-sm font-medium text-foreground">sk-••••{{ keyStatus.last4 }}</span>
-                    <span
-                      class="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"
-                      :class="keyStatus.is_active
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-amber-100 text-amber-700'"
-                    >
-                      {{ keyStatus.is_active ? 'Активен' : 'Неактивен' }}
-                    </span>
-                  </div>
-                  <p class="text-xs text-muted-foreground mt-0.5">
-                    Провайдер: {{ keyStatus.provider }}
-                  </p>
-                </div>
-              </div>
-              <Button
-                variant="destructive"
-                size="sm"
-                :disabled="isDeleting"
-                @click="showDeleteDialog = true"
-              >
-                <Loader2 v-if="isDeleting" class="w-4 h-4 mr-1.5 animate-spin" />
-                <Trash2 v-else class="w-4 h-4 mr-1.5" />
-                Удалить
-              </Button>
-            </div>
+        <ProviderLlmKeyCard
+          provider-id="openai"
+          title="OpenAI"
+          description="Ключ для эмбеддингов, поиска по базе знаний, каталога и моделей openai:* в агентах."
+          :status="openaiStatus"
+          v-model="openaiKeyInput"
+          input-label="API-ключ OpenAI"
+          placeholder="sk-proj-..."
+          :is-saving="isSaving"
+          :is-deleting="isDeletingKey"
+          :deleting-for-this="deleteTarget === 'openai'"
+          @save="saveOpenai"
+          @request-delete="deleteTarget = 'openai'"
+        />
 
-            <div v-else class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-muted rounded-lg flex items-center justify-center">
-                <KeyRound class="w-5 h-5 text-muted-foreground" />
-              </div>
-              <div>
-                <p class="text-sm font-medium text-foreground">Ключ не установлен</p>
-                <p class="text-xs text-muted-foreground">Без ключа запросы к OpenAI недоступны</p>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ProviderLlmKeyCard
+          provider-id="anthropic"
+          title="Anthropic (Claude)"
+          description="Ключ для моделей чата anthropic:* в агентах."
+          :status="anthropicStatus"
+          v-model="anthropicKeyInput"
+          input-label="API-ключ Anthropic"
+          placeholder="Вставьте ключ API Anthropic"
+          :is-saving="isSaving"
+          :is-deleting="isDeletingKey"
+          :deleting-for-this="deleteTarget === 'anthropic'"
+          @save="saveAnthropic"
+          @request-delete="deleteTarget = 'anthropic'"
+        />
 
-        <!-- Set / Update Key Form -->
-        <div class="bg-background rounded-xl border border-border overflow-hidden">
-          <div class="px-6 py-4 border-b border-border">
-            <h2 class="text-base font-semibold text-foreground">
-              {{ keyStatus?.has_key ? 'Обновить ключ' : 'Установить ключ' }}
-            </h2>
-          </div>
-          <div class="px-6 py-5 space-y-4">
-            <div class="space-y-2">
-              <label for="api-key-input" class="text-sm font-medium text-foreground">
-                API-ключ OpenAI
-              </label>
-              <input
-                id="api-key-input"
-                v-model="apiKeyInput"
-                type="password"
-                placeholder="sk-proj-..."
-                class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:ring-2 focus:ring-ring focus:border-transparent outline-none transition-colors"
-                :disabled="isSaving"
-              />
-              <p v-if="validationError" class="text-xs text-red-500">{{ validationError }}</p>
-              <p class="text-xs text-muted-foreground">
-                Ключ шифруется и хранится безопасно. Только последние 4 символа будут видны.
-              </p>
-            </div>
-
-            <div class="flex items-center gap-3">
-              <Button
-                :disabled="!apiKeyInput.trim() || isSaving"
-                @click="handleSave"
-              >
-                <Loader2 v-if="isSaving" class="w-4 h-4 mr-2 animate-spin" />
-                <Check v-else class="w-4 h-4 mr-2" />
-                {{ keyStatus?.has_key ? 'Обновить ключ' : 'Установить ключ' }}
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Info Block -->
         <div class="bg-muted/50 rounded-xl border border-border p-6">
           <h3 class="text-sm font-semibold text-foreground mb-2">Как это работает</h3>
           <ul class="text-sm text-muted-foreground space-y-1.5">
-            <li>Если установлен собственный ключ, он используется для всех запросов к OpenAI</li>
-            <li>При удалении ключа запросы к OpenAI будут недоступны до повторной установки ключа</li>
-            <li>Ключ шифруется Fernet и никогда не возвращается в API-ответах</li>
+            <li>OpenAI нужен для эмбеддингов и инструментов поиска; без него диалог с агентом не запустится.</li>
+            <li>Если в агенте выбрана модель Anthropic, дополнительно нужен ключ Anthropic.</li>
+            <li>Ключи шифруются Fernet и никогда не возвращаются в API-ответах.</li>
           </ul>
         </div>
       </template>
     </template>
 
-    <!-- Delete Confirmation Dialog -->
-    <Dialog :open="showDeleteDialog" @update:open="showDeleteDialog = $event">
+    <Dialog :open="deleteTarget !== null" @update:open="(v: boolean) => { if (!v) deleteTarget = null }">
       <DialogContent class="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Удалить API-ключ</DialogTitle>
           <DialogDescription>
-            После удаления запросы к OpenAI будут недоступны до установки нового ключа.
-            Это действие нельзя отменить.
+            После удаления запросы к выбранному провайдеру с использованием организационного ключа будут недоступны до установки нового ключа.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter class="gap-2">
-          <Button variant="ghost" :disabled="isDeleting" @click="showDeleteDialog = false">
+          <Button variant="ghost" :disabled="isDeletingKey" @click="deleteTarget = null">
             Отмена
           </Button>
-          <Button variant="destructive" :disabled="isDeleting" @click="handleDelete">
-            <Loader2 v-if="isDeleting" class="w-4 h-4 mr-2 animate-spin" />
+          <Button variant="destructive" :disabled="isDeletingKey" @click="runDelete">
+            <Loader2 v-if="isDeletingKey" class="w-4 h-4 mr-2 animate-spin" />
             Удалить ключ
           </Button>
         </DialogFooter>
@@ -169,7 +96,7 @@ definePageMeta({
 })
 
 import { ref, onMounted, watch } from 'vue'
-import { ArrowLeft, KeyRound, ShieldAlert, Loader2, Trash2, Check } from 'lucide-vue-next'
+import { ArrowLeft, ShieldAlert, Loader2 } from 'lucide-vue-next'
 import { Button } from '~/components/ui/button'
 import {
   Dialog,
@@ -179,59 +106,99 @@ import {
   DialogDescription,
   DialogFooter,
 } from '~/components/ui/dialog'
+import ProviderLlmKeyCard from '~/components/settings/ProviderLlmKeyCard.vue'
 import { usePermissions } from '~/composables/usePermissions'
 import { useTenantLlmConfig } from '~/composables/useTenantLlmConfig'
+import { useApiFetch } from '~/composables/useApiFetch'
+import { useToast } from '~/composables/useToast'
+import type { TenantLLMConfigStatus } from '~/types/tenantLlmConfig'
 
 const { pageTitle } = useLayoutState()
 const { canManageApiKeys } = usePermissions()
-const {
-  keyStatus,
-  isLoading,
-  isSaving,
-  isDeleting,
-  fetchKeyStatus,
-  saveKey,
-  deleteKey,
-} = useTenantLlmConfig()
+const { saveKey, isSaving } = useTenantLlmConfig()
+const apiFetch = useApiFetch()
+const { success: toastOk, error: toastErr } = useToast()
 
-const apiKeyInput = ref('')
-const validationError = ref('')
-const showDeleteDialog = ref(false)
+const openaiStatus = ref<TenantLLMConfigStatus | null>(null)
+const anthropicStatus = ref<TenantLLMConfigStatus | null>(null)
+const openaiKeyInput = ref('')
+const anthropicKeyInput = ref('')
+const deleteTarget = ref<'openai' | 'anthropic' | null>(null)
+const pageLoading = ref(true)
+const isDeletingKey = ref(false)
 
-onMounted(() => {
-  pageTitle.value = 'API-ключ OpenAI'
-  if (canManageApiKeys.value) {
-    fetchKeyStatus()
-  }
-})
+const loadStatuses = async () => {
+  const [o, a] = await Promise.all([
+    apiFetch<TenantLLMConfigStatus>('/tenant-settings/llm-key', { query: { provider: 'openai' } }),
+    apiFetch<TenantLLMConfigStatus>('/tenant-settings/llm-key', { query: { provider: 'anthropic' } }),
+  ])
+  openaiStatus.value = o
+  anthropicStatus.value = a
+}
 
-watch(canManageApiKeys, (val) => {
-  if (val) fetchKeyStatus()
-})
-
-watch(apiKeyInput, () => {
-  validationError.value = ''
-})
-
-const handleSave = async () => {
-  const key = apiKeyInput.value.trim()
-  if (key.length < 10 || key.length > 512) {
-    validationError.value = 'API-ключ должен быть от 10 до 512 символов'
+onMounted(async () => {
+  pageTitle.value = 'Ключи LLM'
+  if (!canManageApiKeys.value) {
+    pageLoading.value = false
     return
   }
-  if (!key.startsWith('sk-')) {
-    validationError.value = 'OpenAI ключ должен начинаться с «sk-»'
-    return
+  try {
+    await loadStatuses()
+  } catch {
+    /* errors surfaced via composables */
+  } finally {
+    pageLoading.value = false
   }
+})
 
+watch(canManageApiKeys, async (val) => {
+  if (val) {
+    pageLoading.value = true
+    try {
+      await loadStatuses()
+    } finally {
+      pageLoading.value = false
+    }
+  }
+})
+
+const saveOpenai = async () => {
+  const key = openaiKeyInput.value.trim()
   const result = await saveKey({ api_key: key, provider: 'openai' })
   if (result) {
-    apiKeyInput.value = ''
+    openaiKeyInput.value = ''
+    await loadStatuses()
   }
 }
 
-const handleDelete = async () => {
-  await deleteKey('openai')
-  showDeleteDialog.value = false
+const saveAnthropic = async () => {
+  const key = anthropicKeyInput.value.trim()
+  const result = await saveKey({ api_key: key, provider: 'anthropic' })
+  if (result) {
+    anthropicKeyInput.value = ''
+    await loadStatuses()
+  }
 }
+
+const runDelete = async () => {
+  const p = deleteTarget.value
+  if (!p) return
+  isDeletingKey.value = true
+  try {
+    await apiFetch('/tenant-settings/llm-key', { method: 'DELETE', query: { provider: p } })
+    toastOk('Ключ удалён', 'Запросы с этим провайдером будут недоступны до установки нового ключа')
+    deleteTarget.value = null
+    await loadStatuses()
+  } catch (err: any) {
+    if (err?.statusCode === 404) {
+      deleteTarget.value = null
+      await loadStatuses()
+      return
+    }
+    toastErr('Ошибка удаления', err?.message || 'Не удалось удалить ключ')
+  } finally {
+    isDeletingKey.value = false
+  }
+}
+
 </script>

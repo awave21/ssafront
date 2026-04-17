@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col h-[600px] bg-background rounded-md border border-border overflow-hidden">
+  <div class="flex flex-col flex-1 min-h-0 bg-background rounded-md border border-border overflow-hidden">
     <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
       <div class="flex flex-col gap-1">
         <div class="flex items-center gap-3">
@@ -59,6 +59,11 @@
           <div v-if="msg.role === 'user'" class="whitespace-pre-wrap">{{ msg.content }}</div>
           <div v-else v-html="renderAgentContent(msg.content)"></div>
         </div>
+        <AgentChatToolCallsStrip
+          v-if="msg.role === 'agent' && msg.tools_called?.length"
+          :tools="msg.tools_called"
+          class="mt-2"
+        />
         <div class="flex flex-col gap-1.5 mt-1.5">
           <div class="flex items-center gap-2">
             <span class="text-[10px] text-slate-400 px-1 uppercase font-semibold tracking-wider">
@@ -142,6 +147,7 @@
 import { nextTick, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { MessageSquare, Send } from 'lucide-vue-next'
+import AgentChatToolCallsStrip from '~/components/agents/AgentChatToolCallsStrip.vue'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import { createSafeMarkdownRenderer } from '~/utils/safe-markdown'
 

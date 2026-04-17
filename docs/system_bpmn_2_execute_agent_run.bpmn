@@ -1,0 +1,326 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+             id="Definitions_ExecuteAgentRun"
+             targetNamespace="http://agent-platform/bpmn">
+
+  <!-- ================================================================
+       PROCESS: execute_agent_run — детальный LLM pipeline
+       run_service.py + runtime/orchestrator.py
+
+       ВАЖНО по прямым вопросам (DirectQuestion):
+       — НЕ являются pre-filter и не обходят LLM.
+       — build_direct_questions_search_tool + build_direct_answer_tool
+         добавляются в extra_runtime_tools наравне с остальными.
+       — LLM сам вызывает search_direct_questions → get_direct_answer.
+       — Пост-обработка после LLM: interrupt_dialog, schedule followup,
+         fallback контент (если модель вернула пустой ответ).
+       ================================================================ -->
+  <process id="Process_ExecuteAgentRun" name="execute_agent_run (LLM Pipeline)" isExecutable="false">
+
+    <startEvent id="Start_ExecAgent" name="Запуск агента">
+      <outgoing>sf2_start_to_balance</outgoing>
+    </startEvent>
+
+    <task id="Task_CheckBalance" name="Проверить баланс тенанта&#10;(токены / деньги)">
+      <incoming>sf2_start_to_balance</incoming>
+      <outgoing>sf2_balance_to_gw</outgoing>
+    </task>
+
+    <exclusiveGateway id="GW_Balance" name="Баланс достаточен?">
+      <incoming>sf2_balance_to_gw</incoming>
+      <outgoing>sf2_balance_ok</outgoing>
+      <outgoing>sf2_balance_fail</outgoing>
+    </exclusiveGateway>
+
+    <endEvent id="End_NoBalance" name="Ошибка: недостаточно средств">
+      <incoming>sf2_balance_fail</incoming>
+    </endEvent>
+
+    <task id="Task_ResolveLlmKey" name="Расшифровать LLM API-ключ тенанта&#10;(get_decrypted_api_key)">
+      <incoming>sf2_balance_ok</incoming>
+      <outgoing>sf2_key_to_load</outgoing>
+    </task>
+
+    <!-- Загружаем агента + инструменты, включая DQ-инструменты как обычные tools -->
+    <task id="Task_LoadAgentTools" name="Загрузить агента и инструменты&#10;(load_agent_and_tools)&#10;+ build_direct_questions_search_tool&#10;+ build_direct_answer_tool&#10;+ build_knowledge_search_tool&#10;+ build_directory_runtime_tools">
+      <incoming>sf2_key_to_load</incoming>
+      <outgoing>sf2_load_to_history</outgoing>
+    </task>
+
+    <task id="Task_GetHistory" name="Получить историю сессии&#10;(get_session_history, max_history_messages)">
+      <incoming>sf2_load_to_history</incoming>
+      <outgoing>sf2_history_to_scenarios</outgoing>
+    </task>
+
+    <task id="Task_RunScenarioPhasesInner" name="Фазы сценария (если не пропущены)&#10;dialog_start / client_message / client_return">
+      <incoming>sf2_history_to_scenarios</incoming>
+      <outgoing>sf2_scenarios_to_llm</outgoing>
+    </task>
+
+    <!-- LLM сам решает вызывать ли инструменты (в т.ч. DQ search/answer) -->
+    <task id="Task_RunPydanticAI" name="Запустить Pydantic AI агент&#10;run_agent_with_tools&#10;(модель + промпт + все инструменты + история)&#10;LLM сам вызывает нужные tools">
+      <incoming>sf2_scenarios_to_llm</incoming>
+      <outgoing>sf2_llm_to_gw_tools</outgoing>
+    </task>
+
+    <exclusiveGateway id="GW_ToolCalls" name="Инструменты вызывались?">
+      <incoming>sf2_llm_to_gw_tools</incoming>
+      <outgoing>sf2_tools_yes</outgoing>
+      <outgoing>sf2_tools_no</outgoing>
+    </exclusiveGateway>
+
+    <task id="Task_ExecuteTools" name="Выполнить инструменты&#10;(HTTP Tools / SQNS MCP / Knowledge&#10;/ search_direct_questions / get_direct_answer)">
+      <incoming>sf2_tools_yes</incoming>
+      <outgoing>sf2_tools_to_join</outgoing>
+    </task>
+
+    <!-- Merge gateway после ветвей tools yes/no -->
+    <exclusiveGateway id="GW_ToolsJoin">
+      <incoming>sf2_tools_to_join</incoming>
+      <incoming>sf2_tools_no</incoming>
+      <outgoing>sf2_join_to_postprocess</outgoing>
+    </exclusiveGateway>
+
+    <!-- Пост-обработка результата DQ (если LLM вызвал get_direct_answer) -->
+    <task id="Task_PostProcessDQ" name="Пост-обработка DirectQuestion&#10;(если LLM вызвал get_direct_answer):&#10;• interrupt_dialog → отключить юзера в сессии&#10;• schedule_direct_question_followup&#10;• fallback: DQ-контент если модель вернула пустой ответ">
+      <incoming>sf2_join_to_postprocess</incoming>
+      <outgoing>sf2_postprocess_to_save</outgoing>
+    </task>
+
+    <task id="Task_SaveResults" name="Сохранить результат Run&#10;(токены, стоимость, messages JSONB, tools_called)">
+      <incoming>sf2_postprocess_to_save</incoming>
+      <outgoing>sf2_save_to_broadcast</outgoing>
+    </task>
+
+    <task id="Task_BroadcastWS" name="Broadcast WebSocket&#10;(обновление CRM в реальном времени)">
+      <incoming>sf2_save_to_broadcast</incoming>
+      <outgoing>sf2_broadcast_to_end</outgoing>
+    </task>
+
+    <endEvent id="End_ExecAgent" name="Ответ агента готов">
+      <incoming>sf2_broadcast_to_end</incoming>
+    </endEvent>
+
+    <sequenceFlow id="sf2_start_to_balance"     sourceRef="Start_ExecAgent"             targetRef="Task_CheckBalance"/>
+    <sequenceFlow id="sf2_balance_to_gw"        sourceRef="Task_CheckBalance"           targetRef="GW_Balance"/>
+    <sequenceFlow id="sf2_balance_ok"           name="Да"  sourceRef="GW_Balance"       targetRef="Task_ResolveLlmKey"/>
+    <sequenceFlow id="sf2_balance_fail"         name="Нет" sourceRef="GW_Balance"       targetRef="End_NoBalance"/>
+    <sequenceFlow id="sf2_key_to_load"          sourceRef="Task_ResolveLlmKey"          targetRef="Task_LoadAgentTools"/>
+    <sequenceFlow id="sf2_load_to_history"      sourceRef="Task_LoadAgentTools"         targetRef="Task_GetHistory"/>
+    <sequenceFlow id="sf2_history_to_scenarios" sourceRef="Task_GetHistory"             targetRef="Task_RunScenarioPhasesInner"/>
+    <sequenceFlow id="sf2_scenarios_to_llm"     sourceRef="Task_RunScenarioPhasesInner" targetRef="Task_RunPydanticAI"/>
+    <sequenceFlow id="sf2_llm_to_gw_tools"      sourceRef="Task_RunPydanticAI"          targetRef="GW_ToolCalls"/>
+    <sequenceFlow id="sf2_tools_yes"            name="Да"  sourceRef="GW_ToolCalls"     targetRef="Task_ExecuteTools"/>
+    <sequenceFlow id="sf2_tools_no"             name="Нет" sourceRef="GW_ToolCalls"     targetRef="GW_ToolsJoin"/>
+    <sequenceFlow id="sf2_tools_to_join"        sourceRef="Task_ExecuteTools"           targetRef="GW_ToolsJoin"/>
+    <sequenceFlow id="sf2_join_to_postprocess"  sourceRef="GW_ToolsJoin"               targetRef="Task_PostProcessDQ"/>
+    <sequenceFlow id="sf2_postprocess_to_save"  sourceRef="Task_PostProcessDQ"         targetRef="Task_SaveResults"/>
+    <sequenceFlow id="sf2_save_to_broadcast"    sourceRef="Task_SaveResults"            targetRef="Task_BroadcastWS"/>
+    <sequenceFlow id="sf2_broadcast_to_end"     sourceRef="Task_BroadcastWS"            targetRef="End_ExecAgent"/>
+  </process>
+
+  <!-- ================================================================
+       DIAGRAM
+       ================================================================ -->
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1" name="execute_agent_run (LLM Pipeline)">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_ExecuteAgentRun">
+
+      <!-- Start -->
+      <bpmndi:BPMNShape id="Shape_Start_ExecAgent" bpmnElement="Start_ExecAgent">
+        <dc:Bounds x="152" y="272" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="136" y="315" width="68" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- Task: Check Balance -->
+      <bpmndi:BPMNShape id="Shape_Task_CheckBalance" bpmnElement="Task_CheckBalance">
+        <dc:Bounds x="250" y="260" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <!-- GW: Balance -->
+      <bpmndi:BPMNShape id="Shape_GW_Balance" bpmnElement="GW_Balance" isMarkerVisible="true">
+        <dc:Bounds x="490" y="265" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="473" y="322" width="84" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- End: No Balance -->
+      <bpmndi:BPMNShape id="Shape_End_NoBalance" bpmnElement="End_NoBalance">
+        <dc:Bounds x="497" y="169" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="466" y="135" width="98" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- Task: Resolve LLM Key -->
+      <bpmndi:BPMNShape id="Shape_Task_ResolveLlmKey" bpmnElement="Task_ResolveLlmKey">
+        <dc:Bounds x="600" y="260" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Task: Load Agent & Tools (includes DQ tools) -->
+      <bpmndi:BPMNShape id="Shape_Task_LoadAgentTools" bpmnElement="Task_LoadAgentTools">
+        <dc:Bounds x="860" y="250" width="220" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Task: Get History -->
+      <bpmndi:BPMNShape id="Shape_Task_GetHistory" bpmnElement="Task_GetHistory">
+        <dc:Bounds x="1140" y="260" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Task: Scenario Phases -->
+      <bpmndi:BPMNShape id="Shape_Task_RunScenarioPhasesInner" bpmnElement="Task_RunScenarioPhasesInner">
+        <dc:Bounds x="1400" y="260" width="220" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Task: Run Pydantic AI -->
+      <bpmndi:BPMNShape id="Shape_Task_RunPydanticAI" bpmnElement="Task_RunPydanticAI">
+        <dc:Bounds x="1680" y="250" width="240" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <!-- GW: Tool Calls? -->
+      <bpmndi:BPMNShape id="Shape_GW_ToolCalls" bpmnElement="GW_ToolCalls" isMarkerVisible="true">
+        <dc:Bounds x="1980" y="265" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1958" y="322" width="94" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- Task: Execute Tools -->
+      <bpmndi:BPMNShape id="Shape_Task_ExecuteTools" bpmnElement="Task_ExecuteTools">
+        <dc:Bounds x="2090" y="170" width="240" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <!-- GW: Tools Join (merge) -->
+      <bpmndi:BPMNShape id="Shape_GW_ToolsJoin" bpmnElement="GW_ToolsJoin" isMarkerVisible="true">
+        <dc:Bounds x="2390" y="265" width="50" height="50"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Task: Post-Process DQ -->
+      <bpmndi:BPMNShape id="Shape_Task_PostProcessDQ" bpmnElement="Task_PostProcessDQ">
+        <dc:Bounds x="2500" y="250" width="260" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Task: Save Results -->
+      <bpmndi:BPMNShape id="Shape_Task_SaveResults" bpmnElement="Task_SaveResults">
+        <dc:Bounds x="2830" y="260" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Task: Broadcast WS -->
+      <bpmndi:BPMNShape id="Shape_Task_BroadcastWS" bpmnElement="Task_BroadcastWS">
+        <dc:Bounds x="3090" y="260" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <!-- End -->
+      <bpmndi:BPMNShape id="Shape_End_ExecAgent" bpmnElement="End_ExecAgent">
+        <dc:Bounds x="3352" y="275" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="3328" y="318" width="84" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- ── Edges ── -->
+
+      <bpmndi:BPMNEdge id="E_sf2_start_to_balance" bpmnElement="sf2_start_to_balance">
+        <di:waypoint x="188" y="290"/>
+        <di:waypoint x="250" y="290"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_balance_to_gw" bpmnElement="sf2_balance_to_gw">
+        <di:waypoint x="430" y="290"/>
+        <di:waypoint x="490" y="290"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_balance_ok" bpmnElement="sf2_balance_ok">
+        <di:waypoint x="540" y="290"/>
+        <di:waypoint x="600" y="290"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="558" y="269" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_balance_fail" bpmnElement="sf2_balance_fail">
+        <di:waypoint x="515" y="265"/>
+        <di:waypoint x="515" y="205"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="521" y="228" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_key_to_load" bpmnElement="sf2_key_to_load">
+        <di:waypoint x="800" y="290"/>
+        <di:waypoint x="860" y="290"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_load_to_history" bpmnElement="sf2_load_to_history">
+        <di:waypoint x="1080" y="290"/>
+        <di:waypoint x="1140" y="290"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_history_to_scenarios" bpmnElement="sf2_history_to_scenarios">
+        <di:waypoint x="1340" y="290"/>
+        <di:waypoint x="1400" y="290"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_scenarios_to_llm" bpmnElement="sf2_scenarios_to_llm">
+        <di:waypoint x="1620" y="290"/>
+        <di:waypoint x="1680" y="290"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_llm_to_gw_tools" bpmnElement="sf2_llm_to_gw_tools">
+        <di:waypoint x="1920" y="290"/>
+        <di:waypoint x="1980" y="290"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_tools_yes" bpmnElement="sf2_tools_yes">
+        <di:waypoint x="2005" y="265"/>
+        <di:waypoint x="2005" y="210"/>
+        <di:waypoint x="2090" y="210"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2020" y="228" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_tools_no" bpmnElement="sf2_tools_no">
+        <di:waypoint x="2030" y="290"/>
+        <di:waypoint x="2390" y="290"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2190" y="269" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_tools_to_join" bpmnElement="sf2_tools_to_join">
+        <di:waypoint x="2330" y="210"/>
+        <di:waypoint x="2415" y="210"/>
+        <di:waypoint x="2415" y="265"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_join_to_postprocess" bpmnElement="sf2_join_to_postprocess">
+        <di:waypoint x="2440" y="290"/>
+        <di:waypoint x="2500" y="290"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_postprocess_to_save" bpmnElement="sf2_postprocess_to_save">
+        <di:waypoint x="2760" y="290"/>
+        <di:waypoint x="2830" y="290"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_save_to_broadcast" bpmnElement="sf2_save_to_broadcast">
+        <di:waypoint x="3030" y="290"/>
+        <di:waypoint x="3090" y="290"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_sf2_broadcast_to_end" bpmnElement="sf2_broadcast_to_end">
+        <di:waypoint x="3290" y="290"/>
+        <di:waypoint x="3352" y="293"/>
+      </bpmndi:BPMNEdge>
+
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</definitions>

@@ -38,6 +38,9 @@ MODEL_PRESETS: dict[str, dict[str, str]] = {
     "openai:o3": {"group": "Reasoning модели", "label": "o3 (Сложные задачи)"},
     "openai:o3-pro": {"group": "Reasoning модели", "label": "o3 Pro (Больше вычислений)"},
     "openai:o4-mini": {"group": "Reasoning модели", "label": "o4 Mini (Быстрые рассуждения)"},
+    "anthropic:claude-sonnet-4-5": {"group": "Claude (Anthropic)", "label": "Claude Sonnet 4.5"},
+    "anthropic:claude-3-5-sonnet-20241022": {"group": "Claude (Anthropic)", "label": "Claude 3.5 Sonnet"},
+    "anthropic:claude-3-5-haiku-20241022": {"group": "Claude (Anthropic)", "label": "Claude 3.5 Haiku"},
 }
 
 GROUP_ORDER = {
@@ -45,6 +48,7 @@ GROUP_ORDER = {
     "GPT-4.1 (Не-reasoning модели)": 1,
     "GPT-4o (Легаси)": 2,
     "Reasoning модели": 3,
+    "Claude (Anthropic)": 4,
     "Другие": 99,
 }
 MODEL_ORDER = {value: idx for idx, value in enumerate(MODEL_PRESETS.keys())}

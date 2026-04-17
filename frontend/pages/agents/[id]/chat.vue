@@ -1,5 +1,5 @@
 <template>
-  <AgentPageShell title="Чат" :hide-actions="true">
+  <AgentPageShell title="Чат" :hide-actions="true" :contained="true" :flush="true">
     <AgentChatPanel />
   </AgentPageShell>
 </template>

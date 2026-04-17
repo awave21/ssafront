@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from app.db.models.direct_question import DirectQuestion
     from app.db.models.function_rule import FunctionRule
     from app.db.models.knowledge_file import KnowledgeFile
+    from app.db.models.script_flow import ScriptFlow
 
 
 class Agent(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
@@ -111,6 +112,11 @@ class Agent(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     )
     knowledge_files: Mapped[list["KnowledgeFile"]] = relationship(
         "KnowledgeFile",
+        back_populates="agent",
+        cascade="all, delete-orphan",
+    )
+    script_flows: Mapped[list["ScriptFlow"]] = relationship(
+        "ScriptFlow",
         back_populates="agent",
         cascade="all, delete-orphan",
     )

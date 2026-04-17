@@ -182,10 +182,10 @@
             </div>
             <div>
               <h3 class="text-lg font-semibold text-foreground mb-1">
-                API-ключ OpenAI
+                Ключи LLM (OpenAI / Anthropic)
               </h3>
               <p class="text-sm text-muted-foreground">
-                Собственный ключ для генерации ответов агентами
+                Ключи провайдеров и справочник моделей для агентов
               </p>
             </div>
           </div>

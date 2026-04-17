@@ -180,7 +180,9 @@ import {
   KeyRound,
   GraduationCap,
   ChevronsUpDown,
-  UsersRound
+  UsersRound,
+  ListTree,
+  GitBranch
 } from 'lucide-vue-next'
 import {
   TooltipRoot,
@@ -270,7 +272,7 @@ const menuItems = [
     icon: Activity
   },
   {
-    name: 'История вызовов',
+    name: 'История',
     path: '/tool-calls-history',
     icon: History
   },
@@ -299,6 +301,8 @@ const agentMenuItems = [
   { id: 'channels', name: 'Каналы', icon: Radio, path: (id: string) => `/agents/${id}/channels` },
   { id: 'connections', name: 'Интеграции', icon: Link, path: (id: string) => `/agents/${id}/connections` },
   { id: 'knowledge', name: 'База знаний', icon: Database, path: (id: string) => `/agents/${id}/knowledge` },
+  { id: 'scenarios', name: 'Сценарии', icon: ListTree, path: (id: string) => `/agents/${id}/scenarios` },
+  { id: 'script-flows', name: 'Потоки эксперта', icon: GitBranch, path: (id: string) => `/agents/${id}/scripts` },
   { id: 'functions', name: 'Функции', icon: Code, path: (id: string) => `/agents/${id}/functions` },
   { id: 'webhook', name: 'Webhook', icon: Webhook, path: (id: string) => `/agents/${id}/webhook` },
   { id: 'model', name: 'Модель', icon: Cpu, path: (id: string) => `/agents/${id}/model` },

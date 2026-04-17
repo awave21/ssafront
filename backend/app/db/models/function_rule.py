@@ -42,13 +42,38 @@ class FunctionRule(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     allow_semantic: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     priority: Mapped[int] = mapped_column(Integer, default=100, server_default="100", nullable=False)
     trigger_mode: Mapped[str] = mapped_column(
-        Enum("pre_run", "post_tool", "post_run", name="function_rule_trigger_mode"),
+        Enum(
+            "pre_run",
+            "post_tool",
+            "post_run",
+            "dialog_start",
+            "client_message",
+            "agent_message",
+            "manager_message",
+            "client_return",
+            "spend_limit",
+            "send_error",
+            name="function_rule_trigger_mode",
+        ),
         default="pre_run",
         server_default="pre_run",
         nullable=False,
     )
     condition_type: Mapped[str] = mapped_column(
-        Enum("keyword", "regex", "semantic", "json_context", "always", name="function_rule_condition_type"),
+        Enum(
+            "keyword",
+            "regex",
+            "semantic",
+            "json_context",
+            "always",
+            "schedule_time",
+            "schedule_weekday",
+            "dialog_source",
+            "start_param",
+            "after_scenario",
+            "client_return_gap",
+            name="function_rule_condition_type",
+        ),
         default="keyword",
         server_default="keyword",
         nullable=False,

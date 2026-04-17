@@ -21,12 +21,13 @@ def _build_agent(
     toolsets: list[Any] | None = None,
     history_processors: list | None = None,
     openai_api_key: str | None = None,
+    anthropic_api_key: str | None = None,
 ):
     """
     Создать pydantic-ai Agent с правильными параметрами.
 
     Args:
-        model_name: Название модели (например, 'openai:gpt-4.1', 'openai:gpt-4.1-mini')
+        model_name: Название модели (например, 'openai:gpt-4.1', 'anthropic:claude-sonnet-4-5')
         system_prompt: Системный промпт для агента
         llm_params: Параметры модели (temperature, max_tokens, etc)
         tools: Список pydantic-ai Tool объектов
@@ -88,7 +89,11 @@ def _build_agent(
     if "deps_type" in signature.parameters:
         agent_kwargs["deps_type"] = AgentDeps
 
-    model = resolve_model(model_name, openai_api_key=openai_api_key)
+    model = resolve_model(
+        model_name,
+        openai_api_key=openai_api_key,
+        anthropic_api_key=anthropic_api_key,
+    )
     return PydanticAgent(model, **agent_kwargs)
 
 

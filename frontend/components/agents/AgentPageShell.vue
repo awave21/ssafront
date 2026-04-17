@@ -1,7 +1,7 @@
 <template>
   <div
     :class="[
-      'px-5 py-5 min-h-0',
+      'min-h-0',
       /* h-full + overflow-hidden без внутреннего скролла обрезали контент (база знаний и др.) */
       props.contained ? 'flex h-full min-h-0 flex-col overflow-hidden' : '',
     ]"
@@ -10,6 +10,8 @@
       :class="[
         'flex min-h-0 flex-col',
         props.contained ? 'min-h-0 flex-1 overflow-y-auto overflow-x-hidden' : '',
+        /* Чат — на всю ширину без внешних полей; остальные страницы — отступы от края main */
+        !props.flush ? 'p-4 sm:p-6' : '',
       ]"
     >
       <!-- Auth Status Banner -->
@@ -77,6 +79,8 @@ type Props = {
   hideActions?: boolean
   /** Высота по main + без внешнего скролла (таблицы, внутренний overflow) */
   contained?: boolean
+  /** Без внешних отступов у контента (страница чата); иначе поля как у остальных разделов */
+  flush?: boolean
 }
 
 const props = defineProps<Props>()

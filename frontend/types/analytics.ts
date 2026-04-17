@@ -264,7 +264,7 @@ export type AnalyticsResourceOption = {
   name: string
 }
 
-export type ToolCallHistoryStatus = 'success' | 'error' | 'unknown'
+export type ToolCallHistoryStatus = 'success' | 'error' | 'unknown' | 'skipped' | 'dry_run'
 
 export type ToolCallHistoryUser = {
   id: string | null
@@ -284,6 +284,7 @@ export type ToolCallHistoryParam = {
 }
 
 export type ToolCallHistoryItem = {
+  entryType: 'tool' | 'scenario'
   id: string
   toolName: string
   toolDescription: string
@@ -297,6 +298,12 @@ export type ToolCallHistoryItem = {
   requestPayload: unknown
   responsePayload: unknown
   errorPayload: unknown
+  ruleId: string | null
+  ruleName: string | null
+  triggerPhase: string | null
+  matched: boolean | null
+  ruleResultStatus: string | null
+  reason: string | null
 }
 
 export type ToolCallHistoryQuery = {

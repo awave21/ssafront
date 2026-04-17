@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+             id="Definitions_BackgroundWorkers"
+             targetNamespace="http://agent-platform/bpmn">
+
+  <!-- ================================================================
+       PROCESS: Background Workers
+       Четыре независимых таймерных воркера.
+       app/workers/
+       ================================================================ -->
+  <process id="Process_Workers" name="Background Workers" isExecutable="false">
+
+    <!-- Worker 1: Scenario Delayed Dispatch -->
+    <startEvent id="Start_ScenarioWorker" name="Таймер (N сек)&#10;scenario_delayed_dispatch">
+      <outgoing>sf3_start_scenario</outgoing>
+      <timerEventDefinition id="TED_Scenario"/>
+    </startEvent>
+    <task id="Task_DispatchDelayed" name="Найти отложенные сообщения сценариев&#10;с истёкшим delay_until&#10;→ отправить через канал (Wappi / Telegram)">
+      <incoming>sf3_start_scenario</incoming>
+      <outgoing>sf3_scenario_to_end</outgoing>
+    </task>
+    <endEvent id="End_ScenarioWorker" name="Итерация завершена">
+      <incoming>sf3_scenario_to_end</incoming>
+    </endEvent>
+
+    <!-- Worker 2: SQNS Hourly Sync -->
+    <startEvent id="Start_SqnsWorker" name="Таймер (каждый час)&#10;sqns_hourly_sync">
+      <outgoing>sf3_start_sqns</outgoing>
+      <timerEventDefinition id="TED_Sqns"/>
+    </startEvent>
+    <task id="Task_SqnsSync" name="Для каждого агента с SQNS enabled:&#10;sync_sqns_entities (под distributed lock)&#10;→ обновить локальные зеркало-таблицы">
+      <incoming>sf3_start_sqns</incoming>
+      <outgoing>sf3_sqns_to_end</outgoing>
+    </task>
+    <endEvent id="End_SqnsWorker" name="Синхронизация завершена">
+      <incoming>sf3_sqns_to_end</incoming>
+    </endEvent>
+
+    <!-- Worker 3: Direct Questions Follow-up -->
+    <startEvent id="Start_DQFollowup" name="Таймер&#10;direct_questions_followup_dispatch">
+      <outgoing>sf3_start_dq</outgoing>
+      <timerEventDefinition id="TED_DQ"/>
+    </startEvent>
+    <task id="Task_DQFollowup" name="Найти просроченные follow-up джобы прямых вопросов&#10;→ выполнить run для каждого&#10;(dispatch_due_direct_question_followups)">
+      <incoming>sf3_start_dq</incoming>
+      <outgoing>sf3_dq_to_end</outgoing>
+    </task>
+    <endEvent id="End_DQWorker" name="Follow-up отправлен">
+      <incoming>sf3_dq_to_end</incoming>
+    </endEvent>
+
+    <!-- Worker 4: Direct Questions Embedding Retry -->
+    <startEvent id="Start_EmbeddingRetry" name="Таймер&#10;direct_questions_embedding_retry">
+      <outgoing>sf3_start_embed</outgoing>
+      <timerEventDefinition id="TED_Embed"/>
+    </startEvent>
+    <task id="Task_EmbeddingRetry" name="Найти прямые вопросы без эмбеддинга&#10;→ повторно векторизировать и проиндексировать">
+      <incoming>sf3_start_embed</incoming>
+      <outgoing>sf3_embed_to_end</outgoing>
+    </task>
+    <endEvent id="End_EmbeddingRetry" name="Индексация завершена">
+      <incoming>sf3_embed_to_end</incoming>
+    </endEvent>
+
+    <sequenceFlow id="sf3_start_scenario" sourceRef="Start_ScenarioWorker"  targetRef="Task_DispatchDelayed"/>
+    <sequenceFlow id="sf3_scenario_to_end" sourceRef="Task_DispatchDelayed" targetRef="End_ScenarioWorker"/>
+    <sequenceFlow id="sf3_start_sqns"      sourceRef="Start_SqnsWorker"     targetRef="Task_SqnsSync"/>
+    <sequenceFlow id="sf3_sqns_to_end"     sourceRef="Task_SqnsSync"         targetRef="End_SqnsWorker"/>
+    <sequenceFlow id="sf3_start_dq"        sourceRef="Start_DQFollowup"      targetRef="Task_DQFollowup"/>
+    <sequenceFlow id="sf3_dq_to_end"       sourceRef="Task_DQFollowup"       targetRef="End_DQWorker"/>
+    <sequenceFlow id="sf3_start_embed"     sourceRef="Start_EmbeddingRetry"  targetRef="Task_EmbeddingRetry"/>
+    <sequenceFlow id="sf3_embed_to_end"    sourceRef="Task_EmbeddingRetry"   targetRef="End_EmbeddingRetry"/>
+  </process>
+
+  <!-- ================================================================
+       DIAGRAM
+       ================================================================ -->
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1" name="Background Workers">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_Workers">
+
+      <!-- ── Worker 1: Scenario Delayed Dispatch (y=120) ── -->
+      <bpmndi:BPMNShape id="Shape_Start_ScenarioWorker" bpmnElement="Start_ScenarioWorker">
+        <dc:Bounds x="152" y="102" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="120" y="145" width="100" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_DispatchDelayed" bpmnElement="Task_DispatchDelayed">
+        <dc:Bounds x="250" y="80" width="320" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_End_ScenarioWorker" bpmnElement="End_ScenarioWorker">
+        <dc:Bounds x="632" y="102" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="610" y="145" width="80" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- ── Worker 2: SQNS Hourly Sync (y=280) ── -->
+      <bpmndi:BPMNShape id="Shape_Start_SqnsWorker" bpmnElement="Start_SqnsWorker">
+        <dc:Bounds x="152" y="262" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="120" y="305" width="100" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_SqnsSync" bpmnElement="Task_SqnsSync">
+        <dc:Bounds x="250" y="240" width="320" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_End_SqnsWorker" bpmnElement="End_SqnsWorker">
+        <dc:Bounds x="632" y="262" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="610" y="305" width="80" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- ── Worker 3: Direct Questions Follow-up (y=440) ── -->
+      <bpmndi:BPMNShape id="Shape_Start_DQFollowup" bpmnElement="Start_DQFollowup">
+        <dc:Bounds x="152" y="422" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="116" y="465" width="108" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_DQFollowup" bpmnElement="Task_DQFollowup">
+        <dc:Bounds x="250" y="400" width="320" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_End_DQWorker" bpmnElement="End_DQWorker">
+        <dc:Bounds x="632" y="422" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="610" y="465" width="80" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- ── Worker 4: Embedding Retry (y=600) ── -->
+      <bpmndi:BPMNShape id="Shape_Start_EmbeddingRetry" bpmnElement="Start_EmbeddingRetry">
+        <dc:Bounds x="152" y="582" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="116" y="625" width="108" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_EmbeddingRetry" bpmnElement="Task_EmbeddingRetry">
+        <dc:Bounds x="250" y="560" width="320" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_End_EmbeddingRetry" bpmnElement="End_EmbeddingRetry">
+        <dc:Bounds x="632" y="582" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="610" y="625" width="80" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- Edges Worker 1 -->
+      <bpmndi:BPMNEdge id="E_sf3_start_scenario" bpmnElement="sf3_start_scenario">
+        <di:waypoint x="188" y="120"/>
+        <di:waypoint x="250" y="120"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="E_sf3_scenario_to_end" bpmnElement="sf3_scenario_to_end">
+        <di:waypoint x="570" y="120"/>
+        <di:waypoint x="632" y="120"/>
+      </bpmndi:BPMNEdge>
+
+      <!-- Edges Worker 2 -->
+      <bpmndi:BPMNEdge id="E_sf3_start_sqns" bpmnElement="sf3_start_sqns">
+        <di:waypoint x="188" y="280"/>
+        <di:waypoint x="250" y="280"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="E_sf3_sqns_to_end" bpmnElement="sf3_sqns_to_end">
+        <di:waypoint x="570" y="280"/>
+        <di:waypoint x="632" y="280"/>
+      </bpmndi:BPMNEdge>
+
+      <!-- Edges Worker 3 -->
+      <bpmndi:BPMNEdge id="E_sf3_start_dq" bpmnElement="sf3_start_dq">
+        <di:waypoint x="188" y="440"/>
+        <di:waypoint x="250" y="440"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="E_sf3_dq_to_end" bpmnElement="sf3_dq_to_end">
+        <di:waypoint x="570" y="440"/>
+        <di:waypoint x="632" y="440"/>
+      </bpmndi:BPMNEdge>
+
+      <!-- Edges Worker 4 -->
+      <bpmndi:BPMNEdge id="E_sf3_start_embed" bpmnElement="sf3_start_embed">
+        <di:waypoint x="188" y="600"/>
+        <di:waypoint x="250" y="600"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="E_sf3_embed_to_end" bpmnElement="sf3_embed_to_end">
+        <di:waypoint x="570" y="600"/>
+        <di:waypoint x="632" y="600"/>
+      </bpmndi:BPMNEdge>
+
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</definitions>

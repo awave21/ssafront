@@ -1,0 +1,897 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+             id="Definitions_AgentPlatform"
+             targetNamespace="http://agent-platform/bpmn">
+
+  <!-- ================================================================
+       PROCESS 1: Inbound Message Processing
+       Описывает полный путь входящего сообщения от канала до ответа.
+       ================================================================ -->
+  <process id="Process_InboundMessage" name="Обработка входящего сообщения" isExecutable="false">
+
+    <startEvent id="StartEvent_InboundMessage" name="Сообщение получено&#10;(Wappi / Telegram)">
+      <outgoing>sf_start_to_gw_channel</outgoing>
+      <messageEventDefinition id="MED_1"/>
+    </startEvent>
+
+    <exclusiveGateway id="GW_ChannelType" name="Тип канала?">
+      <incoming>sf_start_to_gw_channel</incoming>
+      <outgoing>sf_gw_channel_to_wappi</outgoing>
+      <outgoing>sf_gw_channel_to_telegram</outgoing>
+    </exclusiveGateway>
+
+    <task id="Task_ParseWappi" name="Парсинг Wappi&#10;(WhatsApp / TG Phone / MAX)">
+      <incoming>sf_gw_channel_to_wappi</incoming>
+      <outgoing>sf_wappi_to_join</outgoing>
+    </task>
+
+    <task id="Task_ParseTelegram" name="Парсинг Telegram&#10;(Bot API update)">
+      <incoming>sf_gw_channel_to_telegram</incoming>
+      <outgoing>sf_telegram_to_join</outgoing>
+    </task>
+
+    <exclusiveGateway id="GW_ChannelJoin">
+      <incoming>sf_wappi_to_join</incoming>
+      <incoming>sf_telegram_to_join</incoming>
+      <outgoing>sf_join_to_validate</outgoing>
+    </exclusiveGateway>
+
+    <task id="Task_ValidateChannel" name="Валидация канала и агента&#10;(channel_id, webhook secret)">
+      <incoming>sf_join_to_validate</incoming>
+      <outgoing>sf_validate_to_gw_event</outgoing>
+    </task>
+
+    <exclusiveGateway id="GW_EventType" name="Тип события?">
+      <incoming>sf_validate_to_gw_event</incoming>
+      <outgoing>sf_gw_event_to_delivery</outgoing>
+      <outgoing>sf_gw_event_to_message</outgoing>
+    </exclusiveGateway>
+
+    <task id="Task_UpdateDelivery" name="Обновить статус доставки&#10;исходящего сообщения">
+      <incoming>sf_gw_event_to_delivery</incoming>
+      <outgoing>sf_delivery_to_end</outgoing>
+    </task>
+
+    <endEvent id="EndEvent_Delivery" name="Статус доставки обновлён">
+      <incoming>sf_delivery_to_end</incoming>
+    </endEvent>
+
+    <task id="Task_CheckGates" name="Проверка состояния диалога&#10;(активен / пауза менеджера / агент отключён / юзер отключён)">
+      <incoming>sf_gw_event_to_message</incoming>
+      <outgoing>sf_gates_to_gw_run</outgoing>
+    </task>
+
+    <exclusiveGateway id="GW_ShouldRunAgent" name="Запускать агента?">
+      <incoming>sf_gates_to_gw_run</incoming>
+      <outgoing>sf_no_run</outgoing>
+      <outgoing>sf_yes_run</outgoing>
+    </exclusiveGateway>
+
+    <endEvent id="EndEvent_NoRun" name="Сообщение сохранено&#10;(без вызова LLM)">
+      <incoming>sf_no_run</incoming>
+    </endEvent>
+
+    <task id="Task_CreateRun" name="Создать запись Run&#10;(status = running, trace_id)">
+      <incoming>sf_yes_run</incoming>
+      <outgoing>sf_run_to_scenarios</outgoing>
+    </task>
+
+    <task id="Task_ScenarioPhases" name="Выполнить фазы сценария&#10;dialog_start / client_message / client_return&#10;(run_rules_for_phase)">
+      <incoming>sf_run_to_scenarios</incoming>
+      <outgoing>sf_scenarios_to_gw_forced</outgoing>
+    </task>
+
+    <exclusiveGateway id="GW_ForcedResult" name="Сценарий задал&#10;принудительный ответ?">
+      <incoming>sf_scenarios_to_gw_forced</incoming>
+      <outgoing>sf_forced_yes</outgoing>
+      <outgoing>sf_forced_no</outgoing>
+    </exclusiveGateway>
+
+    <task id="Task_SendForcedResponse" name="Отправить принудительный ответ&#10;сценария (без LLM)">
+      <incoming>sf_forced_yes</incoming>
+      <outgoing>sf_forced_to_end</outgoing>
+    </task>
+
+    <endEvent id="EndEvent_Forced" name="Ответ сценария отправлен&#10;(LLM не вызывался)">
+      <incoming>sf_forced_to_end</incoming>
+    </endEvent>
+
+    <callActivity id="CallActivity_ExecuteAgent" name="execute_agent_run&#10;(Process_ExecuteAgentRun)" calledElement="Process_ExecuteAgentRun">
+      <incoming>sf_forced_no</incoming>
+      <outgoing>sf_agent_to_send</outgoing>
+    </callActivity>
+
+    <task id="Task_SendResponse" name="Отправить ответ агента&#10;через канал (Wappi API / Telegram Bot API)">
+      <incoming>sf_agent_to_send</incoming>
+      <outgoing>sf_send_to_end</outgoing>
+    </task>
+
+    <endEvent id="EndEvent_Main" name="Диалог обработан">
+      <incoming>sf_send_to_end</incoming>
+    </endEvent>
+
+    <!-- Sequence flows -->
+    <sequenceFlow id="sf_start_to_gw_channel" sourceRef="StartEvent_InboundMessage" targetRef="GW_ChannelType"/>
+    <sequenceFlow id="sf_gw_channel_to_wappi" name="Wappi" sourceRef="GW_ChannelType" targetRef="Task_ParseWappi"/>
+    <sequenceFlow id="sf_gw_channel_to_telegram" name="Telegram" sourceRef="GW_ChannelType" targetRef="Task_ParseTelegram"/>
+    <sequenceFlow id="sf_wappi_to_join" sourceRef="Task_ParseWappi" targetRef="GW_ChannelJoin"/>
+    <sequenceFlow id="sf_telegram_to_join" sourceRef="Task_ParseTelegram" targetRef="GW_ChannelJoin"/>
+    <sequenceFlow id="sf_join_to_validate" sourceRef="GW_ChannelJoin" targetRef="Task_ValidateChannel"/>
+    <sequenceFlow id="sf_validate_to_gw_event" sourceRef="Task_ValidateChannel" targetRef="GW_EventType"/>
+    <sequenceFlow id="sf_gw_event_to_delivery" name="Статус доставки" sourceRef="GW_EventType" targetRef="Task_UpdateDelivery"/>
+    <sequenceFlow id="sf_gw_event_to_message" name="Входящее сообщение" sourceRef="GW_EventType" targetRef="Task_CheckGates"/>
+    <sequenceFlow id="sf_delivery_to_end" sourceRef="Task_UpdateDelivery" targetRef="EndEvent_Delivery"/>
+    <sequenceFlow id="sf_gates_to_gw_run" sourceRef="Task_CheckGates" targetRef="GW_ShouldRunAgent"/>
+    <sequenceFlow id="sf_no_run" name="Нет (заблокирован / неактивен)" sourceRef="GW_ShouldRunAgent" targetRef="EndEvent_NoRun"/>
+    <sequenceFlow id="sf_yes_run" name="Да" sourceRef="GW_ShouldRunAgent" targetRef="Task_CreateRun"/>
+    <sequenceFlow id="sf_run_to_scenarios" sourceRef="Task_CreateRun" targetRef="Task_ScenarioPhases"/>
+    <sequenceFlow id="sf_scenarios_to_gw_forced" sourceRef="Task_ScenarioPhases" targetRef="GW_ForcedResult"/>
+    <sequenceFlow id="sf_forced_yes" name="Да" sourceRef="GW_ForcedResult" targetRef="Task_SendForcedResponse"/>
+    <sequenceFlow id="sf_forced_no" name="Нет (нужен LLM)" sourceRef="GW_ForcedResult" targetRef="CallActivity_ExecuteAgent"/>
+    <sequenceFlow id="sf_forced_to_end" sourceRef="Task_SendForcedResponse" targetRef="EndEvent_Forced"/>
+    <sequenceFlow id="sf_agent_to_send" sourceRef="CallActivity_ExecuteAgent" targetRef="Task_SendResponse"/>
+    <sequenceFlow id="sf_send_to_end" sourceRef="Task_SendResponse" targetRef="EndEvent_Main"/>
+  </process>
+
+  <!-- ================================================================
+       PROCESS 2: execute_agent_run
+       Детальный subprocess вызова LLM через Pydantic AI.
+       ================================================================ -->
+  <process id="Process_ExecuteAgentRun" name="execute_agent_run (LLM Pipeline)" isExecutable="false">
+
+    <startEvent id="Start_ExecAgent" name="Запуск агента">
+      <outgoing>sf2_start_to_balance</outgoing>
+    </startEvent>
+
+    <task id="Task_CheckBalance" name="Проверить баланс тенанта&#10;(токены / деньги)">
+      <incoming>sf2_start_to_balance</incoming>
+      <outgoing>sf2_balance_to_gw</outgoing>
+    </task>
+
+    <exclusiveGateway id="GW_Balance" name="Баланс достаточен?">
+      <incoming>sf2_balance_to_gw</incoming>
+      <outgoing>sf2_balance_ok</outgoing>
+      <outgoing>sf2_balance_fail</outgoing>
+    </exclusiveGateway>
+
+    <endEvent id="End_NoBalance" name="Ошибка: недостаточно средств">
+      <incoming>sf2_balance_fail</incoming>
+    </endEvent>
+
+    <task id="Task_ResolveLlmKey" name="Получить LLM API-ключ тенанта&#10;(get_decrypted_api_key)">
+      <incoming>sf2_balance_ok</incoming>
+      <outgoing>sf2_key_to_directq</outgoing>
+    </task>
+
+    <task id="Task_CheckDirectQ" name="Маршрутизатор прямых вопросов&#10;(DirectQuestion router)">
+      <incoming>sf2_key_to_directq</incoming>
+      <outgoing>sf2_direct_to_gw</outgoing>
+    </task>
+
+    <exclusiveGateway id="GW_DirectQ" name="Найден прямой вопрос?">
+      <incoming>sf2_direct_to_gw</incoming>
+      <outgoing>sf2_direct_found</outgoing>
+      <outgoing>sf2_direct_not_found</outgoing>
+    </exclusiveGateway>
+
+    <endEvent id="End_DirectQ" name="Ответ прямым вопросом&#10;(без вызова LLM)">
+      <incoming>sf2_direct_found</incoming>
+    </endEvent>
+
+    <task id="Task_LoadAgentTools" name="Загрузить агента и инструменты&#10;(load_agent_and_tools)">
+      <incoming>sf2_direct_not_found</incoming>
+      <outgoing>sf2_load_to_history</outgoing>
+    </task>
+
+    <task id="Task_GetHistory" name="Получить историю сессии&#10;(get_session_history, max_history_messages)">
+      <incoming>sf2_load_to_history</incoming>
+      <outgoing>sf2_history_to_scenarios</outgoing>
+    </task>
+
+    <task id="Task_RunScenarioPhasesInner" name="Фазы сценария (если не пропущены)&#10;dialog_start / client_message / client_return">
+      <incoming>sf2_history_to_scenarios</incoming>
+      <outgoing>sf2_scenarios_to_llm</outgoing>
+    </task>
+
+    <task id="Task_RunPydanticAI" name="Запустить Pydantic AI агент&#10;run_agent_with_tools&#10;(модель + системный промпт + инструменты + история)">
+      <incoming>sf2_scenarios_to_llm</incoming>
+      <outgoing>sf2_llm_to_gw_tools</outgoing>
+    </task>
+
+    <exclusiveGateway id="GW_ToolCalls" name="Агент вызвал инструменты?">
+      <incoming>sf2_llm_to_gw_tools</incoming>
+      <outgoing>sf2_tools_yes</outgoing>
+      <outgoing>sf2_tools_no</outgoing>
+    </exclusiveGateway>
+
+    <task id="Task_ExecuteTools" name="Выполнить инструменты&#10;(HTTP Tools / SQNS MCP / Knowledge / Directory)">
+      <incoming>sf2_tools_yes</incoming>
+      <outgoing>sf2_tools_back_to_llm</outgoing>
+    </task>
+
+    <task id="Task_SaveResults" name="Сохранить результат Run&#10;(токены, стоимость, messages JSONB)">
+      <incoming>sf2_tools_no</incoming>
+      <incoming>sf2_tools_back_to_llm</incoming>
+      <outgoing>sf2_save_to_broadcast</outgoing>
+    </task>
+
+    <task id="Task_BroadcastWS" name="Broadcast WebSocket&#10;(обновление CRM в реальном времени)">
+      <incoming>sf2_save_to_broadcast</incoming>
+      <outgoing>sf2_broadcast_to_end</outgoing>
+    </task>
+
+    <endEvent id="End_ExecAgent" name="Ответ агента готов">
+      <incoming>sf2_broadcast_to_end</incoming>
+    </endEvent>
+
+    <sequenceFlow id="sf2_start_to_balance" sourceRef="Start_ExecAgent" targetRef="Task_CheckBalance"/>
+    <sequenceFlow id="sf2_balance_to_gw" sourceRef="Task_CheckBalance" targetRef="GW_Balance"/>
+    <sequenceFlow id="sf2_balance_ok" name="Да" sourceRef="GW_Balance" targetRef="Task_ResolveLlmKey"/>
+    <sequenceFlow id="sf2_balance_fail" name="Нет" sourceRef="GW_Balance" targetRef="End_NoBalance"/>
+    <sequenceFlow id="sf2_key_to_directq" sourceRef="Task_ResolveLlmKey" targetRef="Task_CheckDirectQ"/>
+    <sequenceFlow id="sf2_direct_to_gw" sourceRef="Task_CheckDirectQ" targetRef="GW_DirectQ"/>
+    <sequenceFlow id="sf2_direct_found" name="Да" sourceRef="GW_DirectQ" targetRef="End_DirectQ"/>
+    <sequenceFlow id="sf2_direct_not_found" name="Нет" sourceRef="GW_DirectQ" targetRef="Task_LoadAgentTools"/>
+    <sequenceFlow id="sf2_load_to_history" sourceRef="Task_LoadAgentTools" targetRef="Task_GetHistory"/>
+    <sequenceFlow id="sf2_history_to_scenarios" sourceRef="Task_GetHistory" targetRef="Task_RunScenarioPhasesInner"/>
+    <sequenceFlow id="sf2_scenarios_to_llm" sourceRef="Task_RunScenarioPhasesInner" targetRef="Task_RunPydanticAI"/>
+    <sequenceFlow id="sf2_llm_to_gw_tools" sourceRef="Task_RunPydanticAI" targetRef="GW_ToolCalls"/>
+    <sequenceFlow id="sf2_tools_yes" name="Да" sourceRef="GW_ToolCalls" targetRef="Task_ExecuteTools"/>
+    <sequenceFlow id="sf2_tools_no" name="Нет" sourceRef="GW_ToolCalls" targetRef="Task_SaveResults"/>
+    <sequenceFlow id="sf2_tools_back_to_llm" sourceRef="Task_ExecuteTools" targetRef="Task_SaveResults"/>
+    <sequenceFlow id="sf2_save_to_broadcast" sourceRef="Task_SaveResults" targetRef="Task_BroadcastWS"/>
+    <sequenceFlow id="sf2_broadcast_to_end" sourceRef="Task_BroadcastWS" targetRef="End_ExecAgent"/>
+  </process>
+
+  <!-- ================================================================
+       PROCESS 3: Background Workers
+       Фоновые воркеры: отложенные сообщения, SQNS, follow-up.
+       ================================================================ -->
+  <process id="Process_Workers" name="Background Workers" isExecutable="false">
+
+    <!-- Worker 1: Scenario Delayed Dispatch -->
+    <startEvent id="Start_ScenarioWorker" name="Таймер (N сек)">
+      <outgoing>sf3_start_scenario</outgoing>
+      <timerEventDefinition id="TED_Scenario"/>
+    </startEvent>
+    <task id="Task_DispatchDelayed" name="Отправить отложенные сообщения сценариев&#10;(dispatch_due_scenario_messages)">
+      <incoming>sf3_start_scenario</incoming>
+      <outgoing>sf3_scenario_to_end</outgoing>
+    </task>
+    <endEvent id="End_ScenarioWorker" name="Итерация завершена">
+      <incoming>sf3_scenario_to_end</incoming>
+    </endEvent>
+
+    <!-- Worker 2: SQNS Hourly Sync -->
+    <startEvent id="Start_SqnsWorker" name="Таймер (каждый час)">
+      <outgoing>sf3_start_sqns</outgoing>
+      <timerEventDefinition id="TED_Sqns"/>
+    </startEvent>
+    <task id="Task_SqnsSync" name="Синхронизировать данные SQNS&#10;(sync_sqns_entities для каждого агента)">
+      <incoming>sf3_start_sqns</incoming>
+      <outgoing>sf3_sqns_to_end</outgoing>
+    </task>
+    <endEvent id="End_SqnsWorker" name="Синхронизация завершена">
+      <incoming>sf3_sqns_to_end</incoming>
+    </endEvent>
+
+    <!-- Worker 3: Direct Questions Follow-up -->
+    <startEvent id="Start_DQFollowup" name="Таймер">
+      <outgoing>sf3_start_dq</outgoing>
+      <timerEventDefinition id="TED_DQ"/>
+    </startEvent>
+    <task id="Task_DQFollowup" name="Отправить follow-up прямых вопросов&#10;(dispatch_due_direct_question_followups)">
+      <incoming>sf3_start_dq</incoming>
+      <outgoing>sf3_dq_to_end</outgoing>
+    </task>
+    <endEvent id="End_DQWorker" name="Follow-up отправлен">
+      <incoming>sf3_dq_to_end</incoming>
+    </endEvent>
+
+    <!-- Worker 4: Direct Questions Embedding Retry -->
+    <startEvent id="Start_EmbeddingRetry" name="Таймер">
+      <outgoing>sf3_start_embed</outgoing>
+      <timerEventDefinition id="TED_Embed"/>
+    </startEvent>
+    <task id="Task_EmbeddingRetry" name="Повторная индексация эмбеддингов&#10;прямых вопросов (embedding retry)">
+      <incoming>sf3_start_embed</incoming>
+      <outgoing>sf3_embed_to_end</outgoing>
+    </task>
+    <endEvent id="End_EmbeddingRetry" name="Индексация завершена">
+      <incoming>sf3_embed_to_end</incoming>
+    </endEvent>
+
+    <sequenceFlow id="sf3_start_scenario" sourceRef="Start_ScenarioWorker" targetRef="Task_DispatchDelayed"/>
+    <sequenceFlow id="sf3_scenario_to_end" sourceRef="Task_DispatchDelayed" targetRef="End_ScenarioWorker"/>
+    <sequenceFlow id="sf3_start_sqns" sourceRef="Start_SqnsWorker" targetRef="Task_SqnsSync"/>
+    <sequenceFlow id="sf3_sqns_to_end" sourceRef="Task_SqnsSync" targetRef="End_SqnsWorker"/>
+    <sequenceFlow id="sf3_start_dq" sourceRef="Start_DQFollowup" targetRef="Task_DQFollowup"/>
+    <sequenceFlow id="sf3_dq_to_end" sourceRef="Task_DQFollowup" targetRef="End_DQWorker"/>
+    <sequenceFlow id="sf3_start_embed" sourceRef="Start_EmbeddingRetry" targetRef="Task_EmbeddingRetry"/>
+    <sequenceFlow id="sf3_embed_to_end" sourceRef="Task_EmbeddingRetry" targetRef="End_EmbeddingRetry"/>
+  </process>
+
+  <!-- ================================================================
+       DIAGRAM 1: Обработка входящего сообщения
+       ================================================================ -->
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1" name="1 — Обработка входящего сообщения">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_InboundMessage">
+
+      <bpmndi:BPMNShape id="Shape_StartEvent_InboundMessage" bpmnElement="StartEvent_InboundMessage">
+        <dc:Bounds x="152" y="222" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="126" y="265" width="88" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_GW_ChannelType" bpmnElement="GW_ChannelType" isMarkerVisible="true">
+        <dc:Bounds x="245" y="215" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="238" y="272" width="64" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_ParseWappi" bpmnElement="Task_ParseWappi">
+        <dc:Bounds x="360" y="155" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_ParseTelegram" bpmnElement="Task_ParseTelegram">
+        <dc:Bounds x="360" y="275" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_GW_ChannelJoin" bpmnElement="GW_ChannelJoin" isMarkerVisible="true">
+        <dc:Bounds x="595" y="215" width="50" height="50"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_ValidateChannel" bpmnElement="Task_ValidateChannel">
+        <dc:Bounds x="700" y="210" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_GW_EventType" bpmnElement="GW_EventType" isMarkerVisible="true">
+        <dc:Bounds x="935" y="215" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="928" y="272" width="64" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_UpdateDelivery" bpmnElement="Task_UpdateDelivery">
+        <dc:Bounds x="1050" y="135" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_EndEvent_Delivery" bpmnElement="EndEvent_Delivery">
+        <dc:Bounds x="1282" y="149" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1256" y="192" width="88" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_CheckGates" bpmnElement="Task_CheckGates">
+        <dc:Bounds x="1050" y="285" width="220" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_GW_ShouldRunAgent" bpmnElement="GW_ShouldRunAgent" isMarkerVisible="true">
+        <dc:Bounds x="1325" y="290" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1308" y="347" width="84" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_EndEvent_NoRun" bpmnElement="EndEvent_NoRun">
+        <dc:Bounds x="1332" y="189" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1306" y="157" width="88" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_CreateRun" bpmnElement="Task_CreateRun">
+        <dc:Bounds x="1440" y="285" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_ScenarioPhases" bpmnElement="Task_ScenarioPhases">
+        <dc:Bounds x="1680" y="285" width="220" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_GW_ForcedResult" bpmnElement="GW_ForcedResult" isMarkerVisible="true">
+        <dc:Bounds x="1960" y="290" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1940" y="347" width="90" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_SendForcedResponse" bpmnElement="Task_SendForcedResponse">
+        <dc:Bounds x="2075" y="195" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_EndEvent_Forced" bpmnElement="EndEvent_Forced">
+        <dc:Bounds x="2332" y="209" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2306" y="252" width="88" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_CallActivity_ExecuteAgent" bpmnElement="CallActivity_ExecuteAgent" isExpanded="false">
+        <dc:Bounds x="2075" y="285" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_SendResponse" bpmnElement="Task_SendResponse">
+        <dc:Bounds x="2345" y="285" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_EndEvent_Main" bpmnElement="EndEvent_Main">
+        <dc:Bounds x="2607" y="300" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2583" y="343" width="84" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- Edges Diagram 1 -->
+      <bpmndi:BPMNEdge id="Edge_sf_start_to_gw_channel" bpmnElement="sf_start_to_gw_channel">
+        <di:waypoint x="188" y="240"/>
+        <di:waypoint x="245" y="240"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_gw_channel_to_wappi" bpmnElement="sf_gw_channel_to_wappi">
+        <di:waypoint x="270" y="215"/>
+        <di:waypoint x="270" y="185"/>
+        <di:waypoint x="360" y="185"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="291" y="191" width="37" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_gw_channel_to_telegram" bpmnElement="sf_gw_channel_to_telegram">
+        <di:waypoint x="270" y="265"/>
+        <di:waypoint x="270" y="305"/>
+        <di:waypoint x="360" y="305"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="283" y="283" width="47" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_wappi_to_join" bpmnElement="sf_wappi_to_join">
+        <di:waypoint x="540" y="185"/>
+        <di:waypoint x="620" y="185"/>
+        <di:waypoint x="620" y="215"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_telegram_to_join" bpmnElement="sf_telegram_to_join">
+        <di:waypoint x="540" y="305"/>
+        <di:waypoint x="620" y="305"/>
+        <di:waypoint x="620" y="265"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_join_to_validate" bpmnElement="sf_join_to_validate">
+        <di:waypoint x="645" y="240"/>
+        <di:waypoint x="700" y="240"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_validate_to_gw_event" bpmnElement="sf_validate_to_gw_event">
+        <di:waypoint x="880" y="240"/>
+        <di:waypoint x="935" y="240"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_gw_event_to_delivery" bpmnElement="sf_gw_event_to_delivery">
+        <di:waypoint x="960" y="215"/>
+        <di:waypoint x="960" y="165"/>
+        <di:waypoint x="1050" y="165"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="970" y="141" width="90" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_gw_event_to_message" bpmnElement="sf_gw_event_to_message">
+        <di:waypoint x="960" y="265"/>
+        <di:waypoint x="960" y="315"/>
+        <di:waypoint x="1050" y="315"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="970" y="320" width="90" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_delivery_to_end" bpmnElement="sf_delivery_to_end">
+        <di:waypoint x="1230" y="165"/>
+        <di:waypoint x="1282" y="167"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_gates_to_gw_run" bpmnElement="sf_gates_to_gw_run">
+        <di:waypoint x="1270" y="315"/>
+        <di:waypoint x="1325" y="315"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_no_run" bpmnElement="sf_no_run">
+        <di:waypoint x="1350" y="290"/>
+        <di:waypoint x="1350" y="225"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1356" y="250" width="80" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_yes_run" bpmnElement="sf_yes_run">
+        <di:waypoint x="1375" y="315"/>
+        <di:waypoint x="1440" y="315"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1398" y="294" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_run_to_scenarios" bpmnElement="sf_run_to_scenarios">
+        <di:waypoint x="1620" y="315"/>
+        <di:waypoint x="1680" y="315"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_scenarios_to_gw_forced" bpmnElement="sf_scenarios_to_gw_forced">
+        <di:waypoint x="1900" y="315"/>
+        <di:waypoint x="1960" y="315"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_forced_yes" bpmnElement="sf_forced_yes">
+        <di:waypoint x="1985" y="290"/>
+        <di:waypoint x="1985" y="225"/>
+        <di:waypoint x="2075" y="225"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2010" y="250" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_forced_no" bpmnElement="sf_forced_no">
+        <di:waypoint x="2010" y="315"/>
+        <di:waypoint x="2075" y="315"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2018" y="294" width="48" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_forced_to_end" bpmnElement="sf_forced_to_end">
+        <di:waypoint x="2275" y="225"/>
+        <di:waypoint x="2332" y="227"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_agent_to_send" bpmnElement="sf_agent_to_send">
+        <di:waypoint x="2275" y="315"/>
+        <di:waypoint x="2345" y="315"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf_send_to_end" bpmnElement="sf_send_to_end">
+        <di:waypoint x="2545" y="315"/>
+        <di:waypoint x="2607" y="318"/>
+      </bpmndi:BPMNEdge>
+
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+  <!-- ================================================================
+       DIAGRAM 2: execute_agent_run (LLM Pipeline)
+       ================================================================ -->
+  <bpmndi:BPMNDiagram id="BPMNDiagram_2" name="2 — execute_agent_run (LLM Pipeline)">
+    <bpmndi:BPMNPlane id="BPMNPlane_2" bpmnElement="Process_ExecuteAgentRun">
+
+      <bpmndi:BPMNShape id="Shape_Start_ExecAgent" bpmnElement="Start_ExecAgent">
+        <dc:Bounds x="152" y="222" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="136" y="265" width="68" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_CheckBalance" bpmnElement="Task_CheckBalance">
+        <dc:Bounds x="250" y="210" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_GW_Balance" bpmnElement="GW_Balance" isMarkerVisible="true">
+        <dc:Bounds x="490" y="215" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="474" y="272" width="82" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_End_NoBalance" bpmnElement="End_NoBalance">
+        <dc:Bounds x="497" y="129" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="470" y="99" width="90" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_ResolveLlmKey" bpmnElement="Task_ResolveLlmKey">
+        <dc:Bounds x="600" y="210" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_CheckDirectQ" bpmnElement="Task_CheckDirectQ">
+        <dc:Bounds x="840" y="210" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_GW_DirectQ" bpmnElement="GW_DirectQ" isMarkerVisible="true">
+        <dc:Bounds x="1100" y="215" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1082" y="272" width="86" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_End_DirectQ" bpmnElement="End_DirectQ">
+        <dc:Bounds x="1107" y="129" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1080" y="99" width="90" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_LoadAgentTools" bpmnElement="Task_LoadAgentTools">
+        <dc:Bounds x="1220" y="210" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_GetHistory" bpmnElement="Task_GetHistory">
+        <dc:Bounds x="1460" y="210" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_RunScenarioPhasesInner" bpmnElement="Task_RunScenarioPhasesInner">
+        <dc:Bounds x="1720" y="210" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_RunPydanticAI" bpmnElement="Task_RunPydanticAI">
+        <dc:Bounds x="1980" y="210" width="220" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_GW_ToolCalls" bpmnElement="GW_ToolCalls" isMarkerVisible="true">
+        <dc:Bounds x="2260" y="215" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2240" y="272" width="90" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_ExecuteTools" bpmnElement="Task_ExecuteTools">
+        <dc:Bounds x="2375" y="130" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_SaveResults" bpmnElement="Task_SaveResults">
+        <dc:Bounds x="2375" y="280" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_BroadcastWS" bpmnElement="Task_BroadcastWS">
+        <dc:Bounds x="2640" y="280" width="200" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_End_ExecAgent" bpmnElement="End_ExecAgent">
+        <dc:Bounds x="2902" y="295" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2878" y="338" width="84" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- Edges Diagram 2 -->
+      <bpmndi:BPMNEdge id="Edge_sf2_start_to_balance" bpmnElement="sf2_start_to_balance">
+        <di:waypoint x="188" y="240"/>
+        <di:waypoint x="250" y="240"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_balance_to_gw" bpmnElement="sf2_balance_to_gw">
+        <di:waypoint x="430" y="240"/>
+        <di:waypoint x="490" y="240"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_balance_ok" bpmnElement="sf2_balance_ok">
+        <di:waypoint x="540" y="240"/>
+        <di:waypoint x="600" y="240"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="557" y="219" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_balance_fail" bpmnElement="sf2_balance_fail">
+        <di:waypoint x="515" y="215"/>
+        <di:waypoint x="515" y="165"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="521" y="183" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_key_to_directq" bpmnElement="sf2_key_to_directq">
+        <di:waypoint x="780" y="240"/>
+        <di:waypoint x="840" y="240"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_direct_to_gw" bpmnElement="sf2_direct_to_gw">
+        <di:waypoint x="1040" y="240"/>
+        <di:waypoint x="1100" y="240"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_direct_found" bpmnElement="sf2_direct_found">
+        <di:waypoint x="1125" y="215"/>
+        <di:waypoint x="1125" y="165"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1131" y="183" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_direct_not_found" bpmnElement="sf2_direct_not_found">
+        <di:waypoint x="1150" y="240"/>
+        <di:waypoint x="1220" y="240"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1166" y="219" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_load_to_history" bpmnElement="sf2_load_to_history">
+        <di:waypoint x="1400" y="240"/>
+        <di:waypoint x="1460" y="240"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_history_to_scenarios" bpmnElement="sf2_history_to_scenarios">
+        <di:waypoint x="1660" y="240"/>
+        <di:waypoint x="1720" y="240"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_scenarios_to_llm" bpmnElement="sf2_scenarios_to_llm">
+        <di:waypoint x="1920" y="240"/>
+        <di:waypoint x="1980" y="240"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_llm_to_gw_tools" bpmnElement="sf2_llm_to_gw_tools">
+        <di:waypoint x="2200" y="240"/>
+        <di:waypoint x="2260" y="240"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_tools_yes" bpmnElement="sf2_tools_yes">
+        <di:waypoint x="2285" y="215"/>
+        <di:waypoint x="2285" y="160"/>
+        <di:waypoint x="2375" y="160"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2308" y="180" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_tools_no" bpmnElement="sf2_tools_no">
+        <di:waypoint x="2285" y="265"/>
+        <di:waypoint x="2285" y="310"/>
+        <di:waypoint x="2375" y="310"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2308" y="280" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_tools_back_to_llm" bpmnElement="sf2_tools_back_to_llm">
+        <di:waypoint x="2575" y="160"/>
+        <di:waypoint x="2610" y="160"/>
+        <di:waypoint x="2610" y="310"/>
+        <di:waypoint x="2375" y="310"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_save_to_broadcast" bpmnElement="sf2_save_to_broadcast">
+        <di:waypoint x="2575" y="310"/>
+        <di:waypoint x="2640" y="310"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_sf2_broadcast_to_end" bpmnElement="sf2_broadcast_to_end">
+        <di:waypoint x="2840" y="310"/>
+        <di:waypoint x="2902" y="313"/>
+      </bpmndi:BPMNEdge>
+
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+  <!-- ================================================================
+       DIAGRAM 3: Background Workers
+       ================================================================ -->
+  <bpmndi:BPMNDiagram id="BPMNDiagram_3" name="3 — Background Workers">
+    <bpmndi:BPMNPlane id="BPMNPlane_3" bpmnElement="Process_Workers">
+
+      <!-- Worker 1: Scenario Delayed Dispatch (row y=120) -->
+      <bpmndi:BPMNShape id="Shape_Start_ScenarioWorker" bpmnElement="Start_ScenarioWorker">
+        <dc:Bounds x="152" y="102" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="130" y="145" width="80" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_DispatchDelayed" bpmnElement="Task_DispatchDelayed">
+        <dc:Bounds x="250" y="90" width="240" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_End_ScenarioWorker" bpmnElement="End_ScenarioWorker">
+        <dc:Bounds x="552" y="102" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="530" y="145" width="80" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- Worker 2: SQNS Hourly Sync (row y=240) -->
+      <bpmndi:BPMNShape id="Shape_Start_SqnsWorker" bpmnElement="Start_SqnsWorker">
+        <dc:Bounds x="152" y="242" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="128" y="285" width="84" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_SqnsSync" bpmnElement="Task_SqnsSync">
+        <dc:Bounds x="250" y="230" width="240" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_End_SqnsWorker" bpmnElement="End_SqnsWorker">
+        <dc:Bounds x="552" y="242" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="530" y="285" width="80" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- Worker 3: Direct Questions Follow-up (row y=380) -->
+      <bpmndi:BPMNShape id="Shape_Start_DQFollowup" bpmnElement="Start_DQFollowup">
+        <dc:Bounds x="152" y="382" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="138" y="425" width="64" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_DQFollowup" bpmnElement="Task_DQFollowup">
+        <dc:Bounds x="250" y="370" width="240" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_End_DQWorker" bpmnElement="End_DQWorker">
+        <dc:Bounds x="552" y="382" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="530" y="425" width="80" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- Worker 4: Embedding Retry (row y=520) -->
+      <bpmndi:BPMNShape id="Shape_Start_EmbeddingRetry" bpmnElement="Start_EmbeddingRetry">
+        <dc:Bounds x="152" y="522" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="138" y="565" width="64" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_EmbeddingRetry" bpmnElement="Task_EmbeddingRetry">
+        <dc:Bounds x="250" y="510" width="240" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_End_EmbeddingRetry" bpmnElement="End_EmbeddingRetry">
+        <dc:Bounds x="552" y="522" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="530" y="565" width="80" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- Edges Worker 1 -->
+      <bpmndi:BPMNEdge id="Edge_sf3_start_scenario" bpmnElement="sf3_start_scenario">
+        <di:waypoint x="188" y="120"/>
+        <di:waypoint x="250" y="120"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_sf3_scenario_to_end" bpmnElement="sf3_scenario_to_end">
+        <di:waypoint x="490" y="120"/>
+        <di:waypoint x="552" y="120"/>
+      </bpmndi:BPMNEdge>
+
+      <!-- Edges Worker 2 -->
+      <bpmndi:BPMNEdge id="Edge_sf3_start_sqns" bpmnElement="sf3_start_sqns">
+        <di:waypoint x="188" y="260"/>
+        <di:waypoint x="250" y="260"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_sf3_sqns_to_end" bpmnElement="sf3_sqns_to_end">
+        <di:waypoint x="490" y="260"/>
+        <di:waypoint x="552" y="260"/>
+      </bpmndi:BPMNEdge>
+
+      <!-- Edges Worker 3 -->
+      <bpmndi:BPMNEdge id="Edge_sf3_start_dq" bpmnElement="sf3_start_dq">
+        <di:waypoint x="188" y="400"/>
+        <di:waypoint x="250" y="400"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_sf3_dq_to_end" bpmnElement="sf3_dq_to_end">
+        <di:waypoint x="490" y="400"/>
+        <di:waypoint x="552" y="400"/>
+      </bpmndi:BPMNEdge>
+
+      <!-- Edges Worker 4 -->
+      <bpmndi:BPMNEdge id="Edge_sf3_start_embed" bpmnElement="sf3_start_embed">
+        <di:waypoint x="188" y="540"/>
+        <di:waypoint x="250" y="540"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_sf3_embed_to_end" bpmnElement="sf3_embed_to_end">
+        <di:waypoint x="490" y="540"/>
+        <di:waypoint x="552" y="540"/>
+      </bpmndi:BPMNEdge>
+
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</definitions>

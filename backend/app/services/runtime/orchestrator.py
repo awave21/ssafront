@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import dataclass, field
+import json
 from typing import Any
 from uuid import UUID
 
@@ -39,6 +40,7 @@ logger = structlog.get_logger(__name__)
 
 # Типы, которые реально возвращает pydantic-ai в new_messages() / all_messages()
 messages_adapter = TypeAdapter(list[ModelMessage | ModelRequest | ModelResponse])
+_ESTIMATED_CHARS_PER_TOKEN = 4
 
 
 def serialize_assistant_text_for_session(content: str) -> dict[str, Any]:
@@ -67,6 +69,36 @@ class AgentRunResult:
     orchestration_meta: dict[str, Any] | None = None
 
 
+def _estimate_tokens_from_text(text: str | None) -> int:
+    if not text:
+        return 0
+    return max(1, (len(text) + _ESTIMATED_CHARS_PER_TOKEN - 1) // _ESTIMATED_CHARS_PER_TOKEN)
+
+
+def _estimate_tokens_from_json(value: Any) -> int:
+    if value is None:
+        return 0
+    try:
+        payload = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except Exception:
+        payload = str(value)
+    return _estimate_tokens_from_text(payload)
+
+
+def _estimate_tool_definition_tokens(tools: list[PydanticTool]) -> int:
+    total = 0
+    for tool in tools:
+        total += _estimate_tokens_from_text(str(getattr(tool, "name", "") or ""))
+        total += _estimate_tokens_from_text(getattr(tool, "description", None))
+        for attr_name in ("json_schema", "parameters_json_schema", "input_schema"):
+            schema = getattr(tool, attr_name, None)
+            if schema is None:
+                continue
+            total += _estimate_tokens_from_json(schema)
+            break
+    return total
+
+
 async def run_agent_with_tools(
     agent: Agent,
     tools: list[Tool],
@@ -79,12 +111,13 @@ async def run_agent_with_tools(
     run_id: UUID | None = None,
     session_id: str | None = None,
     openai_api_key: str | None = None,
+    anthropic_api_key: str | None = None,
     system_prompt_override: str | None = None,
     extra_tools: list[PydanticTool] | None = None,
 ) -> AgentRunResult:
     settings = get_settings()
     model_name = agent.model or settings.pydanticai_default_model
-    
+
     # Фолбек для некорректного имени модели "string" (часто дефолт в Swagger UI)
     if model_name == "string":
         logger.warning(
@@ -94,7 +127,7 @@ async def run_agent_with_tools(
             fallback_model=settings.pydanticai_default_model
         )
         model_name = settings.pydanticai_default_model
-    
+
     # Подготовка тулов: собираем обычные
     binding_map = {binding.tool_id: binding for binding in bindings}
     wrapped_tools: list[PydanticTool] = []
@@ -172,6 +205,7 @@ async def run_agent_with_tools(
         toolsets=sqns_toolsets if sqns_toolsets else None,
         history_processors=history_processors,
         openai_api_key=openai_api_key,
+        anthropic_api_key=anthropic_api_key,
     )
     
     # Логирование для отладки
@@ -192,6 +226,47 @@ async def run_agent_with_tools(
             message_history,
             trace_id,
         )
+
+    context_diagnostics: dict[str, Any] | None = None
+    if settings.runtime_context_diagnostics_enabled:
+        history_payload = None
+        if message_history:
+            try:
+                history_payload = messages_adapter.dump_python(message_history, mode="json")
+            except Exception:
+                history_payload = message_history
+        prompt_tokens_estimate = _estimate_tokens_from_text(enriched_system_prompt)
+        history_tokens_estimate = _estimate_tokens_from_json(history_payload)
+        tool_tokens_estimate = _estimate_tool_definition_tokens(wrapped_tools)
+        total_estimated_input_tokens = (
+            prompt_tokens_estimate
+            + history_tokens_estimate
+            + tool_tokens_estimate
+        )
+        context_diagnostics = {
+            "prompt_tokens_estimate": prompt_tokens_estimate,
+            "history_tokens_estimate": history_tokens_estimate,
+            "tool_tokens_estimate": tool_tokens_estimate,
+            "total_estimated_input_tokens": total_estimated_input_tokens,
+            "tool_count": len(wrapped_tools),
+            "toolset_count": len(sqns_toolsets),
+            "message_history_count": len(message_history) if message_history else 0,
+            "has_system_prompt_override": system_prompt_override is not None,
+        }
+        logger.info(
+            "pre_run_context_diagnostics",
+            agent_id=str(agent.id),
+            trace_id=trace_id,
+            **context_diagnostics,
+        )
+        if total_estimated_input_tokens >= settings.runtime_context_budget_warn_tokens:
+            logger.warning(
+                "pre_run_context_budget_warning",
+                agent_id=str(agent.id),
+                trace_id=trace_id,
+                budget_warn_tokens=settings.runtime_context_budget_warn_tokens,
+                **context_diagnostics,
+            )
 
     # Логируем историю сообщений, которая уйдет в модель (для отладки)
     # Проверяем структуру сообщений перед отправкой
@@ -339,4 +414,5 @@ async def run_agent_with_tools(
         token_usage_steps=token_usage_steps,
         tools_called=tools_called,
         tool_call_events=tool_events,
+        orchestration_meta=context_diagnostics,
     )

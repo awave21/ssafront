@@ -10,6 +10,8 @@ import type {
 
 const PROVIDER_PATTERN = /^[a-z0-9_-]+$/
 
+const ANTHROPIC_KEY_ALLOWED = /^[a-zA-Z0-9._-]+$/
+
 const validatePayload = (payload: TenantLLMConfigSet): string | null => {
   const key = payload.api_key
   if (!key || key.length < 10 || key.length > 512)
@@ -21,6 +23,9 @@ const validatePayload = (payload: TenantLLMConfigSet): string | null => {
 
   if (provider === 'openai' && !key.startsWith('sk-'))
     return 'OpenAI ключ должен начинаться с «sk-»'
+
+  if (provider === 'anthropic' && !ANTHROPIC_KEY_ALLOWED.test(key))
+    return 'Ключ Anthropic содержит недопустимые символы'
 
   return null
 }
@@ -93,7 +98,7 @@ export const useTenantLlmConfig = () => {
         last4: null,
         is_active: false,
       }
-      toastSuccess('Ключ удалён', 'API-ключ удалён. Запросы к OpenAI будут недоступны до установки нового ключа')
+      toastSuccess('Ключ удалён', 'Запросы с этим провайдером будут недоступны до установки нового ключа')
     } catch (err: any) {
       if (err?.statusCode === 404) {
         keyStatus.value = { has_key: false, provider, last4: null, is_active: false }

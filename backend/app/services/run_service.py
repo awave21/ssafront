@@ -25,6 +25,7 @@ from app.db.models.agent_user_state import AgentUserState
 from app.db.models.run import Run
 from app.db.models.run_token_usage_step import RunTokenUsageStep
 from app.db.models.session_message import SessionMessage
+from app.db.models.tenant import Tenant
 from app.db.models.tool import Tool
 from app.db.models.tool_call_log import ToolCallLog
 from app.schemas.auth import AuthContext
@@ -34,18 +35,20 @@ from app.services.runtime import (
     run_agent_with_tools,
     serialize_assistant_text_for_session,
 )
-from app.services.runtime.tools import (
-    build_direct_answer_tool,
-    build_direct_questions_search_tool,
-    build_directory_runtime_tools,
-    build_knowledge_search_tool,
+from app.services.runtime.context_assembler import (
+    normalize_augment_prompt_blocks,
+    select_optional_runtime_tool_categories,
 )
+from app.services.runtime.tool_registry import build_optional_runtime_tools
+from app.services.runtime.scenario_runtime import apply_dialog_scenario_phases_before_llm
 from app.core.config import get_settings
 from app.services.logfire_cost_reconcile import schedule_logfire_cost_reconcile
 from app.services.agent_user_state import is_agent_user_disabled_by_session, normalize_identity
 from app.services.direct_questions import schedule_direct_question_followup
 from app.services.direct_questions.safety import sanitize_direct_question_content, split_direct_question_content
+from app.services.runtime.model_resolver import provider_prefix_from_model_name
 from app.services.tenant_llm_config import get_decrypted_api_key
+from app.services.function_rules_runtime import run_rules_for_phase
 from app.services.tenant_balance import sync_run_balance_charge
 from app.services.token_costing import apply_fallback_costs
 from app.services.tool_executor import ToolExecutionError
@@ -53,6 +56,11 @@ from app.utils.broadcast import broadcaster
 from app.utils.message_mapping import extract_text_contents
 
 logger = structlog.get_logger(__name__)
+
+
+# Backward-compatible aliases for existing tests/imports.
+_normalize_augment_prompt_blocks = normalize_augment_prompt_blocks
+_select_optional_runtime_tool_categories = select_optional_runtime_tool_categories
 
 
 def _session_messages_contain_output_text(
@@ -618,6 +626,9 @@ async def execute_agent_run(
     new_messages_filter: Any | None = None,
     user_info: dict[str, Any] | None = None,
     openai_api_key: str | None = None,
+    anthropic_api_key: str | None = None,
+    skip_dialog_scenario_phases: bool = False,
+    system_prompt_override: str | None = None,
 ) -> AgentRunResult:
     """Запустить агента, обновить Run, сохранить сообщения и token-usage.
 
@@ -628,6 +639,9 @@ async def execute_agent_run(
         перед сохранением в сессию (используется в webhooks для filter_user_prompts).
     user_info : dict, optional
         Информация о пользователе для broadcast (например, данные Telegram).
+    skip_dialog_scenario_phases : bool
+        Если True — не выполнять фазы dialog_start / client_message / client_return
+        (их уже выполнил process_webhook_inbound_agent_message перед этим вызовом).
 
     Returns
     -------
@@ -652,88 +666,139 @@ async def execute_agent_run(
         raise _agent_user_disabled_http_error(agent.id, session_id)
 
     settings = get_settings()
+    selected_optional_categories, optional_tool_meta = _select_optional_runtime_tool_categories(
+        input_message,
+        mode=settings.runtime_optional_tools_mode,
+    )
+    logger.info(
+        "runtime_optional_tool_selection",
+        agent_id=str(agent.id),
+        session_id=session_id,
+        trace_id=trace_id,
+        **optional_tool_meta,
+    )
 
     direct_question_meta: dict[str, Any] | None = None
-    system_prompt_override: str | None = None
+    # system_prompt_override may be passed in from webhook (pre-computed augment_prompt);
+    # dialog-phase scenario augmentation below may further extend it.
     extra_runtime_tools = []
     retrieval_decisions: list[dict[str, Any]] = []
 
     if openai_api_key is None:
-        openai_api_key = await get_decrypted_api_key(db, run.tenant_id)
+        openai_api_key = await get_decrypted_api_key(db, run.tenant_id, "openai")
+    if anthropic_api_key is None:
+        anthropic_api_key = await get_decrypted_api_key(db, run.tenant_id, "anthropic")
 
-    if settings.direct_questions_retrieval_router_enabled:
-        try:
-            dq_limit = getattr(agent, "direct_questions_limit", None) or settings.direct_questions_max_results
-            extra_runtime_tools.append(
-                build_direct_questions_search_tool(
-                    db=db,
-                    tenant_id=run.tenant_id,
-                    agent_id=agent.id,
-                    openai_api_key=openai_api_key,
-                    default_limit=dq_limit,
-                    min_match_percent=settings.direct_questions_min_match_percent,
-                    rerank=settings.direct_questions_rerank_enabled,
-                    analytics_sink=retrieval_decisions,
-                )
-            )
-            extra_runtime_tools.append(
-                build_direct_answer_tool(
-                    db=db,
-                    tenant_id=run.tenant_id,
-                    agent_id=agent.id,
-                )
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("direct_question_router_setup_failed", agent_id=str(agent.id), error=str(exc))
-
-    if not openai_api_key:
+    effective_model = agent.model or settings.pydanticai_default_model
+    if effective_model == "string":
+        effective_model = settings.pydanticai_default_model
+    chat_provider = provider_prefix_from_model_name(effective_model) or "openai"
+    if chat_provider == "anthropic" and not anthropic_api_key:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="API-ключ OpenAI не настроен для организации. Установите его в Настройках организации → Ключ LLM.",
+            detail=(
+                "API-ключ Anthropic не настроен для организации. "
+                "Установите его в Настройках организации → Ключи LLM."
+            ),
+        )
+
+    optional_tools_bundle = await build_optional_runtime_tools(
+        db=db,
+        agent=agent,
+        tenant_id=run.tenant_id,
+        session_id=session_id,
+        selected_categories=selected_optional_categories,
+        settings=settings,
+        openai_api_key=openai_api_key,
+    )
+    extra_runtime_tools = optional_tools_bundle.tools
+    retrieval_decisions = optional_tools_bundle.retrieval_decisions
+
+    # Merge expertise bridge into system_prompt_override when expert scripts are active.
+    if optional_tools_bundle.system_prompt_addition:
+        base = (system_prompt_override or agent.system_prompt or "").rstrip()
+        system_prompt_override = base + optional_tools_bundle.system_prompt_addition
+
+    # Same phases as inbound webhooks (webhooks_inbound_agent): dialog_start on first message
+    # in session, then client_message / client_return. Test chat (/runs, WS) previously skipped
+    # these and only ran agent_message after the model — so «Начало диалога» did not fire in UI.
+    scenario_short_circuit = False
+    result: AgentRunResult | None = None
+    if not skip_dialog_scenario_phases:
+        pre_llm = await apply_dialog_scenario_phases_before_llm(
+            db,
+            agent=agent,
+            run=run,
+            input_message=input_message,
+            trace_id=trace_id,
+            user=user,
+            session_id=session_id,
+            user_info=user_info,
+            system_prompt_override=system_prompt_override,
+            settings=settings,
+        )
+        system_prompt_override = pre_llm.system_prompt_override
+        scenario_short_circuit = pre_llm.scenario_short_circuit
+        result = pre_llm.short_circuit_result
+        # NOTE: silent_reaction is intentionally NOT a short-circuit here.
+        # For pre-LLM phases (dialog_start / client_message) it means "no extra
+        # scenario message", but the LLM must still run — especially when
+        # augment_prompt has been populated above and needs to reach the model.
+
+    if result is None:
+        result = await run_agent_with_tools(
+            agent,
+            tools,
+            bindings,
+            input_message=input_message,
+            trace_id=trace_id,
+            user=user,
+            message_history=message_history,
+            run_id=run.id,
+            session_id=session_id,
+            openai_api_key=openai_api_key,
+            anthropic_api_key=anthropic_api_key,
+            system_prompt_override=system_prompt_override,
+            extra_tools=extra_runtime_tools or None,
         )
 
     try:
-        knowledge_tool = await build_knowledge_search_tool(
-            db=db,
-            tenant_id=run.tenant_id,
-            agent_id=agent.id,
-            openai_api_key=openai_api_key,
-            description=agent.knowledge_tool_description,
+        tenant_row = await db.get(Tenant, run.tenant_id)
+        rules_enabled = bool(getattr(agent, "function_rules_enabled", True)) and bool(
+            getattr(tenant_row, "function_rules_enabled", True) if tenant_row else True
         )
-        if knowledge_tool is not None:
-            extra_runtime_tools.append(knowledge_tool)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("knowledge_tool_setup_failed", agent_id=str(agent.id), error=str(exc))
-
-    try:
-        directory_tools = await build_directory_runtime_tools(
-            db=db,
-            agent_id=agent.id,
-            openai_api_key=openai_api_key,
+        semantic_allowed = bool(getattr(agent, "function_rules_allow_semantic", True)) and bool(
+            getattr(tenant_row, "function_rules_allow_semantic", True) if tenant_row else True
         )
-        if directory_tools:
-            extra_runtime_tools.extend(directory_tools)
+        if rules_enabled and not scenario_short_circuit:
+            ui = user_info if isinstance(user_info, dict) else {}
+            await run_rules_for_phase(
+                db,
+                tenant_id=run.tenant_id,
+                agent_id=agent.id,
+                session_id=session_id,
+                trace_id=trace_id,
+                phase="agent_message",
+                message=str(result.output or ""),
+                user=user,
+                run_id=run.id,
+                context={
+                    "user_info": ui,
+                    "agent_timezone": getattr(agent, "timezone", None) or "UTC",
+                    "input_message": input_message,
+                    "message": input_message,
+                    "assistant_output": str(result.output or ""),
+                },
+                rules_enabled=True,
+                semantic_allowed=semantic_allowed,
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "directory_runtime_tools_failed",
+            "agent_message_scenario_rules_failed",
             agent_id=str(agent.id),
+            session_id=session_id,
             error=str(exc),
         )
-
-    result = await run_agent_with_tools(
-        agent,
-        tools,
-        bindings,
-        input_message=input_message,
-        trace_id=trace_id,
-        user=user,
-        message_history=message_history,
-        run_id=run.id,
-        session_id=session_id,
-        openai_api_key=openai_api_key,
-        system_prompt_override=system_prompt_override,
-        extra_tools=extra_runtime_tools or None,
-    )
 
     # Enrich tool calls with metadata useful for UI/debug:
     # - when_to_call: tool description

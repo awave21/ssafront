@@ -23,6 +23,7 @@ from app.services.agent_analysis.analyzers import ANALYZER_VERSION, analyze_dial
 from app.services.agent_analysis.contracts import AnalyzerRecommendation
 from app.services.agent_analysis.data_collector import AnalysisDialogSample, collect_dialog_samples
 from app.services.agent_analysis.redaction import redact_text
+from app.services.runtime.model_resolver import provider_prefix_from_model_name
 from app.services.tenant_llm_config import get_decrypted_api_key
 
 logger = structlog.get_logger(__name__)
@@ -521,10 +522,17 @@ async def run_analysis_job(job_id: UUID) -> None:
             await db.commit()
 
             model_name = job.meta_model or settings.pydanticai_default_model
-            openai_api_key = await get_decrypted_api_key(db, job.tenant_id)
-            if not openai_api_key:
+            openai_api_key = await get_decrypted_api_key(db, job.tenant_id, "openai")
+            anthropic_api_key = await get_decrypted_api_key(db, job.tenant_id, "anthropic")
+            chat_provider = provider_prefix_from_model_name(model_name) or "openai"
+            if chat_provider == "anthropic" and not anthropic_api_key:
                 raise RuntimeError(
-                    "API-ключ OpenAI не настроен для организации. Установите его в Настройках организации → Ключ LLM."
+                    "API-ключ Anthropic не настроен для организации. "
+                    "Установите его в Настройках организации → Ключи LLM."
+                )
+            if chat_provider == "openai" and not openai_api_key:
+                raise RuntimeError(
+                    "API-ключ OpenAI не настроен для организации. Установите его в Настройках организации → Ключи LLM."
                 )
 
             if len(dialogs) > job.max_dialogs:
@@ -534,6 +542,7 @@ async def run_analysis_job(job_id: UUID) -> None:
                 dialogs,
                 model_name=model_name,
                 openai_api_key=openai_api_key,
+                anthropic_api_key=anthropic_api_key,
                 max_llm_requests=min(job.max_llm_requests_per_job, 100),
             )
 

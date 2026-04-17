@@ -35,6 +35,8 @@ const toStatus = (raw: unknown): ToolCallHistoryStatus => {
   const normalized = String(raw || '').toLowerCase()
   if (['ok', 'success', 'succeeded', 'done'].includes(normalized)) return 'success'
   if (['error', 'failed', 'failure'].includes(normalized)) return 'error'
+  if (normalized === 'skipped' || normalized === 'skip') return 'skipped'
+  if (normalized === 'dry_run') return 'dry_run'
   return 'unknown'
 }
 
@@ -77,8 +79,11 @@ const normalizeItem = (raw: unknown, index: number): ToolCallHistoryItem => {
   const firstName = String(userRecord.first_name || '').trim()
   const lastName = String(userRecord.last_name || '').trim()
   const fullName = `${firstName} ${lastName}`.trim()
+  const entryType: 'tool' | 'scenario' = record.entry_type === 'scenario' ? 'scenario' : 'tool'
+  const defaultUserName = entryType === 'scenario' ? 'Сценарий (автоматика)' : 'Неизвестный пользователь'
 
   return {
+    entryType,
     id: String(record.id || record.tool_call_id || `${toolName}-${index}`),
     toolName,
     toolDescription: String(record.tool_description || toolRecord.description || 'Описание отсутствует'),
@@ -89,14 +94,14 @@ const normalizeItem = (raw: unknown, index: number): ToolCallHistoryItem => {
       record.tool_url ||
       '',
     ).trim() || null,
-    status: toStatus(record.status || record.result_status || record.success),
+    status: toStatus(record.status || record.rule_result_status || record.result_status || record.success),
     invokedAt: String(record.invoked_at || record.created_at || record.timestamp || ''),
     durationMs: Number.isFinite(Number(record.duration_ms || record.latency_ms))
       ? Number(record.duration_ms || record.latency_ms)
       : null,
     user: {
       id: userRecord.id ? String(userRecord.id) : null,
-      name: String(userRecord.name || fullName || userRecord.username || 'Неизвестный пользователь'),
+      name: String(userRecord.name || fullName || userRecord.username || defaultUserName),
       username: userRecord.username ? String(userRecord.username) : null,
       email: userRecord.email ? String(userRecord.email) : null,
     },
@@ -108,6 +113,12 @@ const normalizeItem = (raw: unknown, index: number): ToolCallHistoryItem => {
     requestPayload: record.request_payload || record.payload || record.args || null,
     responsePayload: record.response_payload || record.result || null,
     errorPayload: record.error_payload || record.error || null,
+    ruleId: record.rule_id != null ? String(record.rule_id) : null,
+    ruleName: record.rule_name != null ? String(record.rule_name) : null,
+    triggerPhase: record.trigger_phase != null ? String(record.trigger_phase) : null,
+    matched: typeof record.matched === 'boolean' ? record.matched : null,
+    ruleResultStatus: record.rule_result_status != null ? String(record.rule_result_status) : null,
+    reason: record.reason != null ? String(record.reason) : null,
   }
 }
 

@@ -1,0 +1,630 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+             id="Definitions_KnowledgeBase"
+             targetNamespace="http://agent-platform/bpmn">
+
+  <!-- ================================================================
+       PROCESS 1: Knowledge Ingestion
+       Как контент попадает в базу знаний и индексируется.
+       Источники: knowledge_file_extractors.py, knowledge_index_jobs.py,
+                  knowledge_chunking.py, runtime/tools.py
+       ================================================================ -->
+  <process id="Process_KnowledgeIngestion" name="База знаний — Загрузка и индексация" isExecutable="false">
+
+    <startEvent id="KI_Start" name="Пользователь добавляет знание">
+      <outgoing>ki_start_to_gw</outgoing>
+    </startEvent>
+
+    <!-- Два источника: загрузка файла или ручной ввод текста -->
+    <exclusiveGateway id="KI_GW_Source" name="Источник контента?">
+      <incoming>ki_start_to_gw</incoming>
+      <outgoing>ki_src_file</outgoing>
+      <outgoing>ki_src_manual</outgoing>
+    </exclusiveGateway>
+
+    <task id="KI_Task_UploadFile" name="Загрузить файл&#10;(PDF / DOCX / TXT / CSV)&#10;POST /knowledge/upload">
+      <incoming>ki_src_file</incoming>
+      <outgoing>ki_file_to_extract</outgoing>
+    </task>
+
+    <task id="KI_Task_ExtractText" name="Извлечь текст из файла&#10;extract_text_from_uploaded_bytes&#10;PDF → pypdf / pdfminer&#10;DOCX → python-docx&#10;CSV → detect delimiter + header&#10;TXT → decode UTF-8 / CP1251">
+      <incoming>ki_file_to_extract</incoming>
+      <outgoing>ki_extract_to_join</outgoing>
+    </task>
+
+    <task id="KI_Task_ManualEntry" name="Ручной ввод текста&#10;через редактор CRM&#10;(PUT /knowledge/{id})">
+      <incoming>ki_src_manual</incoming>
+      <outgoing>ki_manual_to_join</outgoing>
+    </task>
+
+    <!-- Join после двух источников -->
+    <exclusiveGateway id="KI_GW_SourceJoin">
+      <incoming>ki_extract_to_join</incoming>
+      <incoming>ki_manual_to_join</incoming>
+      <outgoing>ki_join_to_save</outgoing>
+    </exclusiveGateway>
+
+    <task id="KI_Task_SaveFile" name="Создать / обновить KnowledgeFile&#10;(title, content, meta_tags, parent_id)&#10;vector_status = 'not_indexed'&#10;Структура: папки + файлы (дерево)">
+      <incoming>ki_join_to_save</incoming>
+      <outgoing>ki_save_to_gw_content</outgoing>
+    </task>
+
+    <exclusiveGateway id="KI_GW_HasContent" name="Контент не пустой?">
+      <incoming>ki_save_to_gw_content</incoming>
+      <outgoing>ki_no_content</outgoing>
+      <outgoing>ki_has_content</outgoing>
+    </exclusiveGateway>
+
+    <endEvent id="KI_End_NoContent" name="vector_status = 'failed'&#10;(пустой контент)">
+      <incoming>ki_no_content</incoming>
+    </endEvent>
+
+    <task id="KI_Task_CreateJob" name="Создать KnowledgeIndexJob&#10;(status='queued', progress=0)&#10;+ asyncio.create_task(_process_index_job)">
+      <incoming>ki_has_content</incoming>
+      <outgoing>ki_job_to_key</outgoing>
+    </task>
+
+    <task id="KI_Task_ResolveKey" name="Получить OpenAI API-ключ тенанта&#10;(get_decrypted_api_key)&#10;Нет ключа → failed">
+      <incoming>ki_job_to_key</incoming>
+      <outgoing>ki_key_to_chunks</outgoing>
+    </task>
+
+    <task id="KI_Task_ResolveChunkSettings" name="Определить параметры чанкинга&#10;(из ближайшей родительской папки&#10;или дефолты: size=6000 / overlap=1000)">
+      <incoming>ki_key_to_chunks</incoming>
+      <outgoing>ki_settings_to_split</outgoing>
+    </task>
+
+    <task id="KI_Task_SplitChunks" name="Разбить текст на чанки&#10;chunk_text_by_chars&#10;(max 250 чанков, max 50 000 символов)&#10;с перекрытием overlap_chars">
+      <incoming>ki_settings_to_split</incoming>
+      <outgoing>ki_split_to_embed</outgoing>
+    </task>
+
+    <!-- Для каждого чанка: удалить старые → создать embedding → сохранить -->
+    <task id="KI_Task_DeleteOldChunks" name="Удалить предыдущие чанки файла&#10;DELETE FROM knowledge_file_chunks&#10;WHERE file_id = ... (идемпотентная переиндексация)">
+      <incoming>ki_split_to_embed</incoming>
+      <outgoing>ki_delete_to_embed</outgoing>
+    </task>
+
+    <task id="KI_Task_EmbedChunks" name="Для каждого чанка:&#10;create_embedding(title + meta_tags + chunk_text)&#10;→ OpenAI Embeddings API (1536-dim vector)&#10;Прогресс пишется в KnowledgeIndexJob&#10;(charge_source_type = embedding.knowledge_index_chunk)">
+      <incoming>ki_delete_to_embed</incoming>
+      <outgoing>ki_embed_to_store</outgoing>
+    </task>
+
+    <task id="KI_Task_StoreChunks" name="Сохранить KnowledgeFileChunk&#10;(chunk_index, chunk_text, embedding vector)&#10;в таблицу knowledge_file_chunks&#10;(pgvector column: vector(1536))">
+      <incoming>ki_embed_to_store</incoming>
+      <outgoing>ki_store_to_mark</outgoing>
+    </task>
+
+    <task id="KI_Task_MarkIndexed" name="Обновить KnowledgeFile:&#10;vector_status = 'indexed'&#10;indexed_at = now()&#10;Обновить KnowledgeIndexJob:&#10;status='indexed', progress=100">
+      <incoming>ki_store_to_mark</incoming>
+      <outgoing>ki_mark_to_end</outgoing>
+    </task>
+
+    <endEvent id="KI_End_Indexed" name="Файл проиндексирован&#10;Готов к RAG-поиску">
+      <incoming>ki_mark_to_end</incoming>
+    </endEvent>
+
+    <!-- Sequence flows -->
+    <sequenceFlow id="ki_start_to_gw"       sourceRef="KI_Start"                  targetRef="KI_GW_Source"/>
+    <sequenceFlow id="ki_src_file"           name="Файл"    sourceRef="KI_GW_Source"        targetRef="KI_Task_UploadFile"/>
+    <sequenceFlow id="ki_src_manual"         name="Текст вручную" sourceRef="KI_GW_Source"  targetRef="KI_Task_ManualEntry"/>
+    <sequenceFlow id="ki_file_to_extract"    sourceRef="KI_Task_UploadFile"        targetRef="KI_Task_ExtractText"/>
+    <sequenceFlow id="ki_extract_to_join"    sourceRef="KI_Task_ExtractText"       targetRef="KI_GW_SourceJoin"/>
+    <sequenceFlow id="ki_manual_to_join"     sourceRef="KI_Task_ManualEntry"       targetRef="KI_GW_SourceJoin"/>
+    <sequenceFlow id="ki_join_to_save"       sourceRef="KI_GW_SourceJoin"         targetRef="KI_Task_SaveFile"/>
+    <sequenceFlow id="ki_save_to_gw_content" sourceRef="KI_Task_SaveFile"         targetRef="KI_GW_HasContent"/>
+    <sequenceFlow id="ki_no_content"         name="Пусто"   sourceRef="KI_GW_HasContent"    targetRef="KI_End_NoContent"/>
+    <sequenceFlow id="ki_has_content"        name="Есть контент" sourceRef="KI_GW_HasContent" targetRef="KI_Task_CreateJob"/>
+    <sequenceFlow id="ki_job_to_key"         sourceRef="KI_Task_CreateJob"         targetRef="KI_Task_ResolveKey"/>
+    <sequenceFlow id="ki_key_to_chunks"      sourceRef="KI_Task_ResolveKey"        targetRef="KI_Task_ResolveChunkSettings"/>
+    <sequenceFlow id="ki_settings_to_split"  sourceRef="KI_Task_ResolveChunkSettings" targetRef="KI_Task_SplitChunks"/>
+    <sequenceFlow id="ki_split_to_embed"     sourceRef="KI_Task_SplitChunks"      targetRef="KI_Task_DeleteOldChunks"/>
+    <sequenceFlow id="ki_delete_to_embed"    sourceRef="KI_Task_DeleteOldChunks"  targetRef="KI_Task_EmbedChunks"/>
+    <sequenceFlow id="ki_embed_to_store"     sourceRef="KI_Task_EmbedChunks"      targetRef="KI_Task_StoreChunks"/>
+    <sequenceFlow id="ki_store_to_mark"      sourceRef="KI_Task_StoreChunks"      targetRef="KI_Task_MarkIndexed"/>
+    <sequenceFlow id="ki_mark_to_end"        sourceRef="KI_Task_MarkIndexed"      targetRef="KI_End_Indexed"/>
+  </process>
+
+  <!-- ================================================================
+       PROCESS 2: Knowledge Retrieval (RAG at LLM runtime)
+       Как база знаний используется в момент ответа агента.
+       Источники: runtime/tools.py (build_knowledge_search_tool),
+                  knowledge_files.py (search_indexed_knowledge_files)
+       ================================================================ -->
+  <process id="Process_KnowledgeRetrieval" name="База знаний — Поиск в Runtime (RAG)" isExecutable="false">
+
+    <startEvent id="KR_Start" name="LLM агент получил вопрос пользователя">
+      <outgoing>kr_start_to_check</outgoing>
+    </startEvent>
+
+    <task id="KR_Task_CheckFiles" name="build_knowledge_search_tool:&#10;проверить наличие проиндексированных файлов&#10;для агента (vector_status='indexed')">
+      <incoming>kr_start_to_check</incoming>
+      <outgoing>kr_check_to_gw</outgoing>
+    </task>
+
+    <exclusiveGateway id="KR_GW_HasFiles" name="Есть индексированные файлы?">
+      <incoming>kr_check_to_gw</incoming>
+      <outgoing>kr_no_files</outgoing>
+      <outgoing>kr_has_files</outgoing>
+    </exclusiveGateway>
+
+    <endEvent id="KR_End_NoTool" name="Инструмент не добавляется&#10;(нет базы знаний)">
+      <incoming>kr_no_files</incoming>
+    </endEvent>
+
+    <task id="KR_Task_AddTool" name="Добавить search_knowledge_files&#10;как инструмент LLM&#10;в extra_runtime_tools">
+      <incoming>kr_has_files</incoming>
+      <outgoing>kr_add_to_llm</outgoing>
+    </task>
+
+    <task id="KR_Task_LLMDecides" name="LLM агент принимает решение:&#10;нужна ли информация из базы знаний?&#10;(по контексту вопроса)">
+      <incoming>kr_add_to_llm</incoming>
+      <outgoing>kr_llm_to_gw</outgoing>
+    </task>
+
+    <exclusiveGateway id="KR_GW_LLMCalls" name="LLM вызывает&#10;search_knowledge_files?">
+      <incoming>kr_llm_to_gw</incoming>
+      <outgoing>kr_no_call</outgoing>
+      <outgoing>kr_yes_call</outgoing>
+    </exclusiveGateway>
+
+    <endEvent id="KR_End_NoCall" name="LLM отвечает без RAG&#10;(из своей модели)">
+      <incoming>kr_no_call</incoming>
+    </endEvent>
+
+    <task id="KR_Task_EmbedQuery" name="create_embedding(query)&#10;→ OpenAI Embeddings API&#10;1536-dim вектор запроса&#10;(charge_source_type = embedding.knowledge_query)">
+      <incoming>kr_yes_call</incoming>
+      <outgoing>kr_embed_to_search</outgoing>
+    </task>
+
+    <task id="KR_Task_VectorSearch" name="pgvector cosine similarity search:&#10;1 - (chunk.embedding &lt;=&gt; query_embedding)&#10;WHERE vector_status='indexed' AND is_enabled=true&#10;ORDER BY distance LIMIT N&#10;(таблица knowledge_file_chunks)">
+      <incoming>kr_embed_to_search</incoming>
+      <outgoing>kr_search_to_gw_results</outgoing>
+    </task>
+
+    <exclusiveGateway id="KR_GW_Results" name="Найдены релевантные чанки?">
+      <incoming>kr_search_to_gw_results</incoming>
+      <outgoing>kr_no_results</outgoing>
+      <outgoing>kr_has_results</outgoing>
+    </exclusiveGateway>
+
+    <endEvent id="KR_End_NoResults" name="LLM получает пустой результат&#10;→ отвечает без RAG-контекста">
+      <incoming>kr_no_results</incoming>
+    </endEvent>
+
+    <task id="KR_Task_ReturnChunks" name="Вернуть LLM топ-N чанков:&#10;{ title, content, meta_tags, relevance }&#10;(chunk_text из knowledge_file_chunks)">
+      <incoming>kr_has_results</incoming>
+      <outgoing>kr_chunks_to_llm</outgoing>
+    </task>
+
+    <task id="KR_Task_LLMGenerates" name="LLM формирует ответ&#10;используя чанки как контекст&#10;(injected into tool result message)">
+      <incoming>kr_chunks_to_llm</incoming>
+      <outgoing>kr_generate_to_end</outgoing>
+    </task>
+
+    <endEvent id="KR_End_Answer" name="Ответ сформирован&#10;с использованием базы знаний">
+      <incoming>kr_generate_to_end</incoming>
+    </endEvent>
+
+    <!-- Sequence flows -->
+    <sequenceFlow id="kr_start_to_check"    sourceRef="KR_Start"                 targetRef="KR_Task_CheckFiles"/>
+    <sequenceFlow id="kr_check_to_gw"       sourceRef="KR_Task_CheckFiles"       targetRef="KR_GW_HasFiles"/>
+    <sequenceFlow id="kr_no_files"          name="Нет"  sourceRef="KR_GW_HasFiles"   targetRef="KR_End_NoTool"/>
+    <sequenceFlow id="kr_has_files"         name="Да"   sourceRef="KR_GW_HasFiles"   targetRef="KR_Task_AddTool"/>
+    <sequenceFlow id="kr_add_to_llm"        sourceRef="KR_Task_AddTool"          targetRef="KR_Task_LLMDecides"/>
+    <sequenceFlow id="kr_llm_to_gw"         sourceRef="KR_Task_LLMDecides"       targetRef="KR_GW_LLMCalls"/>
+    <sequenceFlow id="kr_no_call"           name="Нет"  sourceRef="KR_GW_LLMCalls"  targetRef="KR_End_NoCall"/>
+    <sequenceFlow id="kr_yes_call"          name="Да"   sourceRef="KR_GW_LLMCalls"  targetRef="KR_Task_EmbedQuery"/>
+    <sequenceFlow id="kr_embed_to_search"   sourceRef="KR_Task_EmbedQuery"       targetRef="KR_Task_VectorSearch"/>
+    <sequenceFlow id="kr_search_to_gw_results" sourceRef="KR_Task_VectorSearch"  targetRef="KR_GW_Results"/>
+    <sequenceFlow id="kr_no_results"        name="Нет"  sourceRef="KR_GW_Results"    targetRef="KR_End_NoResults"/>
+    <sequenceFlow id="kr_has_results"       name="Да"   sourceRef="KR_GW_Results"    targetRef="KR_Task_ReturnChunks"/>
+    <sequenceFlow id="kr_chunks_to_llm"     sourceRef="KR_Task_ReturnChunks"     targetRef="KR_Task_LLMGenerates"/>
+    <sequenceFlow id="kr_generate_to_end"   sourceRef="KR_Task_LLMGenerates"     targetRef="KR_End_Answer"/>
+  </process>
+
+  <!-- ================================================================
+       DIAGRAM 1: Загрузка и индексация
+       ================================================================ -->
+  <bpmndi:BPMNDiagram id="BPMNDiagram_KI" name="База знаний — Загрузка и индексация">
+    <bpmndi:BPMNPlane id="BPMNPlane_KI" bpmnElement="Process_KnowledgeIngestion">
+
+      <bpmndi:BPMNShape id="S_KI_Start" bpmnElement="KI_Start">
+        <dc:Bounds x="152" y="282" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="120" y="325" width="100" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KI_GW_Source" bpmnElement="KI_GW_Source" isMarkerVisible="true">
+        <dc:Bounds x="250" y="285" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="232" y="342" width="86" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- File path (top) -->
+      <bpmndi:BPMNShape id="S_KI_Task_UploadFile" bpmnElement="KI_Task_UploadFile">
+        <dc:Bounds x="370" y="180" width="220" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KI_Task_ExtractText" bpmnElement="KI_Task_ExtractText">
+        <dc:Bounds x="660" y="170" width="240" height="100"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Manual path (bottom) -->
+      <bpmndi:BPMNShape id="S_KI_Task_ManualEntry" bpmnElement="KI_Task_ManualEntry">
+        <dc:Bounds x="370" y="360" width="220" height="60"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Join -->
+      <bpmndi:BPMNShape id="S_KI_GW_SourceJoin" bpmnElement="KI_GW_SourceJoin" isMarkerVisible="true">
+        <dc:Bounds x="960" y="285" width="50" height="50"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Save file -->
+      <bpmndi:BPMNShape id="S_KI_Task_SaveFile" bpmnElement="KI_Task_SaveFile">
+        <dc:Bounds x="1075" y="270" width="220" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <!-- GW: has content? -->
+      <bpmndi:BPMNShape id="S_KI_GW_HasContent" bpmnElement="KI_GW_HasContent" isMarkerVisible="true">
+        <dc:Bounds x="1355" y="285" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1336" y="342" width="88" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- End: no content -->
+      <bpmndi:BPMNShape id="S_KI_End_NoContent" bpmnElement="KI_End_NoContent">
+        <dc:Bounds x="1362" y="189" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1334" y="155" width="92" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- Create job -->
+      <bpmndi:BPMNShape id="S_KI_Task_CreateJob" bpmnElement="KI_Task_CreateJob">
+        <dc:Bounds x="1475" y="270" width="220" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Resolve key -->
+      <bpmndi:BPMNShape id="S_KI_Task_ResolveKey" bpmnElement="KI_Task_ResolveKey">
+        <dc:Bounds x="1765" y="270" width="200" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Resolve chunk settings -->
+      <bpmndi:BPMNShape id="S_KI_Task_ResolveChunkSettings" bpmnElement="KI_Task_ResolveChunkSettings">
+        <dc:Bounds x="2035" y="270" width="220" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Split chunks -->
+      <bpmndi:BPMNShape id="S_KI_Task_SplitChunks" bpmnElement="KI_Task_SplitChunks">
+        <dc:Bounds x="2325" y="270" width="220" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Delete old chunks -->
+      <bpmndi:BPMNShape id="S_KI_Task_DeleteOldChunks" bpmnElement="KI_Task_DeleteOldChunks">
+        <dc:Bounds x="2615" y="270" width="220" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Embed chunks -->
+      <bpmndi:BPMNShape id="S_KI_Task_EmbedChunks" bpmnElement="KI_Task_EmbedChunks">
+        <dc:Bounds x="2905" y="260" width="240" height="100"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Store chunks -->
+      <bpmndi:BPMNShape id="S_KI_Task_StoreChunks" bpmnElement="KI_Task_StoreChunks">
+        <dc:Bounds x="3215" y="270" width="220" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Mark indexed -->
+      <bpmndi:BPMNShape id="S_KI_Task_MarkIndexed" bpmnElement="KI_Task_MarkIndexed">
+        <dc:Bounds x="3505" y="270" width="220" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <!-- End: indexed -->
+      <bpmndi:BPMNShape id="S_KI_End_Indexed" bpmnElement="KI_End_Indexed">
+        <dc:Bounds x="3787" y="292" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="3761" y="335" width="88" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- ── Edges ── -->
+      <bpmndi:BPMNEdge id="E_ki_start_to_gw" bpmnElement="ki_start_to_gw">
+        <di:waypoint x="188" y="300"/>
+        <di:waypoint x="250" y="310"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_src_file" bpmnElement="ki_src_file">
+        <di:waypoint x="275" y="285"/>
+        <di:waypoint x="275" y="220"/>
+        <di:waypoint x="370" y="220"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="291" y="245" width="30" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_src_manual" bpmnElement="ki_src_manual">
+        <di:waypoint x="275" y="335"/>
+        <di:waypoint x="275" y="390"/>
+        <di:waypoint x="370" y="390"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="278" y="358" width="60" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_file_to_extract" bpmnElement="ki_file_to_extract">
+        <di:waypoint x="590" y="220"/>
+        <di:waypoint x="660" y="220"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_extract_to_join" bpmnElement="ki_extract_to_join">
+        <di:waypoint x="900" y="220"/>
+        <di:waypoint x="985" y="220"/>
+        <di:waypoint x="985" y="285"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_manual_to_join" bpmnElement="ki_manual_to_join">
+        <di:waypoint x="590" y="390"/>
+        <di:waypoint x="985" y="390"/>
+        <di:waypoint x="985" y="335"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_join_to_save" bpmnElement="ki_join_to_save">
+        <di:waypoint x="1010" y="310"/>
+        <di:waypoint x="1075" y="310"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_save_to_gw_content" bpmnElement="ki_save_to_gw_content">
+        <di:waypoint x="1295" y="310"/>
+        <di:waypoint x="1355" y="310"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_no_content" bpmnElement="ki_no_content">
+        <di:waypoint x="1380" y="285"/>
+        <di:waypoint x="1380" y="225"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1386" y="250" width="34" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_has_content" bpmnElement="ki_has_content">
+        <di:waypoint x="1405" y="310"/>
+        <di:waypoint x="1475" y="310"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1418" y="289" width="48" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_job_to_key" bpmnElement="ki_job_to_key">
+        <di:waypoint x="1695" y="310"/>
+        <di:waypoint x="1765" y="310"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_key_to_chunks" bpmnElement="ki_key_to_chunks">
+        <di:waypoint x="1965" y="310"/>
+        <di:waypoint x="2035" y="310"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_settings_to_split" bpmnElement="ki_settings_to_split">
+        <di:waypoint x="2255" y="310"/>
+        <di:waypoint x="2325" y="310"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_split_to_embed" bpmnElement="ki_split_to_embed">
+        <di:waypoint x="2545" y="310"/>
+        <di:waypoint x="2615" y="310"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_delete_to_embed" bpmnElement="ki_delete_to_embed">
+        <di:waypoint x="2835" y="310"/>
+        <di:waypoint x="2905" y="310"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_embed_to_store" bpmnElement="ki_embed_to_store">
+        <di:waypoint x="3145" y="310"/>
+        <di:waypoint x="3215" y="310"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_store_to_mark" bpmnElement="ki_store_to_mark">
+        <di:waypoint x="3435" y="310"/>
+        <di:waypoint x="3505" y="310"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_ki_mark_to_end" bpmnElement="ki_mark_to_end">
+        <di:waypoint x="3725" y="310"/>
+        <di:waypoint x="3787" y="310"/>
+      </bpmndi:BPMNEdge>
+
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+  <!-- ================================================================
+       DIAGRAM 2: Поиск (RAG) в runtime
+       ================================================================ -->
+  <bpmndi:BPMNDiagram id="BPMNDiagram_KR" name="База знаний — Поиск в Runtime (RAG)">
+    <bpmndi:BPMNPlane id="BPMNPlane_KR" bpmnElement="Process_KnowledgeRetrieval">
+
+      <bpmndi:BPMNShape id="S_KR_Start" bpmnElement="KR_Start">
+        <dc:Bounds x="152" y="272" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="116" y="315" width="108" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_Task_CheckFiles" bpmnElement="KR_Task_CheckFiles">
+        <dc:Bounds x="250" y="258" width="240" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_GW_HasFiles" bpmnElement="KR_GW_HasFiles" isMarkerVisible="true">
+        <dc:Bounds x="550" y="270" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="526" y="327" width="98" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_End_NoTool" bpmnElement="KR_End_NoTool">
+        <dc:Bounds x="557" y="179" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="524" y="145" width="102" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_Task_AddTool" bpmnElement="KR_Task_AddTool">
+        <dc:Bounds x="670" y="258" width="220" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_Task_LLMDecides" bpmnElement="KR_Task_LLMDecides">
+        <dc:Bounds x="960" y="258" width="240" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_GW_LLMCalls" bpmnElement="KR_GW_LLMCalls" isMarkerVisible="true">
+        <dc:Bounds x="1260" y="270" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1238" y="327" width="94" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_End_NoCall" bpmnElement="KR_End_NoCall">
+        <dc:Bounds x="1267" y="179" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1236" y="145" width="98" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_Task_EmbedQuery" bpmnElement="KR_Task_EmbedQuery">
+        <dc:Bounds x="1380" y="248" width="240" height="100"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_Task_VectorSearch" bpmnElement="KR_Task_VectorSearch">
+        <dc:Bounds x="1690" y="248" width="260" height="100"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_GW_Results" bpmnElement="KR_GW_Results" isMarkerVisible="true">
+        <dc:Bounds x="2010" y="270" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1990" y="327" width="90" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_End_NoResults" bpmnElement="KR_End_NoResults">
+        <dc:Bounds x="2017" y="179" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1984" y="145" width="102" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_Task_ReturnChunks" bpmnElement="KR_Task_ReturnChunks">
+        <dc:Bounds x="2130" y="258" width="240" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_Task_LLMGenerates" bpmnElement="KR_Task_LLMGenerates">
+        <dc:Bounds x="2440" y="258" width="240" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="S_KR_End_Answer" bpmnElement="KR_End_Answer">
+        <dc:Bounds x="2752" y="280" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2724" y="323" width="92" height="40"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- ── Edges ── -->
+      <bpmndi:BPMNEdge id="E_kr_start_to_check" bpmnElement="kr_start_to_check">
+        <di:waypoint x="188" y="290"/>
+        <di:waypoint x="250" y="298"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_check_to_gw" bpmnElement="kr_check_to_gw">
+        <di:waypoint x="490" y="298"/>
+        <di:waypoint x="550" y="295"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_no_files" bpmnElement="kr_no_files">
+        <di:waypoint x="575" y="270"/>
+        <di:waypoint x="575" y="215"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="581" y="238" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_has_files" bpmnElement="kr_has_files">
+        <di:waypoint x="600" y="295"/>
+        <di:waypoint x="670" y="298"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="620" y="274" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_add_to_llm" bpmnElement="kr_add_to_llm">
+        <di:waypoint x="890" y="298"/>
+        <di:waypoint x="960" y="298"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_llm_to_gw" bpmnElement="kr_llm_to_gw">
+        <di:waypoint x="1200" y="298"/>
+        <di:waypoint x="1260" y="295"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_no_call" bpmnElement="kr_no_call">
+        <di:waypoint x="1285" y="270"/>
+        <di:waypoint x="1285" y="215"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1291" y="238" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_yes_call" bpmnElement="kr_yes_call">
+        <di:waypoint x="1310" y="295"/>
+        <di:waypoint x="1380" y="298"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1330" y="274" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_embed_to_search" bpmnElement="kr_embed_to_search">
+        <di:waypoint x="1620" y="298"/>
+        <di:waypoint x="1690" y="298"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_search_to_gw_results" bpmnElement="kr_search_to_gw_results">
+        <di:waypoint x="1950" y="298"/>
+        <di:waypoint x="2010" y="295"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_no_results" bpmnElement="kr_no_results">
+        <di:waypoint x="2035" y="270"/>
+        <di:waypoint x="2035" y="215"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2041" y="238" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_has_results" bpmnElement="kr_has_results">
+        <di:waypoint x="2060" y="295"/>
+        <di:waypoint x="2130" y="298"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2080" y="274" width="20" height="14"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_chunks_to_llm" bpmnElement="kr_chunks_to_llm">
+        <di:waypoint x="2370" y="298"/>
+        <di:waypoint x="2440" y="298"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="E_kr_generate_to_end" bpmnElement="kr_generate_to_end">
+        <di:waypoint x="2680" y="298"/>
+        <di:waypoint x="2752" y="298"/>
+      </bpmndi:BPMNEdge>
+
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</definitions>

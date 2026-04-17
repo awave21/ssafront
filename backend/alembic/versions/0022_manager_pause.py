@@ -35,12 +35,13 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
-    # Удаляем manager_pause_minutes из dialog_states, если он там был
-    # (safe: столбец добавлялся в этой же миграции раньше)
-    try:
-        op.drop_column("dialog_states", "manager_pause_minutes")
-    except Exception:
-        pass
+    # Раньше здесь был drop_column в try/except — при отсутствии столбца Postgres
+    # помечал транзакцию как aborted, и обновление alembic_version ломалось.
+    op.execute(
+        sa.text(
+            "ALTER TABLE dialog_states DROP COLUMN IF EXISTS manager_pause_minutes"
+        )
+    )
 
 
 def downgrade() -> None:

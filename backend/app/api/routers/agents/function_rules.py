@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -60,6 +61,17 @@ def _extract_tool_args_schema(condition_config: dict[str, Any] | None) -> dict[s
     raw_schema = condition_config.get("tool_args_schema")
     if raw_schema is None:
         return None
+    if isinstance(raw_schema, str):
+        raw_schema = raw_schema.strip()
+        if not raw_schema:
+            return None
+        try:
+            raw_schema = json.loads(raw_schema)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="condition_config.tool_args_schema must be valid JSON object",
+            ) from exc
     if not isinstance(raw_schema, dict):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -159,8 +171,6 @@ def _hydrated_condition_config(rule: FunctionRule) -> dict[str, Any]:
 def _to_rule_read(rule: FunctionRule) -> FunctionRuleRead:
     payload = FunctionRuleRead.model_validate(rule).model_dump()
     payload["condition_config"] = _hydrated_condition_config(rule)
-    payload["trigger_mode"] = "post_tool"
-    payload["condition_type"] = "always"
     return FunctionRuleRead(**payload)
 
 
@@ -281,10 +291,10 @@ async def create_function_rule(
         enabled=payload.enabled,
         dry_run=payload.dry_run,
         stop_on_match=payload.stop_on_match,
-        allow_semantic=False,
+        allow_semantic=payload.allow_semantic,
         priority=payload.priority,
-        trigger_mode="post_tool",
-        condition_type="always",
+        trigger_mode=payload.trigger_mode,
+        condition_type=payload.condition_type,
         condition_config=payload.condition_config,
         tool_id=resolved_tool_id,
         reaction_to_execution=payload.reaction_to_execution,
@@ -369,10 +379,11 @@ async def update_function_rule(
         extra_where=[FunctionRule.agent_id == agent_id],
     )
 
-    update_data = payload.model_dump(exclude_unset=True)
-    update_data["trigger_mode"] = "post_tool"
-    update_data["condition_type"] = "always"
-    update_data["allow_semantic"] = False
+    # Exclude actions from dump: model_dump() turns nested models into dicts, which
+    # breaks action_payload.action_type below (AttributeError → 500).
+    update_data = payload.model_dump(exclude_unset=True, exclude={"actions"})
+    actions_field_set = "actions" in payload.model_fields_set
+
     if "tool_id" in update_data and update_data["tool_id"] is not None:
         await get_or_404(
             db,
@@ -394,6 +405,33 @@ async def update_function_rule(
             )
     for key, value in update_data.items():
         setattr(rule, key, value)
+
+    if actions_field_set:
+        to_persist = list(payload.actions or [])
+        for action_payload in to_persist:
+            await _validate_webhook_action_config(
+                db,
+                tenant_id=user.tenant_id,
+                action_type=action_payload.action_type,
+                action_config=action_payload.action_config,
+            )
+        await db.execute(
+            delete(FunctionPostAction).where(FunctionPostAction.rule_id == rule.id)
+        )
+        await db.flush()
+        for action in to_persist:
+            db.add(
+                FunctionPostAction(
+                    tenant_id=user.tenant_id,
+                    rule_id=rule.id,
+                    action_type=action.action_type,
+                    action_config=action.action_config,
+                    on_status=action.on_status,
+                    order_index=action.order_index,
+                    enabled=action.enabled,
+                )
+            )
+
     target_condition_config = update_data.get("condition_config", rule.condition_config)
     target_tool_id = update_data.get("tool_id", rule.tool_id)
     await _sync_internal_tool_schema(

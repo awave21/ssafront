@@ -124,6 +124,7 @@ async def analyze_dialog_samples(
     *,
     model_name: str | None = None,
     openai_api_key: str | None = None,
+    anthropic_api_key: str | None = None,
     max_llm_requests: int = 20,
 ) -> AnalyzerRunResult:
     if not dialogs:
@@ -136,7 +137,11 @@ async def analyze_dialog_samples(
 
     settings = get_settings()
     effective_model = model_name or settings.pydanticai_default_model
-    model = resolve_model(effective_model, openai_api_key=openai_api_key)
+    model = resolve_model(
+        effective_model,
+        openai_api_key=openai_api_key,
+        anthropic_api_key=anthropic_api_key,
+    )
 
     analyst = PydanticAgent(
         model,

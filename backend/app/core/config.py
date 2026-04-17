@@ -177,6 +177,14 @@ class Settings(BaseSettings):
         validation_alias="RUNTIME_STRIP_TOOL_MESSAGES_FROM_HISTORY",
         description="Удалять tool-call/tool-return из history перед запуском модели (можно включить для строгой совместимости).",
     )
+    runtime_optional_tools_mode: str = Field(
+        default="eager",
+        validation_alias="RUNTIME_OPTIONAL_TOOLS_MODE",
+        description=(
+            "Режим подбора optional data-тулов: eager — всегда все категории; "
+            "lazy_keywords — эвристика по тексту сообщения."
+        ),
+    )
     direct_questions_retrieval_router_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices(

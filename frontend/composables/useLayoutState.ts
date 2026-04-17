@@ -83,6 +83,8 @@ export const useLayoutState = () => {
     functionsCanSave.value = false
   }
 
+  const isEditorFullscreen = useState<boolean>('editor-fullscreen', () => false)
+
   const toggleSidebar = () => {
     isCollapsed.value = !isCollapsed.value
     if (import.meta.client) {
@@ -124,5 +126,6 @@ export const useLayoutState = () => {
     functionsTesting,
     functionsCanSave,
     resetFunctionsTopbarState,
+    isEditorFullscreen,
   }
 }

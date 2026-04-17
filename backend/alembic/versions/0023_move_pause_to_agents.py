@@ -16,18 +16,20 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Добавляем manager_pause_minutes в agents (глобальная настройка)
-    op.add_column(
-        "agents",
-        sa.Column(
-            "manager_pause_minutes",
-            sa.Integer(),
-            nullable=False,
-            server_default="10",
-        ),
+    # Колонка на agents уже добавлена в 0022_manager_pause — при свежей цепочке
+    # миграций повторный add_column давал DuplicateColumnError.
+    op.execute(
+        sa.text(
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
+            "manager_pause_minutes INTEGER NOT NULL DEFAULT 10"
+        )
     )
-    # Удаляем manager_pause_minutes из dialog_states (больше не per-dialog)
-    op.drop_column("dialog_states", "manager_pause_minutes")
+    # Убираем с dialog_states, если когда-то была (старые схемы / черновики миграций)
+    op.execute(
+        sa.text(
+            "ALTER TABLE dialog_states DROP COLUMN IF EXISTS manager_pause_minutes"
+        )
+    )
 
 
 def downgrade() -> None:

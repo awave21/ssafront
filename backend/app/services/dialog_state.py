@@ -74,6 +74,22 @@ async def set_dialog_status(
     return state
 
 
+async def upsert_dialog_status_flush_only(
+    db: AsyncSession,
+    *,
+    agent_id: UUID | Any,
+    tenant_id: UUID | Any,
+    session_id: str,
+    new_status: str,
+) -> DialogState:
+    """Обновить статус диалога без commit (для function-rules внутри транзакции)."""
+    state, _ = await _get_or_create_state(db, agent_id, tenant_id, session_id)
+    state.status = new_status
+    await db.flush()
+    logger.info("dialog_status_flush", agent_id=str(agent_id), session_id=session_id, new_status=new_status)
+    return state
+
+
 async def is_manager_paused(
     db: AsyncSession,
     agent_id: UUID | Any,
@@ -130,4 +146,37 @@ async def update_last_manager_message(
     state.last_manager_message_at = datetime.now(timezone.utc)
     await db.commit()
     logger.info("last_manager_message_updated", agent_id=str(agent_id), session_id=session_id)
+    return state
+
+
+async def get_last_user_message_at(
+    db: AsyncSession,
+    *,
+    agent_id: UUID | Any,
+    session_id: str,
+) -> datetime | None:
+    """Время последнего входящего сообщения клиента (если запись dialog_states есть)."""
+    stmt = select(DialogState.last_user_message_at).where(
+        DialogState.session_id == session_id,
+        DialogState.agent_id == agent_id,
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def update_last_user_message_at(
+    db: AsyncSession,
+    *,
+    agent_id: UUID | Any,
+    tenant_id: UUID | Any,
+    session_id: str,
+    commit: bool = True,
+) -> DialogState:
+    """Обновить время последнего сообщения клиента (upsert)."""
+    state, _ = await _get_or_create_state(db, agent_id, tenant_id, session_id)
+    state.last_user_message_at = datetime.now(timezone.utc)
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
+    logger.info("last_user_message_at_updated", agent_id=str(agent_id), session_id=session_id)
     return state

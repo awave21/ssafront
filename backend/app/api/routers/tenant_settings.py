@@ -157,7 +157,7 @@ async def get_llm_key_status(
     user: AuthContext = Depends(require_scope("settings:read")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Check whether the organization has a custom OpenAI API key configured."""
+    """Check whether the organization has a custom API key for the given provider."""
     config = await get_tenant_llm_config(db, user.tenant_id, provider)
     if config is None or not config.is_active:
         return TenantLLMConfigStatus(has_key=False, provider=provider)
@@ -175,7 +175,7 @@ async def set_llm_key(
     user: AuthContext = Depends(require_scope("settings:write")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Set or update the organization's OpenAI API key.
+    """Set or update the organization's LLM API key for a provider.
 
     The key is encrypted at rest via Fernet. Only the last 4 characters
     are stored in plaintext for identification purposes.
@@ -185,8 +185,23 @@ async def set_llm_key(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="OpenAI API keys must start with 'sk-'",
         )
+    api_key_to_store = body.api_key
+    if body.provider == "anthropic":
+        key = body.api_key.strip()
+        if len(key) < 10:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Anthropic API key is too short",
+            )
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+        if not all(c in allowed for c in key):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Anthropic API key contains invalid characters",
+            )
+        api_key_to_store = key
 
-    row = await set_tenant_llm_key(db, user.tenant_id, body.api_key, body.provider)
+    row = await set_tenant_llm_key(db, user.tenant_id, api_key_to_store, body.provider)
     await db.commit()
     await db.refresh(row)
     logger.info(
@@ -204,10 +219,7 @@ async def delete_llm_key(
     user: AuthContext = Depends(require_scope("settings:write")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove (deactivate) the organization's custom OpenAI API key.
-
-    After deletion, OpenAI requests are blocked until a new key is configured.
-    """
+    """Remove (deactivate) the organization's API key for the given provider."""
     deleted = await delete_tenant_llm_key(db, user.tenant_id, provider)
     if not deleted:
         raise HTTPException(

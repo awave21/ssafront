@@ -5,9 +5,11 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import httpx
 import structlog
@@ -19,11 +21,12 @@ from app.db.models.dialog_tag import DialogTag
 from app.db.models.function_post_action import FunctionPostAction
 from app.db.models.function_rule import FunctionRule
 from app.db.models.rule_execution_log import RuleExecutionLog
+from app.db.models.scenario_delayed_message import ScenarioDelayedMessage
 from app.db.models.tool import Tool
 from app.schemas.auth import AuthContext
 from app.core.config import get_settings
 from app.services.agent_user_state import upsert_agent_user_state
-from app.services.dialog_state import set_dialog_status
+from app.services.dialog_state import set_dialog_status, upsert_dialog_status_flush_only
 from app.services.semantic_matcher import semantic_match_text
 from app.services.tool_executor import _ensure_allowed_domain, execute_tool_call
 from app.utils.idempotency import generate_idempotency_key
@@ -228,6 +231,150 @@ def _extract_latest_tool_call_args(
     return {}
 
 
+def merge_scenario_rule_contexts(prev: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    """Объединить контексты нескольких фаз сценариев (сообщения, silent, forced_result)."""
+    merged = dict(prev)
+    for key, val in new.items():
+        if key == "messages_to_send" and isinstance(val, list):
+            merged.setdefault("messages_to_send", []).extend(val)
+        elif key == "augment_prompt" and isinstance(val, list):
+            merged.setdefault("augment_prompt", []).extend(val)
+        elif key == "silent_reaction" and val:
+            merged["silent_reaction"] = True
+        elif key == "forced_result" and val is not None:
+            merged["forced_result"] = val
+        elif key == "should_pause" and val:
+            merged["should_pause"] = True
+        else:
+            merged[key] = val
+    return merged
+
+
+def _parse_hhmm(s: str) -> tuple[int, int]:
+    parts = str(s or "").strip().split(":")
+    if len(parts) < 2:
+        return 0, 0
+    try:
+        return int(parts[0]), int(parts[1])
+    except (TypeError, ValueError):
+        return 0, 0
+
+
+def _evaluate_schedule_time(cfg: dict[str, Any], context: dict[str, Any]) -> ConditionResult:
+    start_s = str(cfg.get("start", "00:00"))
+    end_s = str(cfg.get("end", "23:59"))
+    tz_name = str(context.get("agent_timezone") or "UTC").strip() or "UTC"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = timezone.utc
+    now = datetime.now(tz)
+    sh, sm = _parse_hhmm(start_s)
+    eh, em = _parse_hhmm(end_s)
+    cur = now.hour * 60 + now.minute
+    start_m = sh * 60 + sm
+    end_m = eh * 60 + em
+    if start_m <= end_m:
+        matched = start_m <= cur <= end_m
+    else:
+        matched = cur >= start_m or cur <= end_m
+    return ConditionResult(
+        matched=matched,
+        score=1.0 if matched else 0.0,
+        reason="schedule_time",
+    )
+
+
+def _evaluate_schedule_weekday(cfg: dict[str, Any], context: dict[str, Any]) -> ConditionResult:
+    days_raw = cfg.get("days")
+    if not isinstance(days_raw, list) or not days_raw:
+        return ConditionResult(matched=False, reason="schedule_weekday missing days")
+    tz_name = str(context.get("agent_timezone") or "UTC").strip() or "UTC"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = timezone.utc
+    now = datetime.now(tz)
+    current = now.weekday()
+    try:
+        day_set = {int(d) for d in days_raw}
+    except (TypeError, ValueError):
+        return ConditionResult(matched=False, reason="schedule_weekday invalid days")
+    matched = current in day_set
+    return ConditionResult(matched=matched, score=1.0 if matched else 0.0, reason="schedule_weekday")
+
+
+def _evaluate_dialog_source(cfg: dict[str, Any], context: dict[str, Any]) -> ConditionResult:
+    platforms = cfg.get("platforms") or cfg.get("platform")
+    if isinstance(platforms, str):
+        platforms = [platforms]
+    if not isinstance(platforms, list) or not platforms:
+        return ConditionResult(matched=False, reason="dialog_source missing platforms")
+    ui = context.get("user_info")
+    if not isinstance(ui, dict):
+        ui = {}
+    plat = str(ui.get("platform") or ui.get("integration_channel_type") or "").strip().lower()
+    normalized = [str(p).strip().lower() for p in platforms]
+    matched = plat in normalized
+    return ConditionResult(matched=matched, score=1.0 if matched else 0.0, reason="dialog_source")
+
+
+def _evaluate_start_param(cfg: dict[str, Any], context: dict[str, Any]) -> ConditionResult:
+    ui = context.get("user_info")
+    if not isinstance(ui, dict):
+        ui = {}
+    val = ui.get("start_param") or ui.get("start_payload")
+    if cfg.get("equals") is not None:
+        matched = str(val) == str(cfg.get("equals"))
+        return ConditionResult(matched=matched, score=1.0 if matched else 0.0, reason="start_param equals")
+    if cfg.get("contains") is not None:
+        matched = str(cfg.get("contains")) in str(val or "")
+        return ConditionResult(matched=matched, score=1.0 if matched else 0.0, reason="start_param contains")
+    return ConditionResult(matched=False, reason="start_param missing equals/contains")
+
+
+def _evaluate_client_return_gap(cfg: dict[str, Any], context: dict[str, Any]) -> ConditionResult:
+    try:
+        min_days = float(cfg.get("min_days", 0))
+    except (TypeError, ValueError):
+        min_days = 0.0
+    days = context.get("days_since_last_user_message")
+    if days is None:
+        return ConditionResult(matched=False, reason="no prior user message timestamp")
+    matched = float(days) >= min_days
+    return ConditionResult(matched=matched, score=1.0 if matched else 0.0, reason="client_return_gap")
+
+
+async def evaluate_after_scenario_condition(
+    db: AsyncSession,
+    rule: FunctionRule,
+    *,
+    session_id: str,
+) -> ConditionResult:
+    cfg = rule.condition_config or {}
+    prereq = cfg.get("prerequisite_rule_id")
+    if prereq is None:
+        return ConditionResult(matched=False, reason="after_scenario missing prerequisite_rule_id")
+    try:
+        rid = UUID(str(prereq))
+    except (ValueError, TypeError):
+        return ConditionResult(matched=False, reason="invalid prerequisite_rule_id")
+    stmt = (
+        select(RuleExecutionLog.id)
+        .where(
+            RuleExecutionLog.session_id == session_id,
+            RuleExecutionLog.rule_id == rid,
+            RuleExecutionLog.matched.is_(True),
+            RuleExecutionLog.result_status.in_(["success", "dry_run"]),
+        )
+        .limit(1)
+    )
+    found = (await db.execute(stmt)).scalar_one_or_none()
+    if found is not None:
+        return ConditionResult(matched=True, score=1.0, reason="prerequisite_rule_executed")
+    return ConditionResult(matched=False, score=0.0, reason="prerequisite_rule_not_matched")
+
+
 def evaluate_condition(rule: FunctionRule, *, message: str, context: dict[str, Any]) -> ConditionResult:
     cfg = rule.condition_config or {}
     if rule.condition_type == "always":
@@ -278,6 +425,21 @@ def evaluate_condition(rule: FunctionRule, *, message: str, context: dict[str, A
             matched = contains in str(value or "")
             return ConditionResult(matched=matched, score=1.0 if matched else 0.0, reason=f"context contains {field_name}")
         return ConditionResult(matched=False, reason="json_context missing operator")
+
+    if rule.condition_type == "schedule_time":
+        return _evaluate_schedule_time(cfg, context)
+
+    if rule.condition_type == "schedule_weekday":
+        return _evaluate_schedule_weekday(cfg, context)
+
+    if rule.condition_type == "dialog_source":
+        return _evaluate_dialog_source(cfg, context)
+
+    if rule.condition_type == "start_param":
+        return _evaluate_start_param(cfg, context)
+
+    if rule.condition_type == "client_return_gap":
+        return _evaluate_client_return_gap(cfg, context)
 
     if rule.condition_type == "semantic":
         threshold = float(cfg.get("semantic_threshold", 0.6))
@@ -594,6 +756,98 @@ async def execute_post_actions(
                 )
                 continue
 
+            if action.action_type == "block_user":
+                ident = _extract_session_identity(session_id)
+                if ident:
+                    platform, platform_user_id = ident
+                    await upsert_agent_user_state(
+                        db,
+                        tenant_id=tenant_id,
+                        agent_id=agent_id,
+                        platform=platform,
+                        platform_user_id=platform_user_id,
+                        is_disabled=True,
+                        changed_by_user_id=user.user_id,
+                    )
+                results.append(ActionResult(action.id, action.action_type, "success"))
+                continue
+
+            if action.action_type == "unblock_user":
+                ident = _extract_session_identity(session_id)
+                if ident:
+                    platform, platform_user_id = ident
+                    await upsert_agent_user_state(
+                        db,
+                        tenant_id=tenant_id,
+                        agent_id=agent_id,
+                        platform=platform,
+                        platform_user_id=platform_user_id,
+                        is_disabled=False,
+                        changed_by_user_id=user.user_id,
+                    )
+                results.append(ActionResult(action.id, action.action_type, "success"))
+                continue
+
+            if action.action_type == "resume_dialog":
+                await upsert_dialog_status_flush_only(
+                    db,
+                    agent_id=agent_id,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    new_status="active",
+                )
+                results.append(ActionResult(action.id, action.action_type, "success"))
+                continue
+
+            if action.action_type == "send_delayed":
+                raw_text = str(cfg.get("text") or cfg.get("message") or "").strip()
+                rendered_text = _render_template(raw_text, output_context) if raw_text else ""
+                try:
+                    delay_seconds = int(cfg.get("delay_seconds", 60))
+                except (TypeError, ValueError):
+                    delay_seconds = 60
+                delay_seconds = max(1, min(delay_seconds, 86400 * 7))
+                if not rendered_text:
+                    results.append(
+                        ActionResult(action.id, action.action_type, "skipped", {"reason": "empty_message"})
+                    )
+                    continue
+                if ":" not in session_id:
+                    results.append(
+                        ActionResult(action.id, action.action_type, "error", {"reason": "invalid_session_id"})
+                    )
+                    continue
+                prefix, peer = session_id.split(":", 1)
+                ch_type = prefix.strip().lower()
+                peer = peer.strip()
+                if ch_type not in ("telegram", "telegram_phone", "whatsapp", "max"):
+                    ch_type = "telegram"
+                rule_uuid = output_context.get("current_rule_id")
+                rid = rule_uuid if isinstance(rule_uuid, UUID) else None
+                scheduled_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+                db.add(
+                    ScenarioDelayedMessage(
+                        tenant_id=tenant_id,
+                        agent_id=agent_id,
+                        rule_id=rid,
+                        session_id=session_id,
+                        channel_type=ch_type,
+                        channel_target=peer,
+                        message_text=rendered_text,
+                        scheduled_at=scheduled_at,
+                        status="pending",
+                    )
+                )
+                results.append(
+                    ActionResult(
+                        action.id,
+                        action.action_type,
+                        "success",
+                        {"scheduled_at": scheduled_at.isoformat(), "delay_seconds": delay_seconds},
+                    )
+                )
+                continue
+
             results.append(ActionResult(action.id, action.action_type, "skipped", {"reason": "unsupported_action"}))
         except Exception as exc:  # noqa: BLE001
             logger.warning("rule_action_failed", action_type=action.action_type, error=str(exc), trace_id=trace_id)
@@ -684,6 +938,8 @@ async def run_rules_for_phase(
         started = time.monotonic()
         if tool_id_filter is not None:
             condition = ConditionResult(matched=True, score=1.0, reason="matched by linked tool execution")
+        elif rule.condition_type == "after_scenario":
+            condition = await evaluate_after_scenario_condition(db, rule, session_id=session_id)
         elif rule.condition_type == "semantic" and (not semantic_allowed or not rule.allow_semantic):
             condition = ConditionResult(matched=False, score=0.0, reason="semantic disabled by feature flag")
         else:
@@ -733,6 +989,7 @@ async def run_rules_for_phase(
                         context_data["last_tool_result"] = tool_result
                     if rule_tool_trace is not None:
                         action_traces.append(rule_tool_trace)
+                context_data["current_rule_id"] = rule.id
                 post_action_traces, context_data = await execute_post_actions(
                     db,
                     tenant_id=tenant_id,

@@ -1033,16 +1033,26 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
         const toolsCalled = collectToolsByPriority(response)
         const orchestrationMeta = extractOrchestrationMeta(response)
 
-        if (response.status === 'succeeded' && response.output_message) {
-          let content = response.output_message
+        if (response.status === 'succeeded') {
+          let content =
+            response.output_message != null ? String(response.output_message) : ''
           const match = content.match(/AgentRunResult\(output=['"]([\s\S]*)['"]\)/)
           if (match && match[1]) {
             content = match[1]
           }
+          if (!content.trim()) {
+            content =
+              'Ответ пустой (например, сценарий подавил ответ или модель ничего не вернула).'
+          }
           messages.value.push({
             role: 'agent',
             content,
-            run_id: response.run_id ?? null,
+            run_id:
+              response.run_id != null
+                ? String(response.run_id)
+                : response.id != null
+                  ? String(response.id)
+                  : null,
             tokens,
             orchestration_meta: orchestrationMeta,
             tools_called: toolsCalled

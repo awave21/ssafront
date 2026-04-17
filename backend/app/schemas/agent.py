@@ -71,9 +71,9 @@ class AgentBase(BaseModel):
         min_length=1,
         max_length=200,
         description=(
-            "Модель LLM в формате 'openai:model-name'. "
-            "Примеры: openai:gpt-4.1, openai:gpt-4.1-mini, openai:gpt-4.1-nano, "
-            "openai:gpt-4o, openai:gpt-4o-mini, openai:gpt-5.2"
+            "Модель LLM в формате 'провайдер:имя-модели'. "
+            "Примеры OpenAI: openai:gpt-4.1, openai:gpt-4o-mini, openai:gpt-5.2. "
+            "Примеры Anthropic: anthropic:claude-sonnet-4-5, anthropic:claude-3-5-sonnet-20241022"
         )
     )
     llm_params: LLMParams | dict[str, Any] | None = None

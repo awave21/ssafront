@@ -196,6 +196,7 @@ async def generate_improved_prompt(
     meta_model: str = "openai:gpt-4.1",
     tools: list[ToolInfo] | None = None,
     openai_api_key: str | None = None,
+    anthropic_api_key: str | None = None,
 ) -> PromptGenerationResult:
     """Вызвать мета-агент для генерации улучшенного system prompt.
 
@@ -211,7 +212,11 @@ async def generate_improved_prompt(
     if not isinstance(meta_model, str) or not meta_model.strip():
         raise ValueError("meta_model must be a non-empty string")
 
-    model = resolve_model(meta_model.strip(), openai_api_key=openai_api_key)
+    model = resolve_model(
+        meta_model.strip(),
+        openai_api_key=openai_api_key,
+        anthropic_api_key=anthropic_api_key,
+    )
     meta_agent = PydanticAgent(
         model,
         output_type=PromptGenerationResult,
