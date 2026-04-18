@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, func
+from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -49,9 +49,7 @@ class SessionScriptContext(Base, UUIDPrimaryKeyMixin):
 
     # node_ref_id of the last ScriptNode returned to the LLM — used for
     # contextual traversal: next call first checks this node's next_steps
-    current_node_ref_id: Mapped[str | None] = mapped_column(
-        nullable=True
-    )
+    current_node_ref_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
