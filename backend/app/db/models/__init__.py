@@ -51,6 +51,10 @@ from app.db.models.knowledge_file import KnowledgeFile
 from app.db.models.knowledge_file_chunk import KnowledgeFileChunk
 from app.db.models.knowledge_index_job import KnowledgeIndexJob
 from app.db.models.user_table import UserTable, UserTableAttribute, UserTableRecord
+from app.db.models.script_flow import ScriptFlow
+from app.db.models.script_node import ScriptNode
+from app.db.models.scenario_delayed_message import ScenarioDelayedMessage
+from app.db.models.session_script_context import SessionScriptContext
 
 __all__ = [
     "Agent",
@@ -109,4 +113,8 @@ __all__ = [
     "UserTable",
     "UserTableAttribute",
     "UserTableRecord",
+    "ScriptFlow",
+    "ScriptNode",
+    "ScenarioDelayedMessage",
+    "SessionScriptContext",
 ]

@@ -377,6 +377,23 @@ class Settings(BaseSettings):
         validation_alias="SQNS_SYNC_PAYMENTS_WINDOW_DAYS",
     )
 
+    lightrag_enabled: bool = Field(
+        default=False,
+        validation_alias="LIGHTRAG_ENABLED",
+        description="Enable LightRAG indexing for expert script flows.",
+    )
+    lightrag_index_poll_interval_seconds: int = Field(
+        default=30,
+        ge=5,
+        validation_alias="LIGHTRAG_INDEX_POLL_INTERVAL_SECONDS",
+    )
+    lightrag_index_batch_size: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        validation_alias="LIGHTRAG_INDEX_BATCH_SIZE",
+    )
+
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"],
         validation_alias="CORS_ORIGINS",
