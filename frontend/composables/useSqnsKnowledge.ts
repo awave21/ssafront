@@ -7,6 +7,9 @@ import {
 } from '~/composables/useAgents'
 import { getReadableErrorMessage } from '~/utils/api-errors'
 
+/** Backend `Query(..., le=1000)` on `/sqns/services/cached` and `/sqns/specialists`. */
+const SQNS_LIST_PAGE_MAX = 1000
+
 /**
  * Загрузка услуг / сотрудников / связей SQNS для экрана сценариев (скриптов).
  * Обёртка над методами useAgents с локальным состоянием списков.
@@ -17,6 +20,7 @@ export const useSqnsKnowledge = (agentId: string) => {
     fetchSqnsSpecialists,
     fetchSqnsServiceEmployeeLinks,
     updateSqnsSpecialist,
+    updateSqnsService,
   } = useAgents()
 
   const services = ref<SqnsService[]>([])
@@ -30,17 +34,42 @@ export const useSqnsKnowledge = (agentId: string) => {
     active: Boolean(s.active ?? s.is_active ?? false),
   })
 
+  const fetchAllCachedServices = async (): Promise<SqnsService[]> => {
+    const acc: SqnsService[] = []
+    let offset = 0
+    while (true) {
+      const res = await fetchSqnsServicesCached(agentId, { limit: SQNS_LIST_PAGE_MAX, offset })
+      const batch = res.services ?? []
+      acc.push(...batch)
+      if (batch.length < SQNS_LIST_PAGE_MAX) break
+      offset += SQNS_LIST_PAGE_MAX
+    }
+    return acc
+  }
+
+  const fetchAllSpecialists = async (): Promise<SqnsSpecialist[]> => {
+    const acc: SqnsSpecialist[] = []
+    let offset = 0
+    while (true) {
+      const batch = await fetchSqnsSpecialists(agentId, { limit: SQNS_LIST_PAGE_MAX, offset }) ?? []
+      acc.push(...batch)
+      if (batch.length < SQNS_LIST_PAGE_MAX) break
+      offset += SQNS_LIST_PAGE_MAX
+    }
+    return acc
+  }
+
   const loadAll = async () => {
     isLoading.value = true
     error.value = null
     try {
-      const [cached, specList, linksRes] = await Promise.all([
-        fetchSqnsServicesCached(agentId, { limit: 5000, offset: 0 }),
-        fetchSqnsSpecialists(agentId, { limit: 5000, offset: 0 }),
+      const [svcList, specList, linksRes] = await Promise.all([
+        fetchAllCachedServices(),
+        fetchAllSpecialists(),
         fetchSqnsServiceEmployeeLinks(agentId, { limit: 8000, offset: 0 }),
       ])
-      services.value = cached.services ?? []
-      specialists.value = (specList ?? []).map(normalizeSpecialist)
+      services.value = svcList
+      specialists.value = specList.map(normalizeSpecialist)
       serviceEmployeeLinks.value = linksRes.items ?? []
     } catch (err: unknown) {
       error.value = getReadableErrorMessage(err as { statusCode?: number }, 'Не удалось загрузить данные SQNS')
@@ -56,6 +85,12 @@ export const useSqnsKnowledge = (agentId: string) => {
     if (row) row.information = information ? information : null
   }
 
+  const updateServiceDescription = async (serviceId: string, description: string) => {
+    await updateSqnsService(agentId, serviceId, { description: description || null })
+    const row = services.value.find((x) => x.id === serviceId)
+    if (row) (row as { description?: string | null }).description = description ? description : null
+  }
+
   return {
     services,
     specialists,
@@ -64,5 +99,6 @@ export const useSqnsKnowledge = (agentId: string) => {
     error,
     loadAll,
     updateSpecialistInfo,
+    updateServiceDescription,
   }
 }

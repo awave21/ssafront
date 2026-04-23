@@ -6,9 +6,11 @@ import type {
   ScriptFlow,
   ScriptFlowCoverageResult,
   ScriptFlowCreatePayload,
+  ScriptFlowGraphPreview,
+  ScriptFlowKgCoverageResult,
   ScriptFlowSearchTestResult,
-  ScriptFlowUpdatePayload,
   ScriptFlowSuggestKeywordsResult,
+  ScriptFlowUpdatePayload,
 } from '~/types/scriptFlow'
 
 export const useScriptFlows = (agentId: string) => {
@@ -52,10 +54,21 @@ export const useScriptFlows = (agentId: string) => {
     })
   }
 
-  const updateFlow = async (flowId: string, payload: ScriptFlowUpdatePayload): Promise<ScriptFlow> => {
+  const updateFlow = async (
+    flowId: string,
+    payload: ScriptFlowUpdatePayload,
+    opts?: { definitionVersion?: number },
+  ): Promise<ScriptFlow> => {
+    const headers: Record<string, string> = {
+      ...authHeaders(),
+      'Content-Type': 'application/json',
+    }
+    if (opts?.definitionVersion != null)
+      headers['X-Definition-Version'] = String(opts.definitionVersion)
+
     return await apiFetch<ScriptFlow>(`/agents/${agentId}/script-flows/${flowId}`, {
       method: 'PATCH',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers,
       body: payload,
     })
   }
@@ -84,6 +97,15 @@ export const useScriptFlows = (agentId: string) => {
     })
   }
 
+  const unpublishFlow = async (
+    flowId: string,
+  ): Promise<{ id: string; flow_status: string; published_version: number; index_status: string }> => {
+    return await apiFetch(`/agents/${agentId}/script-flows/${flowId}/unpublish`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+  }
+
   const suggestKeywords = async (flowId: string): Promise<ScriptFlowSuggestKeywordsResult> => {
     return await apiFetch<ScriptFlowSuggestKeywordsResult>(
       `/agents/${agentId}/script-flows/${flowId}/suggest-keywords`,
@@ -91,13 +113,13 @@ export const useScriptFlows = (agentId: string) => {
     )
   }
 
-  const testSearch = async (query: string, limit = 5): Promise<ScriptFlowSearchTestResult> => {
+  const testSearch = async (query: string): Promise<ScriptFlowSearchTestResult> => {
     return await apiFetch<ScriptFlowSearchTestResult>(
       `/agents/${agentId}/script-flows/test-search`,
       {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: { query, limit },
+        body: { query },
       },
     )
   }
@@ -107,6 +129,115 @@ export const useScriptFlows = (agentId: string) => {
       `/agents/${agentId}/script-flows/${flowId}/coverage`,
       { headers: authHeaders() },
     )
+  }
+
+  const getKgCoverage = async (): Promise<ScriptFlowKgCoverageResult> => {
+    return await apiFetch<ScriptFlowKgCoverageResult>(
+      `/agents/${agentId}/script-flows/kg-coverage`,
+      { headers: authHeaders() },
+    )
+  }
+
+  const compileDraft = async (
+    flowId: string,
+    body: { flow_definition?: Record<string, unknown>; flow_metadata?: Record<string, unknown> },
+  ): Promise<{ compiled_text: string | null }> => {
+    return await apiFetch(`/agents/${agentId}/script-flows/${flowId}/compile-draft`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body,
+    })
+  }
+
+  const getGraphRagPreview = async (flowId: string): Promise<ScriptFlowGraphPreview> => {
+    return await apiFetch<ScriptFlowGraphPreview>(
+      `/agents/${agentId}/script-flows/${flowId}/graphrag-preview`,
+      { headers: authHeaders() },
+    )
+  }
+
+  const getGraphRagPreviewDraft = async (
+    flowId: string,
+    flow_definition?: Record<string, unknown>,
+    flow_metadata?: Record<string, unknown>,
+  ): Promise<ScriptFlowGraphPreview> => {
+    return await apiFetch<ScriptFlowGraphPreview>(
+      `/agents/${agentId}/script-flows/${flowId}/graphrag-preview-draft`,
+      {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: {
+          flow_definition: flow_definition ?? {},
+          flow_metadata: flow_metadata ?? {},
+        },
+      },
+    )
+  }
+
+  const retryFlowIndex = async (
+    flowId: string,
+  ): Promise<{ id: string; index_status: string; published_version: number }> => {
+    return await apiFetch(`/agents/${agentId}/script-flows/${flowId}/retry-index`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+  }
+
+  const listFlowVersions = async (
+    flowId: string,
+  ): Promise<Array<{ id: string; version: number; created_at: string }>> => {
+    return await apiFetch(`/agents/${agentId}/script-flows/${flowId}/versions`, {
+      headers: authHeaders(),
+    })
+  }
+
+  const restoreFlowVersion = async (
+    flowId: string,
+    publishedVersion: number,
+  ): Promise<ScriptFlow> => {
+    return await apiFetch<ScriptFlow>(
+      `/agents/${agentId}/script-flows/${flowId}/versions/${publishedVersion}/restore`,
+      {
+        method: 'POST',
+        headers: authHeaders(),
+      },
+    )
+  }
+
+  const cancelFlowIndex = async (
+    flowId: string,
+  ): Promise<{ id: string; index_cancel_requested: boolean }> => {
+    return await apiFetch(`/agents/${agentId}/script-flows/${flowId}/cancel-index`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+  }
+
+  const getFlowToolUsage = async (
+    flowId: string,
+    days?: number,
+  ): Promise<{
+    approximate_flow_tool_calls: number
+    days?: number
+    disclaimer?: string
+    daily_series?: Array<{ date: string; count: number }>
+    top_node_refs?: Array<{
+      node_ref: string
+      tactic_title?: string | null
+      count: number
+      last_invoked_at?: string | null
+    }>
+    by_node_id?: Record<string, {
+      node_ref: string
+      tactic_title?: string | null
+      count: number
+      last_invoked_at?: string | null
+    }>
+  }> => {
+    const q = typeof days === 'number' ? `?days=${days}` : ''
+    return await apiFetch(`/agents/${agentId}/script-flows/${flowId}/tool-usage${q}`, {
+      headers: authHeaders(),
+    })
   }
 
   return {
@@ -120,8 +251,18 @@ export const useScriptFlows = (agentId: string) => {
     deleteFlow,
     previewFlow,
     publishFlow,
+    unpublishFlow,
     suggestKeywords,
     testSearch,
     getFlowCoverage,
+    getKgCoverage,
+    compileDraft,
+    getGraphRagPreview,
+    getGraphRagPreviewDraft,
+    retryFlowIndex,
+    listFlowVersions,
+    restoreFlowVersion,
+    cancelFlowIndex,
+    getFlowToolUsage,
   }
 }

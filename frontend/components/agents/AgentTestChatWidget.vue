@@ -84,6 +84,17 @@
                 </span>
               </div>
               <div
+                v-if="msg.role === 'agent' && isScriptFlowValidationMeta(msg.orchestration_meta?.source)"
+                class="inline-flex max-w-[80%] w-fit items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] text-indigo-900"
+              >
+                <span>Сценарий: {{ msg.orchestration_meta?.tactic_title || msg.orchestration_meta?.tactic_node_ref || 'без названия' }}</span>
+                <span
+                  class="font-mono text-indigo-700"
+                >
+                  {{ msg.orchestration_meta?.rewritten ? '(rewrite)' : '(as-is)' }}
+                </span>
+              </div>
+              <div
                 v-if="msg.role === 'agent' && msg.tokens && (msg.tokens.prompt !== null || msg.tokens.completion !== null || msg.tokens.total !== null)"
                 class="flex flex-wrap gap-1.5 text-[10px]"
               >
@@ -177,6 +188,10 @@ const formatScore = (score: unknown) => {
 
 const isDirectQuestionMeta = (source: unknown) => {
   return source === 'direct_question_match' || source === 'direct_question_tool_call'
+}
+
+const isScriptFlowValidationMeta = (source: unknown) => {
+  return source === 'script_flow_validation'
 }
 
 const store = useAgentEditorStore()

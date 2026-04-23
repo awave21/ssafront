@@ -1,3 +1,27 @@
+import type { ScriptFlow, ScriptFlowToolUsageNode } from '~/types/scriptFlow'
+import type { CoverageRiskSummary } from '~/utils/scriptFlowCoverageRisk'
+
+/** Данные для компактной полосы редактора потока в DashboardTopBar (layouts/agent.vue). */
+export type ScriptFlowToolbarPayload = {
+  flow: ScriptFlow
+  publishing: boolean
+  retrying: boolean
+  riskSummary: CoverageRiskSummary | null
+  toolUsage: {
+    approximate_flow_tool_calls?: number
+    days?: number
+    disclaimer?: string | null
+    daily_series?: Array<{ date: string; count: number }>
+    top_node_refs?: ScriptFlowToolUsageNode[]
+    by_node_id?: Record<string, ScriptFlowToolUsageNode>
+  } | null
+  onPublish: () => void
+  onUnpublish: () => void
+  onReadiness: () => void
+  onDraftPreview: () => void
+  onRetryIndex: () => void
+}
+
 /** Вкладки базы знаний (совпадает с AgentKnowledgePanel) */
 export type KnowledgeBreadcrumbTab =
   | 'sqns'
@@ -85,6 +109,17 @@ export const useLayoutState = () => {
 
   const isEditorFullscreen = useState<boolean>('editor-fullscreen', () => false)
 
+  // Script-flow page actions (canvas editor → TopBar header buttons)
+  const scriptFlowActionsVisible = useState<boolean>('script-flow-actions-visible', () => false)
+  const scriptFlowSandboxOpen = useState<boolean>('script-flow-sandbox-open', () => false)
+  const scriptFlowCoverageOpen = useState<boolean>('script-flow-coverage-open', () => false)
+
+  /** Редактор сценария: компактная полоса статуса и действий в шапке агента */
+  const scriptFlowToolbarPayload = useState<ScriptFlowToolbarPayload | null>(
+    'script-flow-toolbar-payload',
+    () => null,
+  )
+
   const toggleSidebar = () => {
     isCollapsed.value = !isCollapsed.value
     if (import.meta.client) {
@@ -127,5 +162,9 @@ export const useLayoutState = () => {
     functionsCanSave,
     resetFunctionsTopbarState,
     isEditorFullscreen,
+    scriptFlowActionsVisible,
+    scriptFlowSandboxOpen,
+    scriptFlowCoverageOpen,
+    scriptFlowToolbarPayload,
   }
 }

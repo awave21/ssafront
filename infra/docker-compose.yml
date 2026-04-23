@@ -85,6 +85,29 @@ services:
     mem_limit: "${SQNS_WORKER_MEM_LIMIT:-512m}"
     mem_reservation: "${SQNS_WORKER_MEM_RESERVATION:-256m}"
 
+  script-flow-index-worker:
+    restart: unless-stopped
+    build:
+      context: ../backend
+    env_file:
+      - ./.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      REDIS_URL: ${REDIS_URL}
+      PYTHONPATH: /app
+      SKIP_ALEMBIC: "1"
+    command: ["python", "-m", "app.workers.script_flow_index"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/logs
+    cpus: "${SCRIPT_FLOW_INDEX_WORKER_CPUS:-0.40}"
+    mem_limit: "${SCRIPT_FLOW_INDEX_WORKER_MEM_LIMIT:-512m}"
+    mem_reservation: "${SCRIPT_FLOW_INDEX_WORKER_MEM_RESERVATION:-256m}"
+
   frontend:
     restart: unless-stopped
     build:

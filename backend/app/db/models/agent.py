@@ -73,6 +73,15 @@ class Agent(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     function_rules_allow_semantic: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="true", nullable=False,
     )
+    # Режим инжекции в системный промпт (всё, чего нет в UI-редакторе, — «скрыто»):
+    #   "manual" — (умолчание) никаких скрытых вставок: только agent.system_prompt
+    #              + сценарии/вебхуки, если сами явно его меняют. Без bridge,
+    #              без снимка state, без стиля эксперта, без даты/времени, без
+    #              автодобавок SQNS. Состояние и стиль остаются в ответах тулов.
+    #   "auto"   — обратная совместимость: bridge, state, стиль, дата/время, SQNS-block.
+    runtime_bridges_mode: Mapped[str] = mapped_column(
+        String(20), default="manual", server_default="manual", nullable=False
+    )
 
     bindings: Mapped[list["AgentToolBinding"]] = relationship(
         back_populates="agent",

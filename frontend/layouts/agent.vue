@@ -4,6 +4,7 @@ import { Menu, Check, Play, Trash2, Copy, ChevronRight } from 'lucide-vue-next'
 import { navigateTo } from '#app'
 import DashboardSidebar from '~/components/DashboardSidebar.vue'
 import DashboardTopBar from '~/components/DashboardTopBar.vue'
+import ScriptFlowHeaderToolbar from '~/components/agents/scripts/ScriptFlowHeaderToolbar.vue'
 import Switch from '~/components/ui/switch/Switch.vue'
 import { useLayoutState, type LayoutBreadcrumbSegment } from '~/composables/useLayoutState'
 
@@ -25,7 +26,11 @@ const {
   functionsSelectedFunction,
   functionsTesting,
   functionsCanSave,
-  functionsCreateAction
+  functionsCreateAction,
+  scriptFlowActionsVisible,
+  scriptFlowSandboxOpen,
+  scriptFlowCoverageOpen,
+  scriptFlowToolbarPayload,
 } = useLayoutState()
 const isPromptFullscreen = useState<boolean>('prompt-fullscreen', () => false)
 const isMobileSidebarOpen = ref(false)
@@ -44,6 +49,15 @@ const handleBreadcrumbSegmentClick = (seg: LayoutBreadcrumbSegment) => {
     return
   }
   pendingBreadcrumbAction.value = seg.action
+}
+
+const onScriptFlowPublishSwitch = (next: boolean) => {
+  const p = scriptFlowToolbarPayload.value
+  if (!p?.flow) return
+  if (next && p.flow.flow_status !== 'published')
+    p.onPublish()
+  else if (!next && p.flow.flow_status === 'published')
+    p.onUnpublish()
 }
 
 onMounted(() => {
@@ -97,37 +111,44 @@ onMounted(() => {
       <!-- TopBar скрывается в fullscreen режиме -->
       <DashboardTopBar v-if="!isPromptFullscreen && !isEditorFullscreen">
         <template #left>
-          <nav
-            v-if="layoutBreadcrumbSegments?.length"
-            class="flex min-w-0 items-center gap-1 text-sm"
-            aria-label="Навигация"
-          >
-            <template v-for="(seg, i) in layoutBreadcrumbSegments" :key="i">
-              <ChevronRight v-if="i > 0" class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <button
-                v-if="seg.action"
-                type="button"
-                class="max-w-[9rem] shrink-0 truncate text-muted-foreground transition-colors hover:text-foreground sm:max-w-[14rem]"
-                @click="handleBreadcrumbSegmentClick(seg)"
-              >
-                {{ seg.label }}
-              </button>
-              <span v-else class="min-w-0 truncate font-medium text-foreground">{{ seg.label }}</span>
-            </template>
-          </nav>
-          <!-- Хлебные крошки агента (простой режим) -->
-          <template v-else-if="breadcrumbTitle">
-            <button
-              v-if="breadcrumbBackPath"
-              @click="handleBreadcrumbBack"
-              class="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
+            <nav
+              v-if="layoutBreadcrumbSegments?.length"
+              class="flex min-w-0 shrink items-center gap-1 text-sm"
+              aria-label="Навигация"
             >
-              ←
-            </button>
-            <span class="text-sm text-muted-foreground font-normal">{{ breadcrumbTitle }}</span>
-            <span v-if="breadcrumbAgentName" class="text-sm text-border">/</span>
-            <span v-if="breadcrumbAgentName" class="text-sm text-foreground font-medium">{{ breadcrumbAgentName }}</span>
-          </template>
+              <template v-for="(seg, i) in layoutBreadcrumbSegments" :key="i">
+                <ChevronRight v-if="i > 0" class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <button
+                  v-if="seg.action"
+                  type="button"
+                  class="max-w-[9rem] shrink-0 truncate text-muted-foreground transition-colors hover:text-foreground sm:max-w-[14rem]"
+                  @click="handleBreadcrumbSegmentClick(seg)"
+                >
+                  {{ seg.label }}
+                </button>
+                <span v-else class="min-w-0 truncate font-medium text-foreground">{{ seg.label }}</span>
+              </template>
+            </nav>
+            <!-- Хлебные крошки агента (простой режим) -->
+            <template v-else-if="breadcrumbTitle">
+              <button
+                v-if="breadcrumbBackPath"
+                @click="handleBreadcrumbBack"
+                class="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                ←
+              </button>
+              <span class="text-sm text-muted-foreground font-normal">{{ breadcrumbTitle }}</span>
+              <span v-if="breadcrumbAgentName" class="text-sm text-border">/</span>
+              <span v-if="breadcrumbAgentName" class="text-sm text-foreground font-medium">{{ breadcrumbAgentName }}</span>
+            </template>
+            <ScriptFlowHeaderToolbar
+              v-if="scriptFlowToolbarPayload"
+              class="min-w-0 flex-1"
+              v-bind="scriptFlowToolbarPayload"
+            />
+          </div>
         </template>
         <template #right>
           <!-- Кнопка мобильного меню (только на планшете/мобиле) -->
@@ -193,11 +214,25 @@ onMounted(() => {
               />
             </div>
           </template>
+
+          <!-- Публикация потока — крайний правый элемент шапки -->
+          <div
+            v-if="scriptFlowToolbarPayload"
+            class="flex shrink-0 items-center lg:ml-2"
+          >
+            <Switch
+              :model-value="scriptFlowToolbarPayload.flow.flow_status === 'published'"
+              :disabled="scriptFlowToolbarPayload.publishing"
+              class-name="scale-90"
+              :title="scriptFlowToolbarPayload.flow.flow_status === 'published' ? 'Снять с публикации (вернуть в черновик)' : 'Опубликовать поток'"
+              @update:model-value="onScriptFlowPublishSwitch"
+            />
+          </div>
         </template>
       </DashboardTopBar>
 
       <!-- Прокручиваемый контент -->
-      <main class="flex-1 min-h-0 overflow-y-auto bg-muted">
+      <main class="flex flex-1 min-h-0 flex-col overflow-y-auto bg-muted">
         <slot />
       </main>
     </div>

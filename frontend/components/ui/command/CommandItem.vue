@@ -57,6 +57,12 @@ onMounted(() => {
 onUnmounted(() => {
   allItems.value.delete(id)
 })
+
+/** После выбора пункта очистить поиск; также пробросить select наружу — иначе ломаются все @select на CommandItem (комбобоксы услуг/сотрудников и т.д.). */
+function handleSelect(...args: ListboxItemEmits['select']) {
+  filterState.search = ''
+  emits('select', ...args)
+}
 </script>
 
 <template>
@@ -66,9 +72,7 @@ onUnmounted(() => {
     :id="id"
     ref="itemRef"
     :class="cn('relative flex cursor-default gap-2 select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0', props.class)"
-    @select="() => {
-      filterState.search = ''
-    }"
+    @select="handleSelect"
   >
     <slot />
   </ListboxItem>

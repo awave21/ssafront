@@ -15,6 +15,10 @@ from app.db.models.agent import Agent
 from app.db.models.run import Run
 from app.db.session import get_db
 from app.schemas.agent import AgentCreate, AgentRead, AgentUpdate
+from app.services.runtime.default_agent_prompt import build_default_agent_system_prompt
+from app.services.runtime.diagnose_tool import DIAGNOSE_PROMPT_BRIDGE
+from app.services.runtime.script_flow_tool import SCRIPT_FLOWS_PROMPT_BRIDGE
+from app.services.sqns.tool_texts import SQNS_PROMPT_BRIDGE
 from app.schemas.auth import AuthContext
 from app.services.audit import write_audit
 
@@ -93,11 +97,15 @@ async def create_agent(
     if isinstance(llm_params, BaseModel):
         llm_params = llm_params.model_dump(exclude_none=True)
 
+    resolved_prompt = (payload.system_prompt or "").strip()
+    if not resolved_prompt:
+        resolved_prompt = build_default_agent_system_prompt()
+
     agent = Agent(
         tenant_id=user.tenant_id,
         owner_user_id=user.user_id,
         name=payload.name,
-        system_prompt=payload.system_prompt,
+        system_prompt=resolved_prompt,
         model=payload.model,
         llm_params=llm_params,
         status=payload.status,
@@ -108,11 +116,11 @@ async def create_agent(
     await db.flush()  # получить agent.id до коммита
 
     # Сохраняем начальную версию системного промпта
-    if payload.system_prompt:
+    if resolved_prompt:
         await create_version(
             db,
             agent,
-            system_prompt=payload.system_prompt,
+            system_prompt=resolved_prompt,
             user=user,
             change_summary="Начальная версия",
             triggered_by="create",
@@ -123,6 +131,25 @@ async def create_agent(
     await db.refresh(agent)
     await write_audit(db, user, "agent.create", "agent", str(agent.id))
     return await _build_agent_read_single(db, tenant_id=user.tenant_id, agent=agent)
+
+
+class DefaultSystemPromptResponse(BaseModel):
+    """Стартовый системный промпт с оркестровкой инструментов (режим manual)."""
+
+    system_prompt: str
+    note: str = (
+        "Шаблон по умолчанию: диагностика мотива, экспертные потоки, запись через SQNS "
+        "(раздел SQNS можно удалить, если интеграция не используется)."
+    )
+
+
+@router.get("/defaults/system-prompt", response_model=DefaultSystemPromptResponse)
+async def get_default_system_prompt(
+    user: AuthContext = Depends(require_scope("agents:read")),
+) -> DefaultSystemPromptResponse:
+    """Текст для поля system_prompt при создании агента — видимый, редактируемый в UI."""
+    _ = user
+    return DefaultSystemPromptResponse(system_prompt=build_default_agent_system_prompt())
 
 
 @router.get("", response_model=list[AgentRead])
@@ -253,3 +280,65 @@ async def delete_agent(
     await db.commit()
     await write_audit(db, user, "agent.delete", "agent", str(agent.id))
     return None
+
+
+class RuntimeBridgeItem(BaseModel):
+    key: str
+    title: str
+    description: str
+    prompt_text: str
+
+
+class RuntimeBridgesResponse(BaseModel):
+    mode: str
+    bridges: list[RuntimeBridgeItem]
+
+
+@router.get("/{agent_id}/runtime-bridges", response_model=RuntimeBridgesResponse)
+async def get_runtime_bridges(
+    agent_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:read")),
+) -> RuntimeBridgesResponse:
+    """Возвращает тексты оркестровочных инструкций (bridge-блоки), которые runtime
+    автоматически добавляет к системному промпту агента в режиме 'auto'.
+
+    Используй этот эндпоинт в UI чтобы:
+    - показать пользователю что именно добавляется скрыто
+    - предложить скопировать нужные блоки в системный промпт при переключении на 'manual'
+    """
+    agent = await get_agent_or_404(agent_id, db, user)
+    mode = getattr(agent, "runtime_bridges_mode", "auto") or "auto"
+
+    bridges = [
+        RuntimeBridgeItem(
+            key="diagnose",
+            title="Диагностика мотива клиента",
+            description=(
+                "Инструкция когда вызывать diagnose_client_motive и как интерпретировать результат. "
+                "Активна если у агента есть Мотивы/Возражения в Knowledge Graph."
+            ),
+            prompt_text=DIAGNOSE_PROMPT_BRIDGE,
+        ),
+        RuntimeBridgeItem(
+            key="script_flows",
+            title="Экспертные сценарии (потоки)",
+            description=(
+                "Инструкция когда вызывать search_script_flows и как применять результат "
+                "(communication_style, preferred_phrases, required_followup_question). "
+                "Активна если у агента есть проиндексированные потоки."
+            ),
+            prompt_text=SCRIPT_FLOWS_PROMPT_BRIDGE,
+        ),
+        RuntimeBridgeItem(
+            key="sqns",
+            title="Запись клиентов (SQNS)",
+            description=(
+                "Пошаговая оркестровка записи, переноса и отмены визитов через SQNS-инструменты. "
+                "Активна если у агента включён SQNS."
+            ),
+            prompt_text=SQNS_PROMPT_BRIDGE,
+        ),
+    ]
+
+    return RuntimeBridgesResponse(mode=mode, bridges=bridges)

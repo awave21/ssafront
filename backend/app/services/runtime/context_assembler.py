@@ -3,33 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-_TOOL_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "knowledge": (
-        "документ", "документы", "инструкция", "регламент", "файл", "файлы",
-        "knowledge", "kb", "faq", "manual", "guide", "policy",
-    ),
-    "direct_questions": (
-        "вопрос", "вопросы", "ответ", "ответы", "база знаний", "faq",
-        "карточка", "карточки", "готовый ответ", "прямой ответ",
-    ),
-    "expertise": (
-        # Явные возражения
-        "возраж", "дорого", "дешевле", "сравн", "другой клиник", "конкурент",
-        "скидк", "скидки", "цен", "стоимост",
-        # Колебания и откладывание
-        "подумаю", "подумать", "не уверен", "посмотрю", "позже", "потом",
-        "не готов", "ещё не", "может быть", "если что", "пока не",
-        "не знаю", "наверное", "возможно",
-        # Недоверие / страхи
-        "боюсь", "страшно", "не хочу", "сомнева", "побоку", "рискован",
-        # Скрипты / экспертиза (технические)
-        "скрипт", "скрипты", "objection", "expert", "expertise", "hesitat", "price",
-    ),
-    "directory": (
-        "каталог", "справочник", "найди", "поиск", "услуга", "товар",
-        "сотрудник", "мастер", "service", "directory", "catalog", "lookup",
-    ),
-}
+# Группы optional data-тулов (knowledge, direct_questions, …): платформа всегда
+# регистрирует их для модели; какие вызывать — решает LLM по описаниям тулов и промпту.
+OPTIONAL_RUNTIME_TOOL_CATEGORY_IDS = frozenset(
+    {"knowledge", "direct_questions", "expertise", "directory"}
+)
 
 
 @dataclass
@@ -108,37 +86,19 @@ def normalize_augment_prompt_blocks(
 
 
 def select_optional_runtime_tool_categories(
-    input_message: str,
-    *,
-    mode: str,
+    _input_message: str = "",
 ) -> tuple[set[str], dict[str, Any]]:
-    normalized_mode = (mode or "eager").strip().lower()
-    categories = set(_TOOL_CATEGORY_KEYWORDS.keys())
-    if normalized_mode != "lazy_keywords":
-        return categories, {"mode": normalized_mode or "eager", "matched_categories": sorted(categories)}
+    """Expose all optional categories and let the LLM decide tool usage.
 
-    message = (input_message or "").strip().lower()
-    if not message:
-        return categories, {
-            "mode": normalized_mode,
-            "matched_categories": sorted(categories),
-            "reason": "empty_message",
-        }
-
-    matched: set[str] = set()
-    for category, keywords in _TOOL_CATEGORY_KEYWORDS.items():
-        if any(keyword in message for keyword in keywords):
-            matched.add(category)
-
-    # Keep a safe baseline when heuristics see no clear intent.
-    # Include expertise so the get_expertise tool is always available — even for
-    # ambiguous messages like "I need to think" or short replies.
-    if not matched:
-        matched = {"knowledge", "direct_questions", "expertise"}
-
-    return matched, {
-        "mode": normalized_mode,
-        "matched_categories": sorted(matched),
+    This keeps runtime tool routing purely model-driven (system prompt +
+    tool descriptions) without server-side message heuristics.
+    """
+    selected = {"knowledge", "direct_questions", "directory", "expertise"}
+    return selected, {
+        "matched_categories": sorted(selected),
+        "selection": "llm_driven_optional_tools",
+        "expertise_selected": True,
+        "expertise_policy": "always_enabled_llm_decides",
     }
 
 

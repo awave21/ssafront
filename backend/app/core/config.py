@@ -152,6 +152,22 @@ class Settings(BaseSettings):
             "Должна быть дешёвой — используется при каждом превышении max_history_messages."
         ),
     )
+    script_flow_graphrag_extraction_model: str = Field(
+        default="openai:gpt-4o-mini",
+        validation_alias="SCRIPT_FLOW_GRAPHRAG_EXTRACTION_MODEL",
+        description=(
+            "Модель для structured extraction сущностей/связей GraphRAG в сценариях. "
+            "Формат: provider:model, например openai:gpt-4o-mini."
+        ),
+    )
+    script_flow_graphrag_summary_model: str = Field(
+        default="openai:gpt-4o-mini",
+        validation_alias="SCRIPT_FLOW_GRAPHRAG_SUMMARY_MODEL",
+        description=(
+            "Модель для summary community-кластеров GraphRAG в сценариях. "
+            "Формат: provider:model, например openai:gpt-4o-mini."
+        ),
+    )
     embedding_model: str = Field(
         default="text-embedding-3-small",
         validation_alias="EMBEDDING_MODEL",
@@ -160,6 +176,15 @@ class Settings(BaseSettings):
             "Размерность вектора должна соответствовать схеме БД (1536 для text-embedding-3-small)."
         ),
     )
+    neo4j_enabled: bool = Field(
+        default=False,
+        validation_alias="NEO4J_ENABLED",
+        description="Включить синхронизацию GraphRAG-слоя в Neo4j.",
+    )
+    neo4j_uri: str | None = Field(default=None, validation_alias="NEO4J_URI")
+    neo4j_username: str | None = Field(default=None, validation_alias="NEO4J_USERNAME")
+    neo4j_password: str | None = Field(default=None, validation_alias="NEO4J_PASSWORD")
+    neo4j_database: str | None = Field(default=None, validation_alias="NEO4J_DATABASE")
     runtime_tool_calls_limit: int = Field(
         default=5,
         ge=1,
@@ -177,13 +202,57 @@ class Settings(BaseSettings):
         validation_alias="RUNTIME_STRIP_TOOL_MESSAGES_FROM_HISTORY",
         description="Удалять tool-call/tool-return из history перед запуском модели (можно включить для строгой совместимости).",
     )
-    runtime_optional_tools_mode: str = Field(
-        default="eager",
-        validation_alias="RUNTIME_OPTIONAL_TOOLS_MODE",
+    runtime_augment_prompt_max_blocks: int = Field(
+        default=12,
+        ge=1,
+        le=100,
+        validation_alias="RUNTIME_AUGMENT_PROMPT_MAX_BLOCKS",
         description=(
-            "Режим подбора optional data-тулов: eager — всегда все категории; "
-            "lazy_keywords — эвристика по тексту сообщения."
+            "Максимум текстовых блоков augment_prompt из сценариев/правил, "
+            "попадающих в системный промпт за один запуск."
         ),
+    )
+    runtime_augment_prompt_max_chars: int = Field(
+        default=16000,
+        ge=256,
+        le=500_000,
+        validation_alias="RUNTIME_AUGMENT_PROMPT_MAX_CHARS",
+        description=(
+            "Общий лимит символов для augment_prompt после нормализации "
+            "(обрезка по последнему блоку)."
+        ),
+    )
+    runtime_context_diagnostics_enabled: bool = Field(
+        default=False,
+        validation_alias="RUNTIME_CONTEXT_DIAGNOSTICS_ENABLED",
+        description=(
+            "Логировать оценку размера контекста перед запуском модели "
+            "(prompt/history/tools, токены приблизительно) и предупреждение при превышении бюджета."
+        ),
+    )
+    runtime_context_budget_warn_tokens: int = Field(
+        default=120_000,
+        ge=1000,
+        le=10_000_000,
+        validation_alias="RUNTIME_CONTEXT_BUDGET_WARN_TOKENS",
+        description=(
+            "Порог суммарной оценки входных токенов, выше которого пишется warning "
+            "(если включён runtime_context_diagnostics_enabled)."
+        ),
+    )
+    scenario_delayed_dispatch_interval_seconds: int = Field(
+        default=5,
+        ge=1,
+        le=3600,
+        validation_alias="SCENARIO_DELAYED_DISPATCH_INTERVAL_SECONDS",
+        description="Интервал цикла воркера отложенных сообщений сценариев.",
+    )
+    scenario_delayed_dispatch_batch_size: int = Field(
+        default=100,
+        ge=1,
+        le=10_000,
+        validation_alias="SCENARIO_DELAYED_DISPATCH_BATCH_SIZE",
+        description="Сколько отложенных сообщений сценариев обрабатывать за один тик воркера.",
     )
     direct_questions_retrieval_router_enabled: bool = Field(
         default=True,
@@ -377,21 +446,33 @@ class Settings(BaseSettings):
         validation_alias="SQNS_SYNC_PAYMENTS_WINDOW_DAYS",
     )
 
-    lightrag_enabled: bool = Field(
-        default=False,
-        validation_alias="LIGHTRAG_ENABLED",
-        description="Enable LightRAG indexing for expert script flows.",
-    )
-    lightrag_index_poll_interval_seconds: int = Field(
+    script_flow_index_poll_interval_seconds: int = Field(
         default=30,
         ge=5,
-        validation_alias="LIGHTRAG_INDEX_POLL_INTERVAL_SECONDS",
+        validation_alias="SCRIPT_FLOW_INDEX_POLL_INTERVAL_SECONDS",
     )
-    lightrag_index_batch_size: int = Field(
+    script_flow_index_batch_size: int = Field(
         default=5,
         ge=1,
         le=50,
-        validation_alias="LIGHTRAG_INDEX_BATCH_SIZE",
+        validation_alias="SCRIPT_FLOW_INDEX_BATCH_SIZE",
+    )
+    runtime_script_flow_retrieval_engine: Literal["auto", "retriever"] = Field(
+        default="retriever",
+        validation_alias="RUNTIME_SCRIPT_FLOW_RETRIEVAL_ENGINE",
+        description=(
+            "Выбор primary-движка для search_script_flows: "
+            "auto (сейчас эквивалентно retriever), retriever (принудительно)."
+        ),
+    )
+    runtime_script_flow_strict_entry_default: bool = Field(
+        default=False,
+        validation_alias="RUNTIME_SCRIPT_FLOW_STRICT_ENTRY_DEFAULT",
+        description=(
+            "Дефолт strict-entry режима для search_script_flows. "
+            "False: поиск по всем searchable-узлам; "
+            "True: по умолчанию только trigger (точки входа)."
+        ),
     )
 
     cors_origins: Annotated[list[str], NoDecode] = Field(

@@ -11,6 +11,7 @@ from app.api.routers.agents.prompt_history import router as prompt_history_route
 from app.api.routers.agents.prompt_training import router as prompt_training_router
 from app.api.routers.agents.function_rules import router as function_rules_router
 from app.api.routers.agents.script_flows import router as script_flows_router
+from app.api.routers.agents.kg_entities import router as kg_entities_router
 from app.api.routers.agents.user_states import router as user_states_router
 from app.api.routers.agents.knowledge_files import router as knowledge_files_router
 
@@ -34,6 +35,7 @@ router.include_router(prompt_history_router, prefix="/{agent_id}", tags=["prompt
 router.include_router(prompt_training_router, prefix="/{agent_id}", tags=["prompt-training"])
 router.include_router(function_rules_router, prefix="/{agent_id}", tags=["function-rules"])
 router.include_router(script_flows_router, prefix="/{agent_id}", tags=["script-flows"])
+router.include_router(kg_entities_router, prefix="/{agent_id}", tags=["kg-entities"])
 router.include_router(user_states_router, prefix="/{agent_id}", tags=["user-states"])
 router.include_router(analysis_router, prefix="/{agent_id}", tags=["analysis"])
 router.include_router(analytics_router, prefix="/{agent_id}", tags=["analytics"])

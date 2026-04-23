@@ -148,7 +148,7 @@ async def run_agent_with_tools(
         )
         wrapped_tools.append(pydantic_tool)
     
-    sqns_toolsets, sqns_tools = await prepare_sqns_tooling(agent, user)
+    sqns_toolsets, sqns_tools, sqns_bridge = await prepare_sqns_tooling(agent, user)
     if sqns_tools:
         wrapped_tools.extend(sqns_tools)
     if extra_tools:
@@ -193,10 +193,18 @@ async def run_agent_with_tools(
         agent_context=agent_summary_context,
     )
     
-    # Собираем агента с tools и toolsets
-    # Обогащаем системный промпт переменными даты и времени
+    # Собираем агента с tools и toolsets.
+    # Инжектируем SQNS_PROMPT_BRIDGE только в режиме "auto".
+    # В режиме "manual" пользователь пишет инструкции в системном промпте сам.
     base_system_prompt = system_prompt_override if system_prompt_override is not None else agent.system_prompt
-    enriched_system_prompt = _enrich_system_prompt_with_datetime(base_system_prompt, agent.timezone)
+    _bridges_auto = (getattr(agent, "runtime_bridges_mode", "manual") or "manual") == "auto"
+    if sqns_bridge and _bridges_auto:
+        base_system_prompt = ((base_system_prompt or "").rstrip() + "\n\n" + sqns_bridge).strip()
+    # Дата/время в промпт — только в auto; в manual не добавляем скрытых блоков.
+    if _bridges_auto:
+        enriched_system_prompt = _enrich_system_prompt_with_datetime(base_system_prompt, agent.timezone)
+    else:
+        enriched_system_prompt = (base_system_prompt or "").strip()
     pydantic_agent = _build_agent(
         model_name,
         enriched_system_prompt,

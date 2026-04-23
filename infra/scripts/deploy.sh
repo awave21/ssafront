@@ -23,11 +23,11 @@ usage() {
   ./scripts/deploy.sh full [--no-migrate]
 
 Режимы:
-  backend   Пересобрать и перезапустить api + sqns-sync-worker (db/redis поднимутся автоматически)
+  backend   Пересобрать и перезапустить api + sqns-sync-worker + script-flow-index-worker (db/redis поднимутся автоматически)
   frontend  Пересобрать и перезапустить frontend
-  worker    Пересобрать и перезапустить только sqns-sync-worker
+  worker    Пересобрать и перезапустить sqns-sync-worker + script-flow-index-worker
   monitor   Перезапустить мониторинг (netdata + caddy)
-  all       Пересобрать и перезапустить api + frontend + sqns-sync-worker + netdata + caddy
+  all       Пересобрать и перезапустить api + frontend + воркеры + netdata + caddy
   full      Поднять/обновить весь прод-набор (с мониторингом и admin-сервисами)
 EOF
 }
@@ -90,49 +90,49 @@ case "$TARGET" in
   backend)
     echo "Деплой backend: db/redis + сборка образов + миграции до старта api + запуск"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" build api sqns-sync-worker
+    "${DC[@]}" build api sqns-sync-worker script-flow-index-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
-    "${DC[@]}" up -d api sqns-sync-worker
+    "${DC[@]}" up -d api sqns-sync-worker script-flow-index-worker
     ;;
   frontend)
-    echo "Деплой frontend: пересборка frontend + проверка sqns-sync-worker"
+    echo "Деплой frontend: пересборка frontend + проверка воркеров"
     "${DC[@]}" up -d --build frontend
-    "${DC[@]}" up -d sqns-sync-worker
+    "${DC[@]}" up -d sqns-sync-worker script-flow-index-worker
     ;;
   worker)
-    echo "Деплой worker: db/redis + сборка api+worker + миграции + запуск worker"
+    echo "Деплой worker: db/redis + сборка образов + миграции + запуск sqns-sync + script-flow-index"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" build api sqns-sync-worker
+    "${DC[@]}" build api sqns-sync-worker script-flow-index-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
-    "${DC[@]}" up -d sqns-sync-worker
+    "${DC[@]}" up -d sqns-sync-worker script-flow-index-worker
     ;;
   monitor)
-    echo "Деплой monitor: перезапуск netdata + caddy + проверка sqns-sync-worker"
+    echo "Деплой monitor: перезапуск netdata + caddy + проверка воркеров"
     "${DC[@]}" up -d netdata caddy
-    "${DC[@]}" up -d sqns-sync-worker
+    "${DC[@]}" up -d sqns-sync-worker script-flow-index-worker
     ;;
   all)
     echo "Деплой all: db/redis + сборка + миграции до api + запуск сервисов + netdata + caddy"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" build api frontend sqns-sync-worker
+    "${DC[@]}" build api frontend sqns-sync-worker script-flow-index-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
-    "${DC[@]}" up -d api frontend sqns-sync-worker
+    "${DC[@]}" up -d api frontend sqns-sync-worker script-flow-index-worker
     "${DC[@]}" up -d --remove-orphans netdata caddy
     ;;
   full)
     echo "Деплой full: db/redis + сборка + миграции до api + запуск + netdata/caddy + pgadmin/watcher"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" build api frontend sqns-sync-worker
+    "${DC[@]}" build api frontend sqns-sync-worker script-flow-index-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
-    "${DC[@]}" up -d api frontend sqns-sync-worker
+    "${DC[@]}" up -d api frontend sqns-sync-worker script-flow-index-worker
     "${DC[@]}" up -d --remove-orphans netdata caddy pgadmin watcher
     ;;
   *)

@@ -1,4 +1,4 @@
-"""Expert script flows (Vue Flow JSON + LightRAG index pipeline).
+"""Expert script flows (Vue Flow JSON + retrieval index pipeline).
 
 Revision ID: 0071
 Revises: 0070

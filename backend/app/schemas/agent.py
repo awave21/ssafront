@@ -201,6 +201,15 @@ class AgentUpdate(BaseModel):
     )
     function_rules_enabled: bool | None = None
     function_rules_allow_semantic: bool | None = None
+    runtime_bridges_mode: Literal["auto", "manual"] | None = Field(
+        default=None,
+        description=(
+            '"auto" — скрытые вставки: bridge-инструкции, снимок state, стиль эксперта, '
+            "дата/время, блок SQNS. "
+            '"manual" (по умолчанию) — в LLM уходит только system_prompt из UI, '
+            "без перечисленного; инструкции и факты — в шаблоне промпта и в ответах тулов."
+        ),
+    )
 
     @field_validator('timezone')
     @classmethod
@@ -257,6 +266,7 @@ class AgentRead(AgentBase):
     direct_questions_limit: int | None = None
     summary_prompt: str | None = None
     knowledge_tool_description: str | None = None
+    runtime_bridges_mode: str = Field(default="manual")
     total_cost_usd: Decimal = Field(default=Decimal("0"), description="Суммарные расходы агента в USD")
     total_cost_rub: Decimal = Field(default=Decimal("0"), description="Суммарные расходы агента в RUB")
 

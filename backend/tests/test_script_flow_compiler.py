@@ -86,6 +86,78 @@ def test_compile_question_axis_order() -> None:
     assert pos_q < pos_ctx
 
 
+def test_compile_business_rule_sections() -> None:
+    text = compile_script_flow_to_text(
+        name="Booking rules",
+        flow_metadata={},
+        flow_definition={
+            "nodes": [
+                {
+                    "id": "br1",
+                    "data": {
+                        "node_type": "business_rule",
+                        "title": "Приоритет врача",
+                        "data_source": "sqns_resources",
+                        "entity_type": "employee",
+                        "entity_id": "uuid-1",
+                        "rule_priority": 10,
+                        "rule_condition": 'Запрос содержит «губы»',
+                        "rule_action": "Предложить запись к Шахноза Алимова; ответ дословно: «На какой день…»",
+                        "situation": "Комментарий эксперта",
+                        "constraints": {
+                            "requires_entity": "service",
+                            "must_follow_node_refs": ["n2", "n3"],
+                        },
+                    },
+                },
+            ],
+            "edges": [],
+        },
+    )
+    assert "▸ **Условие — когда правило срабатывает**" in text
+    assert "«губы»" in text
+    assert "▸ **Действие — что делает агент (алгоритм, формат ответа)**" in text
+    assert "На какой день" in text
+    assert "▸ **Комментарий эксперта (не дословно клиенту)**" in text
+    assert "Логический порядок" in text
+
+
+def test_compile_condition_stable_branch_handles() -> None:
+    text = compile_script_flow_to_text(
+        name="Branchy",
+        flow_metadata={},
+        flow_definition={
+            "nodes": [
+                {
+                    "id": "c1",
+                    "data": {
+                        "node_type": "condition",
+                        "title": "Развилка",
+                        "conditions": [
+                            {"id": "b1", "label": "да"},
+                            {"id": "b2", "label": "нет"},
+                        ],
+                    },
+                },
+                {
+                    "id": "t1",
+                    "data": {"node_type": "expertise", "title": "Тактика А", "situation": "s"},
+                },
+                {
+                    "id": "t2",
+                    "data": {"node_type": "expertise", "title": "Тактика Б", "situation": "s2"},
+                },
+            ],
+            "edges": [
+                {"id": "e1", "source": "c1", "target": "t1", "sourceHandle": "branch:b1"},
+                {"id": "e2", "source": "c1", "target": "t2", "sourceHandle": "branch:b2"},
+            ],
+        },
+    )
+    assert 'Если «да»' in text
+    assert 'Если «нет»' in text
+
+
 def test_compile_trigger_axis() -> None:
     text = compile_script_flow_to_text(
         name="Tr",

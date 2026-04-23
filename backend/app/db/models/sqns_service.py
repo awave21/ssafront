@@ -147,6 +147,17 @@ class SqnsService(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         server_default="now()",
     )
 
+    # Момент, когда услуга перестала приходить из SQNS.
+    # NULL = активна. При полной синхронизации услуги, которых нет во внешнем
+    # ответе, помечаются stale_since=now(), но не удаляются физически —
+    # локальные настройки (is_enabled, priority) сохраняются до возможного
+    # возврата услуги.
+    stale_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
     # Relationships
     agent: Mapped["Agent"] = relationship(
         "Agent",
@@ -236,6 +247,16 @@ class SqnsServiceCategory(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Приоритет для сортировки (чем выше - тем важнее)
     priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Момент мягкого удаления. NULL = категория активна.
+    # При полной синхронизации категории, которых нет в ответе SQNS, получают
+    # deleted_at=now() вместо физического DELETE, чтобы локальные настройки
+    # (is_enabled, priority) пережили возможное восстановление категории.
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
 
     # Relationships
     agent: Mapped["Agent"] = relationship(

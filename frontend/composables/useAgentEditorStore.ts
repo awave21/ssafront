@@ -80,6 +80,9 @@ type ChatMessage = {
     search_title?: string | null
     score?: number | null
     interrupt_dialog?: boolean | null
+    rewritten?: boolean | null
+    tactic_node_ref?: string | null
+    tactic_title?: string | null
   }
   tools_called?: Array<{
     tool_name: string
@@ -422,6 +425,10 @@ const extractOrchestrationMeta = (response: any): ChatMessage['orchestration_met
   const score = typeof scoreRaw === 'number' ? scoreRaw : (typeof scoreRaw === 'string' && scoreRaw.trim() !== '' ? Number(scoreRaw) : null)
   const interruptRaw = (raw as any).interrupt_dialog
   const interrupt_dialog = typeof interruptRaw === 'boolean' ? interruptRaw : null
+  const rewrittenRaw = (raw as any).rewritten
+  const rewritten = typeof rewrittenRaw === 'boolean' ? rewrittenRaw : null
+  const tacticNodeRef = String((raw as any).tactic_node_ref ?? '').trim() || null
+  const tacticTitle = String((raw as any).tactic_title ?? '').trim() || null
 
   return {
     source,
@@ -430,6 +437,9 @@ const extractOrchestrationMeta = (response: any): ChatMessage['orchestration_met
     question_id,
     score: Number.isFinite(score as number) ? score : null,
     interrupt_dialog,
+    rewritten,
+    tactic_node_ref: tacticNodeRef,
+    tactic_title: tacticTitle,
   }
 }
 

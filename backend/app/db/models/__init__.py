@@ -52,9 +52,17 @@ from app.db.models.knowledge_file_chunk import KnowledgeFileChunk
 from app.db.models.knowledge_index_job import KnowledgeIndexJob
 from app.db.models.user_table import UserTable, UserTableAttribute, UserTableRecord
 from app.db.models.script_flow import ScriptFlow
+from app.db.models.script_flow_graph_diagnostic import ScriptFlowGraphDiagnostic
+from app.db.models.script_flow_graph_community import ScriptFlowGraphCommunity
+from app.db.models.script_flow_graph_node import ScriptFlowGraphNode
+from app.db.models.script_flow_graph_relation import ScriptFlowGraphRelation
+from app.db.models.script_flow_edge_index import ScriptFlowEdgeIndex
+from app.db.models.script_flow_node_index import ScriptFlowNodeIndex
+from app.db.models.script_flow_version import ScriptFlowVersion
 from app.db.models.script_node import ScriptNode
 from app.db.models.scenario_delayed_message import ScenarioDelayedMessage
 from app.db.models.session_script_context import SessionScriptContext
+from app.db.models.agent_kg_entity import AgentKgEntity
 
 __all__ = [
     "Agent",
@@ -114,7 +122,15 @@ __all__ = [
     "UserTableAttribute",
     "UserTableRecord",
     "ScriptFlow",
+    "ScriptFlowGraphDiagnostic",
+    "ScriptFlowGraphCommunity",
+    "ScriptFlowGraphNode",
+    "ScriptFlowGraphRelation",
+    "ScriptFlowEdgeIndex",
+    "ScriptFlowNodeIndex",
+    "ScriptFlowVersion",
     "ScriptNode",
     "ScenarioDelayedMessage",
     "SessionScriptContext",
+    "AgentKgEntity",
 ]

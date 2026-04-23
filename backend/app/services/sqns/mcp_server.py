@@ -698,9 +698,13 @@ def create_sqns_mcp_server(
                 .outerjoin(
                     SqnsService,
                     (SqnsService.agent_id == SqnsServiceCategory.agent_id)
-                    & (SqnsService.category == SqnsServiceCategory.name),
+                    & (SqnsService.category == SqnsServiceCategory.name)
+                    & (SqnsService.stale_since.is_(None)),
                 )
-                .where(SqnsServiceCategory.agent_id == agent_id)
+                .where(
+                    SqnsServiceCategory.agent_id == agent_id,
+                    SqnsServiceCategory.deleted_at.is_(None),
+                )
                 .group_by(SqnsServiceCategory.id)
                 .order_by(
                     SqnsServiceCategory.priority.desc(),

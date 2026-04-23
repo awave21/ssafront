@@ -39,6 +39,7 @@ from app.services.runtime.context_assembler import (
     normalize_augment_prompt_blocks,
     select_optional_runtime_tool_categories,
 )
+from app.services.runtime.expert_script_runtime_graph import run_expert_script_runtime_graph
 from app.services.runtime.tool_registry import build_optional_runtime_tools
 from app.services.runtime.scenario_runtime import apply_dialog_scenario_phases_before_llm
 from app.core.config import get_settings
@@ -134,6 +135,104 @@ def _extract_forced_reaction_output(tools_called: list[dict[str, Any]] | None) -
     if not messages:
         return None
     return "\n".join(messages)
+
+
+def _extract_top_script_flow_match(tools_called: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    if not tools_called:
+        return None
+    for call in tools_called:
+        if not isinstance(call, dict):
+            continue
+        if call.get("name") != "search_script_flows":
+            continue
+        result = call.get("result")
+        if not isinstance(result, dict):
+            continue
+        matches = result.get("matches")
+        if not isinstance(matches, list) or not matches:
+            continue
+        top = matches[0]
+        if isinstance(top, dict):
+            return top
+    return None
+
+
+def _script_flow_output_needs_rewrite(output: str, top_match: dict[str, Any] | None) -> bool:
+    text = str(output or "").strip()
+    if not text or not isinstance(top_match, dict):
+        return False
+
+    lowered = text.lower()
+
+    meta_markers = [
+        "в системе вижу",
+        "по логике клиники",
+        "в нашей системе",
+        "есть несколько позиций",
+        "эта категория",
+        "маршрутизац",
+        "в базе",
+    ]
+    if any(marker in lowered for marker in meta_markers):
+        return True
+
+    forbidden = [str(x).strip().lower() for x in (top_match.get("forbidden_phrases") or []) if str(x).strip()]
+    if any(phrase in lowered for phrase in forbidden):
+        return True
+
+    required_followup = str(top_match.get("required_followup_question") or "").strip()
+    if required_followup and required_followup.lower() not in lowered:
+        return True
+
+    preferred = [str(x).strip().lower() for x in (top_match.get("preferred_phrases") or []) if str(x).strip()]
+    if preferred and not any(phrase in lowered for phrase in preferred):
+        return True
+
+    return False
+
+
+def _render_script_flow_brief(top_match: dict[str, Any]) -> list[str]:
+    situation = str(top_match.get("situation") or "").strip()
+    communication_style = str(top_match.get("communication_style") or "").strip()
+    preferred = [str(x).strip() for x in (top_match.get("preferred_phrases") or []) if str(x).strip()]
+    forbidden = [str(x).strip() for x in (top_match.get("forbidden_phrases") or []) if str(x).strip()]
+    hard_constraints = [str(x).strip() for x in (top_match.get("hard_constraints") or []) if str(x).strip()]
+    required_followup = str(top_match.get("required_followup_question") or "").strip()
+
+    lines = [
+        "Ориентир для живого ответа клиенту:",
+        "- Отвечай как живой администратор/координатор клиники, а не как система или регламент.",
+        "- Не озвучивай внутренние процессы, поиск, категории, позиции в системе, маршрутизацию и логику принятия решения.",
+        "- Сначала ответь на текущую реплику клиента по существу, затем мягко веди к следующему шагу сценария.",
+    ]
+    if situation:
+        lines.append(f"- Ситуация клиента в сценарии: {situation}")
+    if communication_style:
+        lines.append(f"- Тон ответа: {communication_style}")
+    if preferred:
+        lines.append(f"- Если уместно, используй одну из формулировок: {preferred}")
+    if forbidden:
+        lines.append(f"- Не используй формулировки: {forbidden}")
+    if hard_constraints:
+        lines.append(f"- Жёсткие ограничения: {hard_constraints}")
+    if required_followup:
+        lines.append(f"- Заверши ответ дословным вопросом: {required_followup}")
+    return lines
+
+
+def _build_script_flow_validation_prompt(base_prompt: str | None, top_match: dict[str, Any]) -> str:
+    base = (base_prompt or "").rstrip()
+    lines = [
+        "=== RUNTIME VALIDATION: SCRIPT FLOW COMPLIANCE ===",
+        "Перепиши ответ так, чтобы он строго соответствовал top-1 сценарию search_script_flows.",
+        "Сохрани живой человеческий тон и не отвечай языком системы.",
+    ]
+    lines.extend(_render_script_flow_brief(top_match))
+    lines.append("Не объясняй правила, просто дай финальный ответ клиенту.")
+    lines.append("=== /RUNTIME VALIDATION ===")
+
+    block = "\n".join(lines)
+    return (base + "\n\n" + block).strip() if base else block
 
 
 def _extract_tool_events_from_message(message: dict[str, Any]) -> list[dict[str, Any]]:
@@ -668,7 +767,6 @@ async def execute_agent_run(
     settings = get_settings()
     selected_optional_categories, optional_tool_meta = _select_optional_runtime_tool_categories(
         input_message,
-        mode=settings.runtime_optional_tools_mode,
     )
     logger.info(
         "runtime_optional_tool_selection",
@@ -679,6 +777,7 @@ async def execute_agent_run(
     )
 
     direct_question_meta: dict[str, Any] | None = None
+    script_flow_validation_meta: dict[str, Any] | None = None
     # system_prompt_override may be passed in from webhook (pre-computed augment_prompt);
     # dialog-phase scenario augmentation below may further extend it.
     extra_runtime_tools = []
@@ -746,10 +845,10 @@ async def execute_agent_run(
         # augment_prompt has been populated above and needs to reach the model.
 
     if result is None:
-        result = await run_agent_with_tools(
-            agent,
-            tools,
-            bindings,
+        result = await run_expert_script_runtime_graph(
+            agent=agent,
+            tools=tools,
+            bindings=bindings,
             input_message=input_message,
             trace_id=trace_id,
             user=user,
@@ -889,7 +988,12 @@ async def execute_agent_run(
                     question_id=question_id_raw,
                     error=str(exc),
                 )
-        result.orchestration_meta = direct_question_meta
+        if script_flow_validation_meta:
+            merged_meta = dict(script_flow_validation_meta)
+            merged_meta["direct_question"] = direct_question_meta
+            result.orchestration_meta = merged_meta
+        else:
+            result.orchestration_meta = direct_question_meta
 
     forced_reaction_output = _extract_forced_reaction_output(result.tools_called)
     direct_question_content: str | None = None
@@ -906,6 +1010,62 @@ async def execute_agent_run(
         # fallback to managed direct content only when model returned nothing.
         if not model_output:
             result.output = direct_question_content
+
+    top_script_flow_match = _extract_top_script_flow_match(result.tools_called)
+    if _script_flow_output_needs_rewrite(str(result.output or ""), top_script_flow_match):
+        script_flow_validation_meta = {
+            "source": "script_flow_validation",
+            "rewritten": True,
+            "tactic_node_ref": (top_script_flow_match or {}).get("tactic_node_ref"),
+            "tactic_title": (top_script_flow_match or {}).get("tactic_title"),
+        }
+        logger.info(
+            "script_flow_output_rewrite_retry",
+            agent_id=str(agent.id),
+            session_id=session_id,
+            run_id=str(run.id),
+            trace_id=trace_id,
+            tactic_node_ref=(top_script_flow_match or {}).get("tactic_node_ref"),
+        )
+        rewrite_prompt_override = _build_script_flow_validation_prompt(
+            system_prompt_override or agent.system_prompt,
+            top_script_flow_match or {},
+        )
+        rewrite_result = await run_expert_script_runtime_graph(
+            agent=agent,
+            tools=tools,
+            bindings=bindings,
+            input_message=input_message,
+            trace_id=trace_id,
+            user=user,
+            message_history=message_history,
+            run_id=run.id,
+            session_id=session_id,
+            openai_api_key=openai_api_key,
+            anthropic_api_key=anthropic_api_key,
+            system_prompt_override=rewrite_prompt_override,
+            extra_tools=extra_runtime_tools or None,
+        )
+        rewrite_output = str(rewrite_result.output or "").strip()
+        if rewrite_output:
+            result.output = rewrite_output
+            result.new_messages = rewrite_result.new_messages
+            result.prompt_tokens = rewrite_result.prompt_tokens
+            result.completion_tokens = rewrite_result.completion_tokens
+            result.total_tokens = rewrite_result.total_tokens
+            result.token_usage_steps = rewrite_result.token_usage_steps
+            result.tools_called = rewrite_result.tools_called
+            result.tool_call_events = rewrite_result.tool_call_events
+    elif top_script_flow_match:
+        script_flow_validation_meta = {
+            "source": "script_flow_validation",
+            "rewritten": False,
+            "tactic_node_ref": top_script_flow_match.get("tactic_node_ref"),
+            "tactic_title": top_script_flow_match.get("tactic_title"),
+        }
+
+    if script_flow_validation_meta and not direct_question_meta:
+        result.orchestration_meta = script_flow_validation_meta
 
     cost_usd, cost_rub = await apply_fallback_costs(db, token_usage_steps=result.token_usage_steps)
 

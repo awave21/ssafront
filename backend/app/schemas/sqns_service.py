@@ -105,6 +105,10 @@ class SqnsServiceRead(SqnsServiceBase):
     priority: int = Field(..., description="Приоритет (выше = важнее)")
     raw_data: dict[str, Any] | None = Field(None, description="Полные данные из SQNS API")
     synced_at: datetime = Field(..., description="Время последней синхронизации")
+    stale_since: datetime | None = Field(
+        None,
+        description="Метка момента, когда услуга перестала приходить из SQNS (NULL = активна)",
+    )
     created_at: datetime
     updated_at: datetime | None
 
@@ -125,6 +129,10 @@ class SqnsServiceListItem(BaseModel):
     # Количество специалистов, которые могут выполнять эту услугу
     specialists_count: int | None = Field(None, description="Количество специалистов для этой услуги")
     price_range: str | None = Field(None, description="Диапазон цен (если есть)")
+    stale_since: datetime | None = Field(
+        None,
+        description="Услуга отсутствует в последней выгрузке SQNS (NULL = активна)",
+    )
 
 
 class SqnsServiceUpdate(BaseModel):
@@ -132,6 +140,7 @@ class SqnsServiceUpdate(BaseModel):
 
     is_enabled: bool | None = Field(None, description="Включить/отключить услугу")
     priority: int | None = Field(None, description="Изменить приоритет", ge=0)
+    description: str | None = Field(None, description="Описание услуги для агента / LLM")
 
 
 class SqnsServiceBulkUpdate(BaseModel):
@@ -164,6 +173,10 @@ class SqnsCategoryRead(SqnsCategoryBase):
     agent_id: UUID
     created_at: datetime
     updated_at: datetime | None
+    deleted_at: datetime | None = Field(
+        None,
+        description="Метка мягкого удаления (NULL = активна)",
+    )
     # Количество услуг в категории
     services_count: int | None = Field(None, description="Количество услуг в категории")
 

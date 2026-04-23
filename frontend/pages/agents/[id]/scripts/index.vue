@@ -1,276 +1,228 @@
 <template>
   <AgentPageShell title="Потоки эксперта" :hide-actions="true" :contained="true">
-    <div class="flex min-h-0 flex-1 gap-4">
-      <aside class="w-[320px] shrink-0 rounded-lg border border-border bg-card p-3">
-        <div class="mb-3 flex items-center justify-between gap-2">
-          <p class="text-sm font-semibold">Знания агента</p>
+    <div class="max-w-full space-y-6">
+      <!-- Header: actions + search -->
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div class="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            class="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            class="inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-indigo-600 px-5 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
             :disabled="creating"
             @click="handleCreate()"
           >
-            + Поток
+            <Plus class="h-4 w-4" />
+            {{ creating ? 'Создаём…' : 'Создать поток' }}
           </button>
-        </div>
-
-        <div class="mb-3 grid grid-cols-2 gap-2">
-          <button
-            v-for="tab in tabs"
-            :key="tab.value"
-            type="button"
-            class="rounded-md border px-2 py-1.5 text-xs"
-            :class="activeTab === tab.value ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'"
-            @click="activeTab = tab.value"
+          <NuxtLink
+            :to="`/agents/${agentId}/scripts/library`"
+            class="inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+            title="Общая библиотека сущностей (Motive / Argument / Proof / Objection / Constraint / Outcome)"
           >
-            {{ tab.label }}
-          </button>
+            <Library class="h-4 w-4" />
+            Библиотека
+          </NuxtLink>
         </div>
 
-        <div class="mb-2 text-xs text-muted-foreground">
-          Потоки: {{ flows.length }} · Услуги: {{ services.length }} · Сотрудники: {{ specialists.length }}
+        <div v-if="flows.length > 0" class="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+          <div class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+            <span class="font-medium text-slate-900">Всего:</span>
+            <span>{{ flows.length }}</span>
+          </div>
+          <div class="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+            <span class="font-medium">Опубликовано:</span>
+            <span>{{ publishedCount }}</span>
+          </div>
+          <div class="relative min-w-0 grow sm:grow-0">
+            <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              v-model="searchQuery"
+              type="text"
+              placeholder="Поиск по названию или когда релевантно…"
+              class="h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-4 text-sm outline-none transition-all duration-300 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 sm:w-80"
+            >
+          </div>
         </div>
+      </div>
 
-        <div class="max-h-[70vh] space-y-1 overflow-auto pr-1">
+      <!-- Error -->
+      <div
+        v-if="error"
+        class="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+      >
+        <span>{{ error }}</span>
+        <button type="button" class="font-semibold underline" @click="fetchFlows">
+          Повторить
+        </button>
+      </div>
+
+      <!-- Loading -->
+      <div v-if="isLoading && !flows.length" class="flex justify-center py-12">
+        <Loader2 class="h-8 w-8 animate-spin text-indigo-600" />
+      </div>
+
+      <!-- Empty state -->
+      <div
+        v-else-if="flows.length === 0"
+        class="rounded-3xl border-2 border-dashed border-slate-100 bg-white p-12 text-center"
+      >
+        <div class="mx-auto max-w-md">
+          <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
+            <Workflow class="h-8 w-8 text-slate-400" />
+          </div>
+          <h3 class="text-lg font-bold text-slate-900">Потоков пока нет</h3>
+          <p class="mb-6 mt-2 text-slate-500">
+            Создайте первый сценарий продаж — канвас с нодами, связанными со сущностями библиотеки.
+          </p>
           <button
-            v-for="item in listItems"
-            :key="`${item.type}:${item.id}`"
             type="button"
-            class="w-full rounded-md border px-3 py-2 text-left"
-            :class="isSelected(item) ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40'"
-            @click="selectItem(item)"
+            class="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-bold text-white transition-colors hover:bg-indigo-700"
+            :disabled="creating"
+            @click="handleCreate()"
           >
-            <div class="truncate text-sm font-medium">{{ item.title }}</div>
-            <div class="truncate text-xs text-muted-foreground">{{ item.subtitle }}</div>
+            Создать первый поток
           </button>
+        </div>
+      </div>
+
+      <!-- No results -->
+      <div
+        v-else-if="filteredFlows.length === 0"
+        class="rounded-3xl border border-slate-100 bg-white p-8 text-center"
+      >
+        <p class="text-slate-500">Ничего не найдено по запросу «{{ searchQuery }}»</p>
+      </div>
+
+      <!-- Cards list -->
+      <div v-else class="w-full min-w-0 space-y-4">
+        <div
+          v-for="flow in filteredFlows"
+          :key="flow.id"
+          class="group relative min-w-0 max-w-full cursor-pointer overflow-hidden rounded-3xl border border-slate-100 bg-white p-5 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-shadow duration-500 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)]"
+          @click="openFlow(flow.id)"
+        >
           <div
-            v-if="!listItems.length"
-            class="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground"
-          >
-            Ничего не найдено для выбранного фильтра.
-          </div>
-        </div>
-      </aside>
+            class="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-indigo-500/5 transition-transform duration-700 group-hover:scale-150"
+          />
 
-      <section class="min-w-0 flex-1 rounded-lg border border-border bg-card p-4">
-        <div v-if="isBusy" class="text-sm text-muted-foreground">Загрузка…</div>
-        <div v-else-if="combinedError" class="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
-          {{ combinedError }}
-          <button type="button" class="ml-2 underline" @click="reloadAll">Повторить</button>
-        </div>
-
-        <template v-else-if="selectedItem?.type === 'flow' && selectedFlow">
-          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 class="text-base font-semibold">{{ selectedFlow.name }}</h3>
-              <p class="text-xs text-muted-foreground">
-                {{ selectedFlow.flow_status === 'published' ? 'Опубликован' : 'Черновик' }}
-                · Индекс: {{ indexLabel(selectedFlow.index_status) }}
-              </p>
-            </div>
-            <div class="flex flex-wrap items-center gap-2">
-              <button class="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted" @click="openFlow(selectedFlow.id)">
-                Редактировать
-              </button>
-              <button
-                class="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
-                :disabled="publishing || hasCoverageBlockers"
-                @click="handlePublish(selectedFlow.id)"
-              >
-                Опубликовать
-              </button>
-              <button
-                class="rounded-md border border-destructive/40 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10"
-                @click="handleDelete(selectedFlow)"
-              >
-                Удалить
-              </button>
-            </div>
-          </div>
-
-          <div class="mb-4 rounded-md border border-border p-3 text-sm">
-            <p class="mb-1 text-xs uppercase text-muted-foreground">Когда релевантно</p>
-            <p>{{ flowWhenRelevant(selectedFlow) || 'Не заполнено' }}</p>
-          </div>
-
-          <div class="mb-4 rounded-md border border-border p-3">
-            <div class="mb-2 flex items-center justify-between gap-2">
-              <p class="text-sm font-medium">Покрытие сценария</p>
-              <span class="text-xs text-muted-foreground">Score: {{ flowCoverage?.score ?? 0 }}%</span>
-            </div>
-            <div v-if="coverageLoading" class="text-sm text-muted-foreground">Проверка покрытия…</div>
-            <div v-else-if="coverageError" class="text-sm text-destructive">{{ coverageError }}</div>
-            <div v-else-if="flowCoverage" class="space-y-2">
-              <div
-                v-for="check in flowCoverage.checks"
-                :key="check.key"
-                class="rounded-md border p-2"
-                :class="check.passed ? 'border-emerald-200 bg-emerald-50/40' : 'border-amber-200 bg-amber-50/40'"
-              >
-                <p class="text-sm">
-                  <span class="mr-1">{{ check.passed ? '✓' : '⚠' }}</span>
-                  {{ check.label }}
-                </p>
-                <p v-if="check.details" class="mt-1 text-xs text-muted-foreground">{{ check.details }}</p>
+          <div class="flex items-start justify-between gap-4">
+            <div class="flex min-w-0 flex-1 items-start gap-4">
+              <div class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-indigo-50 transition-colors group-hover:bg-indigo-100">
+                <Workflow class="h-5 w-5 text-indigo-600" />
               </div>
-              <p v-if="hasCoverageBlockers" class="text-xs text-amber-700">
-                Есть критические пункты. Рекомендуется исправить перед публикацией.
-              </p>
-            </div>
-          </div>
 
-          <div class="rounded-md border border-border p-3">
-            <p class="mb-2 text-sm font-medium">Тест запроса</p>
-            <div class="flex flex-wrap items-center gap-2">
-              <input
-                v-model="testQuery"
-                type="text"
-                class="min-w-[240px] flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
-                placeholder="Например: клиент говорит, что дорого"
-                @keydown.enter.prevent="runTestSearch"
-              >
-              <button
-                type="button"
-                class="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                :disabled="testLoading || !testQuery.trim()"
-                @click="runTestSearch"
-              >
-                Проверить
-              </button>
-            </div>
-
-            <div v-if="testError" class="mt-2 text-sm text-destructive">{{ testError }}</div>
-            <div v-if="testResults.length" class="mt-3 space-y-2">
-              <div v-for="match in testResults" :key="match.node_id" class="rounded-md border border-border p-2">
-                <div class="flex items-center justify-between gap-2">
-                  <p class="text-sm font-medium">{{ match.flow_name }} · {{ match.node_type }}</p>
-                  <span class="text-xs text-muted-foreground">score {{ match.score.toFixed(3) }}</span>
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <h4 class="truncate text-base font-bold text-slate-900">{{ flow.name }}</h4>
+                  <span
+                    class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                    :class="flow.flow_status === 'published'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-slate-100 text-slate-600 border border-slate-200'"
+                  >
+                    {{ flow.flow_status === 'published' ? 'Опубликован' : 'Черновик' }}
+                  </span>
+                  <span
+                    v-if="indexBadge(flow.index_status)"
+                    class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium"
+                    :class="indexBadge(flow.index_status)!.className"
+                  >
+                    {{ indexBadge(flow.index_status)!.label }}
+                  </span>
                 </div>
-                <p class="mt-1 text-sm">{{ match.situation }}</p>
-                <p v-if="match.good_question" class="mt-1 text-xs text-muted-foreground">
-                  Вопрос: {{ match.good_question }}
+                <p class="mt-1 line-clamp-1 break-all text-xs text-slate-600">
+                  {{ flowWhenRelevant(flow) || 'Когда релевантно не заполнено' }}
                 </p>
+
+                <div class="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+                  <span class="inline-flex items-center gap-1">
+                    <Workflow class="h-3.5 w-3.5 text-slate-400" />
+                    {{ nodeCount(flow) }} узлов
+                  </span>
+                  <span
+                    class="inline-flex items-center gap-1"
+                    :class="kgLinkCount(flow) > 0 ? 'text-indigo-700 font-medium' : 'text-slate-400'"
+                    :title="kgLinkCount(flow) > 0
+                      ? 'Сколько ссылок на сущности библиотеки стоит на нодах'
+                      : 'Ни один узел не связан с библиотекой — LLM не получит мотивы/аргументы'"
+                  >
+                    <Link2 class="h-3.5 w-3.5" />
+                    {{ kgLinkCount(flow) }} связей с библиотекой
+                  </span>
+                  <span
+                    v-if="unlinkedContentCount(flow) > 0"
+                    class="inline-flex items-center gap-1 text-amber-600"
+                    title="Узлов контента без единой связи с библиотекой — их стоит проработать"
+                  >
+                    <AlertTriangle class="h-3.5 w-3.5" />
+                    {{ unlinkedContentCount(flow) }} без связи
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-        </template>
 
-        <template v-else-if="selectedItem?.type === 'service' && selectedService">
-          <div class="mb-4">
-            <h3 class="text-base font-semibold">{{ selectedService.name }}</h3>
-            <p class="text-xs text-muted-foreground">
-              {{ selectedService.category || 'Без категории' }}
-              · {{ formatDuration(selectedService.duration_seconds) }}
-              · {{ selectedService.price ?? 'цена не указана' }}
-            </p>
-          </div>
-
-          <div class="mb-4 rounded-md border border-border p-3">
-            <div class="mb-2 flex items-center justify-between">
-              <p class="text-sm font-medium">Как говорить (потоки)</p>
+            <div
+              class="relative z-20 flex shrink-0 items-center gap-1.5"
+              @click.stop
+            >
               <button
                 type="button"
-                class="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
-                :disabled="creating"
-                @click="handleCreate(selectedService.name)"
+                class="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                title="Открыть канвас"
+                @click="openFlow(flow.id)"
               >
-                Создать поток
+                <Pencil class="h-3.5 w-3.5" />
+                Открыть
               </button>
-            </div>
-            <div v-if="!relatedFlowsForService.length" class="text-sm text-muted-foreground">
-              Потоки не найдены. Создайте первый сценарий для этой услуги.
-            </div>
-            <ul v-else class="space-y-2">
-              <li v-for="flow in relatedFlowsForService" :key="flow.id" class="rounded-md border border-border p-2">
-                <button type="button" class="text-sm font-medium hover:underline" @click="selectFlow(flow.id)">
-                  {{ flow.name }}
-                </button>
-                <p class="text-xs text-muted-foreground">{{ flowWhenRelevant(flow) || 'when_relevant не заполнено' }}</p>
-              </li>
-            </ul>
-          </div>
-
-          <div class="rounded-md border border-border p-3">
-            <p class="mb-2 text-sm font-medium">Сотрудники услуги</p>
-            <ul v-if="employeesForService.length" class="space-y-1">
-              <li v-for="employee in employeesForService" :key="employee" class="text-sm">{{ employee }}</li>
-            </ul>
-            <p v-else class="text-sm text-muted-foreground">Нет связей сотрудник-услуга.</p>
-          </div>
-        </template>
-
-        <template v-else-if="selectedItem?.type === 'employee' && selectedSpecialist">
-          <div class="mb-4">
-            <h3 class="text-base font-semibold">{{ selectedSpecialist.name }}</h3>
-            <p class="text-xs text-muted-foreground">
-              {{ selectedSpecialist.role || 'Специализация не указана' }}
-            </p>
-          </div>
-
-          <div class="mb-4 rounded-md border border-border p-3">
-            <p class="mb-2 text-sm font-medium">Информация для агента</p>
-            <textarea
-              v-model="specialistInfoDraft"
-              rows="4"
-              class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-              placeholder="Например: принимает вт/чт, специализация по ботоксу, противопоказания..."
-            />
-            <div class="mt-2 flex justify-end">
               <button
                 type="button"
-                class="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                :disabled="savingSpecialist"
-                @click="saveSpecialistInfo"
+                class="inline-flex h-8 items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+                :disabled="publishingId === flow.id"
+                title="Опубликовать → индексация в LightRAG"
+                @click="handlePublish(flow)"
               >
-                Сохранить
+                <UploadCloud class="h-3.5 w-3.5" />
+                {{ publishingId === flow.id ? '…' : 'Опубликовать' }}
+              </button>
+              <button
+                type="button"
+                class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-white text-red-600 transition-colors hover:bg-red-50"
+                title="Удалить"
+                @click="handleDelete(flow)"
+              >
+                <Trash2 class="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
-
-          <div class="rounded-md border border-border p-3">
-            <p class="mb-2 text-sm font-medium">Потоки по сотруднику</p>
-            <ul v-if="relatedFlowsForSpecialist.length" class="space-y-2">
-              <li v-for="flow in relatedFlowsForSpecialist" :key="flow.id" class="rounded-md border border-border p-2">
-                <button type="button" class="text-sm font-medium hover:underline" @click="selectFlow(flow.id)">
-                  {{ flow.name }}
-                </button>
-                <p class="text-xs text-muted-foreground">{{ flowWhenRelevant(flow) || 'when_relevant не заполнено' }}</p>
-              </li>
-            </ul>
-            <p v-else class="text-sm text-muted-foreground">Для этого сотрудника пока нет сценариев.</p>
-          </div>
-        </template>
-
-        <div v-else class="text-sm text-muted-foreground">
-          Выберите элемент слева, чтобы открыть карточку.
         </div>
-      </section>
+      </div>
     </div>
   </AgentPageShell>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from '#app'
+import { computed, onMounted, ref } from 'vue'
+import { navigateTo, useRoute } from '#app'
+import {
+  AlertTriangle,
+  Library,
+  Link2,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  UploadCloud,
+  Workflow,
+} from 'lucide-vue-next'
 import AgentPageShell from '~/components/agents/AgentPageShell.vue'
 import { useScriptFlows } from '~/composables/useScriptFlows'
-import { useSqnsKnowledge } from '~/composables/useSqnsKnowledge'
 import { useToast } from '~/composables/useToast'
-import type {
-  ScriptFlow,
-  ScriptFlowCoverageResult,
-  ScriptFlowSearchTestMatch,
-} from '~/types/scriptFlow'
+import type { ScriptFlow, ScriptFlowIndexStatus } from '~/types/scriptFlow'
 
 definePageMeta({
   layout: 'agent' as any,
   middleware: 'auth',
 })
-
-type DashboardItem =
-  | { type: 'flow'; id: string; title: string; subtitle: string }
-  | { type: 'service'; id: string; title: string; subtitle: string }
-  | { type: 'employee'; id: string; title: string; subtitle: string }
 
 const route = useRoute()
 const agentId = route.params.id as string
@@ -282,182 +234,85 @@ const {
   createFlow,
   deleteFlow,
   publishFlow,
-  testSearch,
-  getFlowCoverage,
 } = useScriptFlows(agentId)
-const {
-  services,
-  specialists,
-  serviceEmployeeLinks,
-  isLoading: sqnsLoading,
-  error: sqnsError,
-  loadAll,
-  updateSpecialistInfo,
-} = useSqnsKnowledge(agentId)
 const { success: toastSuccess, error: toastError } = useToast()
 
 const creating = ref(false)
-const publishing = ref(false)
-const savingSpecialist = ref(false)
+const publishingId = ref<string | null>(null)
+const searchQuery = ref('')
 
-const activeTab = ref<'all' | 'flows' | 'services' | 'employees'>('all')
-const tabs = [
-  { value: 'all', label: 'ВСЁ' },
-  { value: 'flows', label: 'Потоки' },
-  { value: 'services', label: 'Услуги' },
-  { value: 'employees', label: 'Сотрудники' },
-] as const
+const publishedCount = computed(() =>
+  flows.value.filter((f) => f.flow_status === 'published').length,
+)
 
-const selectedItem = ref<DashboardItem | null>(null)
+const filteredFlows = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return flows.value
+  return flows.value.filter((f) => {
+    const name = f.name.toLowerCase()
+    const wr = flowWhenRelevant(f).toLowerCase()
+    return name.includes(q) || wr.includes(q)
+  })
+})
 
-const testQuery = ref('')
-const testLoading = ref(false)
-const testError = ref<string | null>(null)
-const testResults = ref<ScriptFlowSearchTestMatch[]>([])
-const flowCoverage = ref<ScriptFlowCoverageResult | null>(null)
-const coverageLoading = ref(false)
-const coverageError = ref<string | null>(null)
-
-const specialistInfoDraft = ref('')
-
-const isBusy = computed(() => isLoading.value || sqnsLoading.value)
-const combinedError = computed(() => error.value || sqnsError.value)
-const activeSpecialists = computed(() => specialists.value.filter((s) => s.active))
-
-const flowWhenRelevant = (flow: ScriptFlow) => {
+const flowWhenRelevant = (flow: ScriptFlow): string => {
   const v = (flow.flow_metadata as Record<string, unknown> | undefined)?.when_relevant
   return typeof v === 'string' ? v : ''
 }
 
-const getNodeBindings = (flow: ScriptFlow) => {
-  const definition = (flow.flow_definition || {}) as Record<string, unknown>
-  const nodes = Array.isArray(definition.nodes) ? definition.nodes : []
-  const serviceIds = new Set<string>()
-  const employeeIds = new Set<string>()
-  for (const n of nodes) {
-    if (!n || typeof n !== 'object') continue
-    const data = (n as { data?: unknown }).data
-    if (!data || typeof data !== 'object') continue
-    const d = data as { service_ids?: unknown; employee_ids?: unknown }
-    if (Array.isArray(d.service_ids))
-      d.service_ids.forEach((id) => typeof id === 'string' && id && serviceIds.add(id))
-    if (Array.isArray(d.employee_ids))
-      d.employee_ids.forEach((id) => typeof id === 'string' && id && employeeIds.add(id))
+const getFlowNodes = (flow: ScriptFlow): Array<Record<string, unknown>> => {
+  const def = (flow.flow_definition || {}) as Record<string, unknown>
+  const raw = def.nodes
+  return Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : []
+}
+
+const nodeCount = (flow: ScriptFlow): number => getFlowNodes(flow).length
+
+const CONTENT_NODE_TYPES = new Set(['expertise', 'question', 'business_rule', 'end'])
+
+const countKgLinksInData = (data: unknown): number => {
+  if (!data || typeof data !== 'object') return 0
+  const d = data as { kg_links?: Record<string, unknown> }
+  const kg = d.kg_links
+  if (!kg || typeof kg !== 'object') return 0
+  let total = 0
+  for (const key of ['motive_ids', 'argument_ids', 'proof_ids', 'objection_ids', 'constraint_ids']) {
+    const arr = (kg as Record<string, unknown>)[key]
+    if (Array.isArray(arr)) total += arr.length
   }
-  return { serviceIds, employeeIds }
+  if (typeof (kg as Record<string, unknown>).outcome_id === 'string'
+    && (kg as Record<string, unknown>).outcome_id) total += 1
+  return total
 }
 
-const indexLabel = (s: string) => {
-  const m: Record<string, string> = {
-    idle: 'не запускался',
-    pending: 'в очереди',
-    indexing: 'индексация',
-    indexed: 'готово',
-    failed: 'ошибка',
+const kgLinkCount = (flow: ScriptFlow): number => {
+  let total = 0
+  for (const n of getFlowNodes(flow)) total += countKgLinksInData(n.data)
+  return total
+}
+
+const unlinkedContentCount = (flow: ScriptFlow): number => {
+  let total = 0
+  for (const n of getFlowNodes(flow)) {
+    const data = (n.data || {}) as Record<string, unknown>
+    const nt = typeof data.node_type === 'string' ? data.node_type : ''
+    if (!CONTENT_NODE_TYPES.has(nt)) continue
+    if (countKgLinksInData(data) === 0) total += 1
   }
-  return m[s] || s
+  return total
 }
 
-const formatDuration = (seconds: number) => {
-  const mins = Math.round((seconds || 0) / 60)
-  return `${mins} мин`
-}
-
-const listItems = computed<DashboardItem[]>(() => {
-  const flowItems: DashboardItem[] = flows.value.map((f) => ({
-    type: 'flow',
-    id: f.id,
-    title: f.name,
-    subtitle: `${f.flow_status === 'published' ? 'Опубликован' : 'Черновик'} · ${indexLabel(f.index_status)}`,
-  }))
-  const serviceItems: DashboardItem[] = services.value.map((s) => ({
-    type: 'service',
-    id: s.id,
-    title: s.name,
-    subtitle: `${s.category || 'Без категории'} · ${formatDuration(s.duration_seconds)}`,
-  }))
-  const employeeItems: DashboardItem[] = activeSpecialists.value.map((s) => ({
-    type: 'employee',
-    id: s.id,
-    title: s.name,
-    subtitle: s.role || 'Специализация не указана',
-  }))
-
-  if (activeTab.value === 'flows') return flowItems
-  if (activeTab.value === 'services') return serviceItems
-  if (activeTab.value === 'employees') return employeeItems
-  return [...flowItems, ...serviceItems, ...employeeItems]
-})
-
-const selectedFlow = computed(() => (
-  selectedItem.value?.type === 'flow'
-    ? flows.value.find((f) => f.id === selectedItem.value?.id) || null
-    : null
-))
-
-const selectedService = computed(() => (
-  selectedItem.value?.type === 'service'
-    ? services.value.find((s) => s.id === selectedItem.value?.id) || null
-    : null
-))
-
-const selectedSpecialist = computed(() => (
-  selectedItem.value?.type === 'employee'
-    ? activeSpecialists.value.find((s) => s.id === selectedItem.value?.id) || null
-    : null
-))
-
-const hasCoverageBlockers = computed(() => Boolean(
-  flowCoverage.value?.checks?.some((c) => !c.passed && c.severity === 'critical'),
-))
-
-const relatedFlowsForService = computed(() => {
-  if (!selectedService.value) return []
-  const needle = selectedService.value.name.toLowerCase()
-  return flows.value.filter((f) => {
-    const bindings = getNodeBindings(f)
-    if (bindings.serviceIds.has(selectedService.value!.id)) return true
-    const wr = flowWhenRelevant(f).toLowerCase()
-    const name = f.name.toLowerCase()
-    return wr.includes(needle) || name.includes(needle)
-  })
-})
-
-const relatedFlowsForSpecialist = computed(() => {
-  if (!selectedSpecialist.value) return []
-  const needle = selectedSpecialist.value.name.toLowerCase()
-  return flows.value.filter((f) => {
-    const bindings = getNodeBindings(f)
-    if (bindings.employeeIds.has(selectedSpecialist.value!.id)) return true
-    const wr = flowWhenRelevant(f).toLowerCase()
-    const name = f.name.toLowerCase()
-    return wr.includes(needle) || name.includes(needle)
-  })
-})
-
-const employeesForService = computed(() => {
-  if (!selectedService.value) return []
-  const serviceName = selectedService.value.name.toLowerCase()
-  return serviceEmployeeLinks.value
-    .filter((row) => row.service?.toLowerCase() === serviceName && row.employee)
-    .map((row) => row.employee as string)
-})
-
-const isSelected = (item: DashboardItem) =>
-  selectedItem.value?.type === item.type && selectedItem.value?.id === item.id
-
-const selectItem = (item: DashboardItem) => {
-  selectedItem.value = item
-}
-
-const selectFlow = (flowId: string) => {
-  const flow = flows.value.find((f) => f.id === flowId)
-  if (!flow) return
-  selectedItem.value = {
-    type: 'flow',
-    id: flow.id,
-    title: flow.name,
-    subtitle: `${flow.flow_status} · ${indexLabel(flow.index_status)}`,
+const indexBadge = (status: ScriptFlowIndexStatus) => {
+  switch (status) {
+    case 'indexed':
+      return { label: 'В графе', className: 'border-indigo-200 bg-indigo-50 text-indigo-700' }
+    case 'indexing':
+    case 'pending':
+      return { label: 'Индексация…', className: 'border-amber-200 bg-amber-50 text-amber-700' }
+    case 'failed':
+      return { label: 'Ошибка индекса', className: 'border-red-200 bg-red-50 text-red-700' }
+    default:
+      return null
   }
 }
 
@@ -465,20 +320,19 @@ const openFlow = async (flowId: string) => {
   await navigateTo(`/agents/${agentId}/scripts/${flowId}`)
 }
 
-const handleCreate = async (whenRelevant = '') => {
+const handleCreate = async () => {
+  if (creating.value) return
   creating.value = true
   try {
-    const name = whenRelevant
-      ? `Поток: ${whenRelevant}`
-      : `Поток ${new Date().toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}`
+    const name = `Поток ${new Date().toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}`
     const created = await createFlow({
       name,
-      flow_metadata: { when_relevant: whenRelevant },
+      flow_metadata: { when_relevant: '' },
       flow_definition: {},
     })
     await fetchFlows()
-    selectFlow(created.id)
     toastSuccess('Поток создан')
+    await navigateTo(`/agents/${agentId}/scripts/${created.id}`)
   } catch (err: unknown) {
     toastError(err instanceof Error ? err.message : 'Не удалось создать поток')
   } finally {
@@ -491,94 +345,26 @@ const handleDelete = async (flow: ScriptFlow) => {
   try {
     await deleteFlow(flow.id)
     await fetchFlows()
-    if (selectedItem.value?.type === 'flow' && selectedItem.value.id === flow.id)
-      selectedItem.value = null
     toastSuccess('Поток удалён')
   } catch (err: unknown) {
     toastError(err instanceof Error ? err.message : 'Не удалось удалить поток')
   }
 }
 
-const handlePublish = async (flowId: string) => {
-  publishing.value = true
+const handlePublish = async (flow: ScriptFlow) => {
+  publishingId.value = flow.id
   try {
-    await publishFlow(flowId)
+    await publishFlow(flow.id)
     await fetchFlows()
-    toastSuccess('Поток опубликован')
+    toastSuccess('Поток опубликован — идёт индексация в LightRAG')
   } catch (err: unknown) {
     toastError(err instanceof Error ? err.message : 'Не удалось опубликовать поток')
   } finally {
-    publishing.value = false
+    publishingId.value = null
   }
 }
 
-const loadCoverage = async (flowId: string) => {
-  coverageLoading.value = true
-  coverageError.value = null
-  try {
-    flowCoverage.value = await getFlowCoverage(flowId)
-  } catch (err: unknown) {
-    coverageError.value = err instanceof Error ? err.message : 'Не удалось загрузить покрытие'
-    flowCoverage.value = null
-  } finally {
-    coverageLoading.value = false
-  }
-}
-
-const runTestSearch = async () => {
-  const query = testQuery.value.trim()
-  if (!query) return
-  testLoading.value = true
-  testError.value = null
-  try {
-    const res = await testSearch(query)
-    const currentFlowId = selectedFlow.value?.id
-    testResults.value = currentFlowId
-      ? res.matches.filter((m) => m.flow_id === currentFlowId)
-      : res.matches
-  } catch (err: unknown) {
-    testError.value = err instanceof Error ? err.message : 'Не удалось выполнить тест запроса'
-    testResults.value = []
-  } finally {
-    testLoading.value = false
-  }
-}
-
-const saveSpecialistInfo = async () => {
-  if (!selectedSpecialist.value) return
-  savingSpecialist.value = true
-  try {
-    await updateSpecialistInfo(selectedSpecialist.value.id, specialistInfoDraft.value.trim())
-    toastSuccess('Информация сотрудника сохранена')
-  } catch (err: unknown) {
-    toastError(err instanceof Error ? err.message : 'Не удалось сохранить информацию')
-  } finally {
-    savingSpecialist.value = false
-  }
-}
-
-const reloadAll = async () => {
-  await Promise.all([fetchFlows(), loadAll()])
-}
-
-watch(selectedSpecialist, (value) => {
-  specialistInfoDraft.value = value?.information || ''
-})
-
-watch(selectedFlow, (flow) => {
-  if (!flow) {
-    flowCoverage.value = null
-    coverageError.value = null
-    return
-  }
-  loadCoverage(flow.id)
-})
-
-watch(listItems, (items) => {
-  if (!selectedItem.value && items.length) selectedItem.value = items[0]
-}, { immediate: true })
-
-onMounted(async () => {
-  await reloadAll()
+onMounted(() => {
+  fetchFlows()
 })
 </script>

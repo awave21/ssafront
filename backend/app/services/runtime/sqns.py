@@ -949,14 +949,21 @@ def build_sqns_legacy_tools(agent: Agent, user: AuthContext) -> list[PydanticToo
 async def prepare_sqns_tooling(
     agent: Agent,
     user: AuthContext,
-) -> tuple[list[Any], list[PydanticTool]]:
+) -> tuple[list[Any], list[PydanticTool], str | None]:
+    """Собирает SQNS toolsets/tools.
+
+    Возвращает (sqns_toolsets, sqns_tools, sqns_bridge).
+    sqns_bridge — текст оркестровки для инжекции в системный промпт,
+    None если SQNS не активен для агента.
+    """
     from app.schemas.agent import get_sqns_tools_definitions
+    from app.services.sqns.tool_texts import SQNS_PROMPT_BRIDGE
 
     sqns_toolsets: list[Any] = []
     sqns_tools: list[PydanticTool] = []
 
     if not (agent.sqns_enabled and agent.sqns_host and agent.sqns_credential_id):
-        return sqns_toolsets, sqns_tools
+        return sqns_toolsets, sqns_tools, None
 
     available_names = {
         str(item.get("name"))
@@ -992,4 +999,4 @@ async def prepare_sqns_tooling(
     except Exception as exc:
         logger.error("sqns_tools_error", agent_id=str(agent.id), error=str(exc))
 
-    return sqns_toolsets, sqns_tools
+    return sqns_toolsets, sqns_tools, SQNS_PROMPT_BRIDGE

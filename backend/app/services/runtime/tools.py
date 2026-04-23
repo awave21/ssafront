@@ -40,11 +40,11 @@ def _tool_result_to_log_dict(value: Any) -> dict[str, Any] | None:
 
 
 DEFAULT_KNOWLEDGE_SEARCH_TOOL_DESCRIPTION = (
-    "Data tool: search indexed uploaded files (RAG). "
-    "Returns chunk_id, file_id, chunk_index, title, excerpt — cite when answering. "
-    "Prefer this for long documents and file-based guides. "
-    "The agent also has other data tools (named catalog searches and `search_direct_questions` / `get_direct_answer`); "
-    "pick whichever tool's description fits the question."
+    "Поиск по загруженным документам (PDF, Word, текстовые файлы). "
+    "Используй для многостраничных руководств, регламентов, договоров, подробных описаний. "
+    "Возвращает фрагменты — цитируй их в ответе. "
+    "НЕ используй для коротких фактов, цен, расписаний, контактов — "
+    "для них используй search_direct_questions."
 )
 
 
@@ -420,17 +420,17 @@ def build_direct_answer_tool(
         function=_get_direct_answer,
         name="get_direct_answer",
         description=(
-            "Data tool: load one curated Q&A / policy card by UUID (same family as the agent's catalog tools—pick by intent). "
-            "`direct_question_id` must come from `search_direct_questions` (or a retry after not_found); do not invent ids. "
-            "After status=ok: use `content` as facts; keep numbers, addresses, prices, URLs exact. "
-            "Apply `system_instruction` if present; call other tools if something is missing."
+            "Загружает карточку FAQ/политики по UUID из search_direct_questions. "
+            "direct_question_id бери только из search_direct_questions.chosen_candidate_id — не придумывай. "
+            "При status=ok: используй content как факты (числа, цены, ссылки — точно). "
+            "Если есть system_instruction — следуй ей."
         ),
         json_schema={
             "type": "object",
             "properties": {
                 "direct_question_id": {
                     "type": "string",
-                    "description": "UUID of the card (e.g. from search_direct_questions.chosen_candidate_id).",
+                    "description": "UUID карточки из search_direct_questions.chosen_candidate_id.",
                 }
             },
             "required": ["direct_question_id"],
@@ -478,15 +478,16 @@ def build_direct_questions_search_tool(
         function=_search_direct_questions,
         name="search_direct_questions",
         description=(
-            "Data tool: semantic search over curated Q&A / policy cards (short fixed answers). "
-            "Same idea as catalog tools—one named tool per dataset; this one covers direct-question cards. "
-            "Use `search_knowledge_files` for long file-based docs; use other tools for live integrations. "
-            "Output may include `chosen_candidate_id` for `get_direct_answer`; do not make up ids."
+            "Семантический поиск по карточкам FAQ (цены, контакты, политики, короткие факты). "
+            "Используй для точных фактических вопросов; для длинных документов — search_knowledge_files. "
+            "ОБЯЗАТЕЛЬНО вызывай get_direct_answer(chosen_candidate_id) после — "
+            "не отвечай только на основе краткого описания из результатов поиска. "
+            "Не придумывай id."
         ),
         json_schema={
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "User intent in natural language."},
+                "query": {"type": "string", "description": "Вопрос или намерение пользователя на естественном языке."},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": default_limit},
             },
             "required": ["query"],
@@ -557,14 +558,14 @@ async def build_knowledge_search_tool(
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Natural language question or search phrase.",
+                    "description": "Вопрос или поисковая фраза на естественном языке.",
                 },
                 "limit": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 10,
                     "default": 5,
-                    "description": "Maximum number of returned fragments.",
+                    "description": "Максимальное количество возвращаемых фрагментов.",
                 },
             },
             "required": ["query"],

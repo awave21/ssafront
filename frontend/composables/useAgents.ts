@@ -86,6 +86,11 @@ export type Agent = {
   total_cost_rub?: string
 }
 
+export type DefaultSystemPromptPayload = {
+  system_prompt: string
+  note?: string
+}
+
 export type CreateAgentData = {
   name: string
   system_prompt: string
@@ -136,6 +141,17 @@ export const useAgents = () => {
       throw err
     } finally {
       isLoading.value = false
+    }
+  }
+
+  /** Шаблон системного промпта с оркестровкой инструментов (GET /agents/defaults/system-prompt). */
+  const fetchDefaultSystemPrompt = async (): Promise<DefaultSystemPromptPayload> => {
+    try {
+      error.value = null
+      return await apiFetch<DefaultSystemPromptPayload>('/agents/defaults/system-prompt')
+    } catch (err: any) {
+      error.value = getReadableErrorMessage(err, 'Не удалось загрузить шаблон промпта')
+      throw err
     }
   }
 
@@ -388,7 +404,11 @@ export const useAgents = () => {
     }
   }
 
-  const updateSqnsService = async (agentId: string, serviceId: string, data: { is_enabled?: boolean, priority?: number }) => {
+  const updateSqnsService = async (
+    agentId: string,
+    serviceId: string,
+    data: { is_enabled?: boolean, priority?: number, description?: string | null },
+  ) => {
     try {
       const url = `/agents/${agentId}/sqns/services/${serviceId}`
       console.log('🚀 PATCH request:', {
@@ -564,6 +584,7 @@ export const useAgents = () => {
     isLoading: readonly(isLoading),
     error: readonly(error),
     fetchAgents,
+    fetchDefaultSystemPrompt,
     createAgent,
     getAgent,
     updateAgent,

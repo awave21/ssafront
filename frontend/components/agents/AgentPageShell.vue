@@ -3,13 +3,21 @@
     :class="[
       'min-h-0',
       /* h-full + overflow-hidden без внутреннего скролла обрезали контент (база знаний и др.) */
-      props.contained ? 'flex h-full min-h-0 flex-col overflow-hidden' : '',
+      props.contained
+        ? props.preventInnerScroll
+          ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+          : 'flex h-full min-h-0 flex-col overflow-hidden'
+        : '',
     ]"
   >
     <div
       :class="[
         'flex min-h-0 flex-col',
-        props.contained ? 'min-h-0 flex-1 overflow-y-auto overflow-x-hidden' : '',
+        props.contained
+          ? props.preventInnerScroll
+            ? 'min-h-0 flex-1 overflow-hidden'
+            : 'min-h-0 flex-1 overflow-y-auto overflow-x-hidden'
+          : '',
         /* Чат — на всю ширину без внешних полей; остальные страницы — отступы от края main */
         !props.flush ? 'p-4 sm:p-6' : '',
       ]"
@@ -81,6 +89,11 @@ type Props = {
   contained?: boolean
   /** Без внешних отступов у контента (страница чата); иначе поля как у остальных разделов */
   flush?: boolean
+  /**
+   * Не включать overflow-y:auto на внутреннем блоке — для редакторов на весь экран (канвас),
+   * иначе высота «плавает» и Vue Flow постоянно пересчитывает размеры.
+   */
+  preventInnerScroll?: boolean
 }
 
 const props = defineProps<Props>()
@@ -95,8 +108,22 @@ const { canEditAgents } = usePermissions()
 // Sync breadcrumb data to layout via shared state
 import { useLayoutState } from '~/composables/useLayoutState'
 const { breadcrumbTitle, breadcrumbAgentName, hideTopBarActions } = useLayoutState()
-breadcrumbTitle.value = props.title
-hideTopBarActions.value = !!props.hideActions
+
+watch(
+  () => props.title,
+  (t) => {
+    breadcrumbTitle.value = t
+  },
+  { immediate: true },
+)
+
+watch(
+  () => props.hideActions,
+  (v) => {
+    hideTopBarActions.value = !!v
+  },
+  { immediate: true },
+)
 
 watch(() => agent.value?.name, (name) => {
   breadcrumbAgentName.value = name || ''

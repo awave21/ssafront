@@ -1721,6 +1721,10 @@ async def sqns_list_cached_services(
     search: str | None = None,
     category: str | None = None,
     is_enabled: bool | None = None,
+    include_stale: bool = Query(
+        False,
+        description="Показать услуги, отсутствующие во внешнем SQNS (stale_since != NULL)",
+    ),
     limit: int = Query(100, ge=1, le=1000, description="Максимум результатов (1-1000)"),
     offset: int = Query(0, ge=0, description="Смещение для пагинации"),
     db: AsyncSession = Depends(get_db),
@@ -1733,6 +1737,7 @@ async def sqns_list_cached_services(
     - search: поиск по названию/описанию (ILIKE)
     - category: фильтр по категории
     - is_enabled: фильтр по статусу (включена/отключена)
+    - include_stale: включать услуги, которых больше нет в SQNS (по умолчанию скрыты)
     - limit: максимум результатов (1-1000)
     - offset: смещение для пагинации
     """
@@ -1758,6 +1763,10 @@ async def sqns_list_cached_services(
         .where(SqnsService.agent_id == agent.id)
         .group_by(SqnsService.id)
     )
+
+    if not include_stale:
+        count_stmt = count_stmt.where(SqnsService.stale_since.is_(None))
+        stmt = stmt.where(SqnsService.stale_since.is_(None))
 
     # Применяем фильтры к обоим запросам
     if search:
@@ -1804,6 +1813,7 @@ async def sqns_list_cached_services(
             "priority": service_data.priority,
             "specialists_count": specialists_count,
             "price_range": price_range,
+            "stale_since": service_data.stale_since,
         }
         services.append(SqnsServiceListItem.model_validate(service_dict))
 
@@ -1826,6 +1836,10 @@ async def sqns_list_cached_services(
 @router.get("/{agent_id}/sqns/service-employee-links")
 async def sqns_list_service_employee_links(
     agent_id: UUID,
+    include_stale: bool = Query(
+        False,
+        description="Включать связи услуг, которых больше нет в SQNS (stale_since != NULL)",
+    ),
     limit: int = Query(5000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -1859,6 +1873,8 @@ async def sqns_list_service_employee_links(
         .where(SqnsService.agent_id == agent.id)
         .order_by(SqnsService.name, SqnsResource.name)
     )
+    if not include_stale:
+        links_stmt = links_stmt.where(SqnsService.stale_since.is_(None))
     link_rows = (await db.execute(links_stmt)).all()
 
     # Услуги, у которых есть хотя бы одна связь
@@ -1890,6 +1906,8 @@ async def sqns_list_service_employee_links(
         )
         .order_by(SqnsService.name)
     )
+    if not include_stale:
+        orphan_stmt = orphan_stmt.where(SqnsService.stale_since.is_(None))
     orphan_rows = (await db.execute(orphan_stmt)).all()
     for row in orphan_rows:
         all_items.append({
@@ -1945,6 +1963,8 @@ async def sqns_update_service(
         service.is_enabled = payload.is_enabled
     if payload.priority is not None:
         service.priority = payload.priority
+    if payload.description is not None:
+        service.description = payload.description
 
     await db.commit()
     await db.refresh(service)
@@ -2006,6 +2026,10 @@ async def sqns_bulk_update_services(
 @router.get("/{agent_id}/sqns/categories")
 async def sqns_list_categories(
     agent_id: UUID,
+    include_deleted: bool = Query(
+        False,
+        description="Включать категории, исчезнувшие из SQNS (deleted_at != NULL)",
+    ),
     db: AsyncSession = Depends(get_db),
     user: AuthContext = Depends(require_scope("agents:write")),
 ):
@@ -2017,6 +2041,7 @@ async def sqns_list_categories(
 
     agent = await get_agent_or_404(agent_id, db, user)
 
+    # services_count не учитывает stale услуги, чтобы UI не считал ушедшие из SQNS.
     stmt = (
         select(
             SqnsServiceCategory,
@@ -2025,7 +2050,8 @@ async def sqns_list_categories(
         .outerjoin(
             SqnsService,
             (SqnsService.agent_id == SqnsServiceCategory.agent_id)
-            & (SqnsService.category == SqnsServiceCategory.name),
+            & (SqnsService.category == SqnsServiceCategory.name)
+            & (SqnsService.stale_since.is_(None)),
         )
         .where(SqnsServiceCategory.agent_id == agent.id)
         .group_by(SqnsServiceCategory.id)
@@ -2034,6 +2060,9 @@ async def sqns_list_categories(
             SqnsServiceCategory.name,
         )
     )
+
+    if not include_deleted:
+        stmt = stmt.where(SqnsServiceCategory.deleted_at.is_(None))
 
     result = await db.execute(stmt)
     rows = result.all()
@@ -2051,6 +2080,7 @@ async def sqns_list_categories(
             "priority": category_data.priority,
             "created_at": category_data.created_at,
             "updated_at": category_data.updated_at,
+            "deleted_at": category_data.deleted_at,
             "services_count": services_count,
         }
         categories.append(SqnsCategoryRead.model_validate(category_dict))

@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -297,6 +297,7 @@ class SqnsServicesSyncHandler:
         links_synced = 0
         categories_touched: set[str] = set()
         services_with_authoritative_links: set[int] = set()
+        synced_service_external_ids: set[int] = set()
 
         for service in services_data:
             if not isinstance(service, dict):
@@ -316,6 +317,7 @@ class SqnsServicesSyncHandler:
 
             service_uuid = await self._upsert_service(external_id_int, service, synced_at)
             services_synced += 1
+            synced_service_external_ids.add(external_id_int)
 
             resource_links = collect_service_resource_links(service)
             if resource_links is not None:
@@ -342,10 +344,23 @@ class SqnsServicesSyncHandler:
 
         for category_name in categories_touched:
             await self._upsert_category(category_name, synced_at)
-        # Удаляем устаревшие категории только при полной синхронизации.
+        # Мягкое удаление категорий только при полной синхронизации.
         # При инкрементальной services_data содержит лишь недавно изменённые услуги,
-        # поэтому categories_touched неполный — prune удалил бы валидные категории.
-        stale_categories = await self._prune_stale_categories(categories_touched) if modificate is None else 0
+        # поэтому categories_touched неполный — prune пометил бы валидные как удалённые.
+        stale_categories = (
+            await self._soft_delete_stale_categories(categories_touched, synced_at)
+            if modificate is None
+            else 0
+        )
+
+        # Помечаем услуги как stale только при полной синхронизации.
+        # Физически не удаляем, чтобы сохранить локальные is_enabled/priority
+        # на случай возврата услуги во внешней системе.
+        stale_services = (
+            await self._mark_stale_services(synced_service_external_ids, synced_at)
+            if modificate is None
+            else 0
+        )
 
         augment = await self.merge_employee_service_resource_links(
             employee_service_links or [],
@@ -380,6 +395,7 @@ class SqnsServicesSyncHandler:
             links_merged_from_employees=augment,
             stale_resources=stale_resources,
             stale_categories=stale_categories,
+            stale_services=stale_services,
             modificate=modificate,
         )
         return {
@@ -388,6 +404,7 @@ class SqnsServicesSyncHandler:
             "links_synced": links_synced,
             "stale_resources": stale_resources,
             "stale_categories": stale_categories,
+            "stale_services": stale_services,
         }
 
     async def _upsert_service(
@@ -433,6 +450,7 @@ class SqnsServicesSyncHandler:
             priority=0,
             raw_data=service_data,
             synced_at=synced_at,
+            stale_since=None,
             created_at=synced_at,
         )
         stmt = stmt.on_conflict_do_update(
@@ -445,6 +463,9 @@ class SqnsServicesSyncHandler:
                 "description": stmt.excluded.description,
                 "raw_data": stmt.excluded.raw_data,
                 "synced_at": stmt.excluded.synced_at,
+                # Услуга снова пришла из SQNS — снимаем флаг stale, сохраняя
+                # локальные is_enabled/priority.
+                "stale_since": None,
                 "updated_at": synced_at,
             },
         ).returning(SqnsService.id)
@@ -593,19 +614,66 @@ class SqnsServicesSyncHandler:
             name=normalized_name,
             is_enabled=True,
             priority=0,
+            deleted_at=None,
             created_at=synced_at,
         )
         stmt = stmt.on_conflict_do_update(
             constraint="uq_sqns_categories_agent_name",
-            set_={"updated_at": synced_at},
+            set_={
+                # Категория снова пришла из SQNS — снимаем мягкое удаление,
+                # сохраняя локальные is_enabled/priority.
+                "deleted_at": None,
+                "updated_at": synced_at,
+            },
         )
         await self.db.execute(stmt)
 
-    async def _prune_stale_categories(self, active_names: set[str]) -> int:
-        stmt = delete(SqnsServiceCategory).where(
-            SqnsServiceCategory.agent_id == self.agent_id
+    async def _soft_delete_stale_categories(
+        self,
+        active_names: set[str],
+        synced_at: datetime,
+    ) -> int:
+        """
+        Мягкое удаление категорий, исчезнувших из SQNS.
+
+        Физически не удаляем: сохраняем is_enabled/priority, выставленные
+        пользователем, на случай возврата категории (например, переименования
+        с последующим откатом или временного скрытия во внешней системе).
+        """
+        stmt = (
+            update(SqnsServiceCategory)
+            .where(
+                SqnsServiceCategory.agent_id == self.agent_id,
+                SqnsServiceCategory.deleted_at.is_(None),
+            )
+            .values(deleted_at=synced_at, updated_at=synced_at)
         )
         if active_names:
             stmt = stmt.where(SqnsServiceCategory.name.notin_(active_names))
+        result = await self.db.execute(stmt)
+        return int(result.rowcount or 0)
+
+    async def _mark_stale_services(
+        self,
+        active_external_ids: set[int],
+        synced_at: datetime,
+    ) -> int:
+        """
+        Помечает услуги, отсутствующие во внешнем ответе, как stale.
+
+        Физически не удаляем — локальные настройки (is_enabled, priority)
+        должны пережить возможный возврат услуги. Повторный upsert сбросит
+        stale_since обратно в NULL.
+        """
+        stmt = (
+            update(SqnsService)
+            .where(
+                SqnsService.agent_id == self.agent_id,
+                SqnsService.stale_since.is_(None),
+            )
+            .values(stale_since=synced_at, updated_at=synced_at)
+        )
+        if active_external_ids:
+            stmt = stmt.where(SqnsService.external_id.notin_(active_external_ids))
         result = await self.db.execute(stmt)
         return int(result.rowcount or 0)

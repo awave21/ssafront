@@ -263,7 +263,7 @@ import { useAgentPromptEnhancement, type PromptEnhancementStep } from '~/composa
 // Auth and Router
 const { isAuthenticated } = useAuth()
 const router = useRouter()
-const { createAgent } = useAgents()
+const { createAgent, fetchDefaultSystemPrompt } = useAgents()
 const { info: toastInfo, success: toastSuccess } = useToast()
 const {
   modelGroups,
@@ -428,6 +428,15 @@ onMounted(async () => {
 
   if (!form.value.model) {
     form.value.model = getFirstModelValue()
+  }
+
+  try {
+    const def = await fetchDefaultSystemPrompt()
+    if (def?.system_prompt && !form.value.system_prompt.trim()) {
+      form.value.system_prompt = def.system_prompt
+    }
+  } catch {
+    /* шаблон опционален — при пустом промпте бэкенд подставит то же при создании */
   }
 })
 
