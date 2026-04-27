@@ -231,12 +231,6 @@ const handleLogout = () => {
   // Перенаправление происходит внутри logout()
 }
 
-const isMenuItemActive = (path: string) => {
-  if (route.path === path) return true
-  if (path !== '/' && route.path.startsWith(path + '/')) return true
-  return false
-}
-
 const isAgentDetail = computed(() => {
   return route.name?.toString().startsWith('agents-id')
 })
@@ -301,6 +295,7 @@ const agentMenuItems = [
   { id: 'channels', name: 'Каналы', icon: Radio, path: (id: string) => `/agents/${id}/channels` },
   { id: 'connections', name: 'Интеграции', icon: Link, path: (id: string) => `/agents/${id}/connections` },
   { id: 'knowledge', name: 'База знаний', icon: Database, path: (id: string) => `/agents/${id}/knowledge` },
+  { id: 'knowledge-graph', name: 'Граф знаний', icon: GitBranch, path: (id: string) => `/agents/${id}/knowledge/graph` },
   { id: 'scenarios', name: 'Сценарии', icon: ListTree, path: (id: string) => `/agents/${id}/scenarios` },
   { id: 'script-flows', name: 'Потоки эксперта', icon: GitBranch, path: (id: string) => `/agents/${id}/scripts` },
   { id: 'functions', name: 'Функции', icon: Code, path: (id: string) => `/agents/${id}/functions` },
@@ -332,4 +327,15 @@ const currentMenuItems = computed(() => {
     item => !('requiresScope' in item && item.requiresScope) || hasScope(item.requiresScope),
   )
 })
+
+const activeMenuPath = computed(() => {
+  const currentPath = route.path || ''
+  const candidates = currentMenuItems.value
+    .map(item => item.path)
+    .filter(path => currentPath === path || (path !== '/' && currentPath.startsWith(path + '/')))
+  if (!candidates.length) return ''
+  return candidates.sort((a, b) => b.length - a.length)[0]
+})
+
+const isMenuItemActive = (path: string) => activeMenuPath.value === path
 </script>

@@ -1,15 +1,28 @@
 <template>
   <div
     ref="containerRef"
-    class="relative w-full overflow-hidden rounded-xl border border-border bg-muted/20"
+    class="relative w-full overflow-hidden bg-muted/20"
     :style="{ height: `${canvasH}px` }"
   >
     <svg ref="svgRef" class="block h-full w-full touch-none" />
     <div
       v-if="hint"
-      class="pointer-events-none absolute bottom-2 left-2 max-w-[min(100%-1rem,24rem)] rounded-md border border-border bg-background/95 px-2 py-1.5 text-[10px] leading-snug text-muted-foreground shadow-sm"
+      class="pointer-events-none absolute left-2 max-w-[min(100%-1rem,24rem)] rounded-md border border-border bg-background/95 px-2 py-1.5 text-[10px] leading-snug text-muted-foreground shadow-sm"
+      :class="props.bottomBadges?.length ? 'bottom-12' : 'bottom-2'"
     >
       {{ hint }}
+    </div>
+    <div
+      v-if="props.bottomBadges?.length"
+      class="pointer-events-none absolute bottom-2 left-2 flex max-w-[min(100%-1rem,42rem)] flex-wrap gap-1.5"
+    >
+      <span
+        v-for="badge in props.bottomBadges"
+        :key="badge"
+        class="rounded-md border border-border bg-background/95 px-2 py-1 text-[10px] leading-none text-muted-foreground shadow-sm"
+      >
+        {{ badge }}
+      </span>
     </div>
   </div>
 </template>
@@ -58,8 +71,10 @@ const props = withDefaults(
     layoutMode?: 'compact' | 'balanced' | 'spread'
     /** Показывать узлы без рёбер (изолированные). По умолчанию скрыты для читаемости. */
     showIsolatedNodes?: boolean
+    /** Нижние информационные плашки (счётчики и статус). */
+    bottomBadges?: string[]
   }>(),
-  { heightPx: 560, selectedGraphNodeId: null, layoutMode: 'balanced', showIsolatedNodes: false },
+  { heightPx: 560, selectedGraphNodeId: null, layoutMode: 'balanced', showIsolatedNodes: false, bottomBadges: () => [] },
 )
 
 const emit = defineEmits<{

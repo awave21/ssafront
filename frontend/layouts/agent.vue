@@ -31,6 +31,11 @@ const {
   scriptFlowSandboxOpen,
   scriptFlowCoverageOpen,
   scriptFlowToolbarPayload,
+    knowledgeGraphRebuildAction,
+    knowledgeGraphRefreshAction,
+    knowledgeGraphRebuildBusy,
+    knowledgeGraphRefreshBusy,
+    knowledgeGraphRebuildLabel,
 } = useLayoutState()
 const isPromptFullscreen = useState<boolean>('prompt-fullscreen', () => false)
 const isMobileSidebarOpen = ref(false)
@@ -213,6 +218,27 @@ onMounted(() => {
                 @update:model-value="functionsToggleStatusAction" 
               />
             </div>
+          </template>
+
+          <template v-if="knowledgeGraphRebuildAction || knowledgeGraphRefreshAction">
+            <button
+              v-if="knowledgeGraphRebuildAction"
+              type="button"
+              class="px-3 py-1.5 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              :disabled="knowledgeGraphRebuildBusy"
+              @click="knowledgeGraphRebuildAction"
+            >
+              {{ knowledgeGraphRebuildLabel }}
+            </button>
+            <button
+              v-if="knowledgeGraphRefreshAction"
+              type="button"
+              class="px-3 py-1.5 border border-border bg-background rounded-md text-sm font-medium hover:bg-muted/60 disabled:opacity-50 transition-colors"
+              :disabled="knowledgeGraphRefreshBusy"
+              @click="knowledgeGraphRefreshAction"
+            >
+              {{ knowledgeGraphRefreshBusy ? 'Загрузка…' : 'Обновить отображение' }}
+            </button>
           </template>
 
           <!-- Публикация потока — крайний правый элемент шапки -->

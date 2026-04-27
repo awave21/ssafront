@@ -1,12 +1,6 @@
 <template>
-  <AgentPageShell title="Граф знаний" :hide-actions="true" :contained="false">
-    <div class="flex flex-col gap-4 px-1 pb-4 pt-1 sm:px-2">
-      <p
-        v-if="preview?.preview_legend"
-        class="border-l-2 border-muted-foreground/30 pl-2 text-xs leading-relaxed text-muted-foreground"
-      >
-        {{ preview.preview_legend }}
-      </p>
+  <AgentPageShell title="Граф знаний" :hide-actions="true" :contained="true" :flush="true">
+    <div class="flex h-full min-h-0 flex-col">
       <div
         v-if="message"
         class="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm"
@@ -14,17 +8,12 @@
       >
         {{ message }}
       </div>
-      <div
-        v-if="graphNodes.length || previewMetaLine"
-        class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
-      >
-        <span v-if="previewMetaLine">{{ previewMetaLine }}</span>
-      </div>
       <ClientOnly>
-        <div v-if="d3Preview?.nodes?.length" class="flex flex-col gap-3">
+        <div v-if="d3Preview?.nodes?.length" class="flex min-h-0 flex-1 flex-col">
           <UnifiedGraphD3View
             :data="d3Preview"
-            :height-px="560"
+            :height-px="graphCanvasHeightPx"
+            :bottom-badges="graphMetaBadges"
             :selected-graph-node-id="selectedNode?.graph_node_id ?? null"
             layout-mode="balanced"
             :show-isolated-nodes="true"
@@ -50,25 +39,6 @@
           Загрузка графа…
         </div>
       </ClientOnly>
-      <div class="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          class="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-          :disabled="rebuildBusy"
-          @click="rebuild"
-        >
-          {{ rebuildBusy ? `Пересборка… ${rebuildElapsedLabel}` : 'Пересобрать граф' }}
-        </button>
-        <button
-          type="button"
-          class="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-xs font-medium hover:bg-muted/60 disabled:opacity-50"
-          :disabled="previewLoading || rebuildBusy"
-          title="Только перечитать output с диска"
-          @click="loadPreview"
-        >
-          {{ previewLoading ? 'Загрузка…' : 'Обновить отображение' }}
-        </button>
-      </div>
       <ClientOnly>
         <UnifiedGraphAskWidget v-if="agentId" :agent-id="agentId" />
       </ClientOnly>
@@ -78,11 +48,13 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useWindowSize } from '@vueuse/core'
 import AgentPageShell from '~/components/agents/AgentPageShell.vue'
 import UnifiedGraphD3View from '~/components/agents/unified-graph/UnifiedGraphD3View.vue'
 import UnifiedGraphNodeDetailPanel from '~/components/agents/unified-graph/UnifiedGraphNodeDetailPanel.vue'
 import UnifiedGraphAskWidget from '~/components/agents/unified-graph/UnifiedGraphAskWidget.vue'
 import { useApiFetch } from '~/composables/useApiFetch'
+import { useLayoutState } from '~/composables/useLayoutState'
 import { getReadableErrorMessage } from '~/utils/api-errors'
 import type { UnifiedGraphNodeDto, UnifiedGraphPreview, UnifiedGraphRelationDto } from '~/types/unifiedGraph'
 
@@ -108,6 +80,16 @@ type GraphPreviewResponse = {
 const route = useRoute()
 const agentId = computed(() => String(route.params.id || ''))
 const apiFetch = useApiFetch()
+const { height: windowHeight } = useWindowSize()
+const {
+  knowledgeGraphRebuildAction,
+  knowledgeGraphRefreshAction,
+  knowledgeGraphRebuildBusy,
+  knowledgeGraphRefreshBusy,
+  knowledgeGraphRebuildLabel,
+  layoutBreadcrumbSegments,
+  resetKnowledgeGraphHeaderState,
+} = useLayoutState()
 
 const rebuildBusy = ref(false)
 const rebuildElapsedSec = ref(0)
@@ -127,6 +109,11 @@ const rebuildElapsedLabel = computed(() => {
   const r = s % 60
   return m > 0 ? `${m}:${String(r).padStart(2, '0')}` : `${r} с`
 })
+
+const TOP_BAR_HEIGHT_PX = 60
+const graphCanvasHeightPx = computed(() =>
+  Math.max(420, windowHeight.value - TOP_BAR_HEIGHT_PX),
+)
 
 const graphNodes = computed(() => preview.value?.nodes ?? [])
 const graphRelations = computed(() => preview.value?.relations ?? [])
@@ -162,14 +149,14 @@ const onNodeSelect = (node: UnifiedGraphNodeDto | null) => {
   selectedNode.value = node
 }
 
-const previewMetaLine = computed(() => {
+const graphMetaBadges = computed(() => {
   const p = preview.value
-  if (!p || p.preview_source === 'no_workspace') return ''
+  if (!p || p.preview_source === 'no_workspace') return [] as string[]
   const parts: string[] = []
   if (typeof p.node_count === 'number') parts.push(`сущностей в индексе: ${p.node_count}`)
   if (typeof p.edge_count === 'number') parts.push(`связей на графе: ${p.edge_count}`)
   if (p.truncated) parts.push('показано частично (лимит узлов/рёбер)')
-  return parts.join(' · ')
+  return parts
 })
 
 const emptyGraphHint = computed(() => {
@@ -263,11 +250,36 @@ watch(preview, () => {
   selectedNode.value = null
 })
 
+watch([rebuildBusy, rebuildElapsedLabel], () => {
+  knowledgeGraphRebuildBusy.value = rebuildBusy.value
+  knowledgeGraphRebuildLabel.value = rebuildBusy.value
+    ? `Пересборка… ${rebuildElapsedLabel.value}`
+    : 'Пересобрать граф'
+})
+
+watch([previewLoading, rebuildBusy], () => {
+  knowledgeGraphRefreshBusy.value = previewLoading.value || rebuildBusy.value
+})
+
 onMounted(() => {
+  // На графе используем обычный title в top bar, без крошек из соседних страниц БЗ.
+  layoutBreadcrumbSegments.value = null
+  knowledgeGraphRebuildAction.value = () => {
+    void rebuild()
+  }
+  knowledgeGraphRefreshAction.value = () => {
+    void loadPreview()
+  }
+  knowledgeGraphRebuildBusy.value = rebuildBusy.value
+  knowledgeGraphRefreshBusy.value = previewLoading.value || rebuildBusy.value
+  knowledgeGraphRebuildLabel.value = rebuildBusy.value
+    ? `Пересборка… ${rebuildElapsedLabel.value}`
+    : 'Пересобрать граф'
   void loadPreview()
 })
 
 onUnmounted(() => {
   stopRebuildTimer()
+  resetKnowledgeGraphHeaderState()
 })
 </script>

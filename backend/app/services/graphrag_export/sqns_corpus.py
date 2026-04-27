@@ -168,7 +168,7 @@ async def gather_sqns_graphrag_sections(
         price = _fmt_price(s.price)
         dur = _duration_minutes(s.duration_seconds)
         desc = sanitize_rich_text(s.description)
-        bits = [f"## {sanitize_rich_text(s.name)} (external_id={s.external_id})"]
+        bits = [f"## {sanitize_rich_text(s.name)}"]
         if s.category:
             bits.append(f"Категория: {sanitize_rich_text(s.category)}")
         if price:
@@ -184,25 +184,18 @@ async def gather_sqns_graphrag_sections(
     for r in specialists:
         info = sanitize_rich_text(r.information)
         lines_spec.append(
-            f"## {sanitize_rich_text(r.name)} (external_id={r.external_id}, uuid={r.id})\n"
+            f"## {sanitize_rich_text(r.name)}\n"
             f"Роль/специализация: {sanitize_rich_text(r.specialization) or '—'}\n"
             f"Доп. информация: {info or '—'}\n"
         )
     sections["input/03_specialists.txt"] = (
         "\n".join(lines_spec) if len(lines_spec) > 2 else "\n".join(lines_spec + ["(нет специалистов)"])
     )
-
-    lines_rel: list[str] = ["# Связи услуга — специалист", ""]
-    for link in links:
-        if link.resource_id not in resource_ids:
-            continue
-        lines_rel.append(
-            f"- service_db_id={link.service_id} → specialist_db_id={link.resource_id} "
-            f"(override_duration_sec={link.duration_seconds})"
-        )
-    sections["input/04_relations.txt"] = (
-        "\n".join(lines_rel) if len(lines_rel) > 2 else "\n".join(lines_rel + ["(нет связей)"])
-    )
+    specialist_info_by_external_id = {
+        r.external_id: sanitize_rich_text(r.information)
+        for r in specialists
+        if r.external_id is not None and sanitize_rich_text(r.information)
+    }
 
     specialist_external_ids = {r.external_id for r in specialists}
     emp_stmt = select(SqnsEmployee).where(SqnsEmployee.agent_id == agent_id)
@@ -215,12 +208,61 @@ async def gather_sqns_graphrag_sections(
     employees = (await db.execute(emp_stmt.order_by(SqnsEmployee.full_name))).scalars().all()
     lines_emp: list[str] = ["# Сотрудники (sqns_employees)", ""]
     for e in employees:
+        employee_info = specialist_info_by_external_id.get(e.external_id, "")
         lines_emp.append(
-            f"## {sanitize_rich_text(e.full_name)} (external_id={e.external_id})\n"
+            f"## {sanitize_rich_text(e.full_name)}\n"
             f"Должность: {sanitize_rich_text(e.position) or '—'}\n"
+            f"Информация: {employee_info or '—'}\n"
         )
     sections["input/05_employees_crm.txt"] = (
         "\n".join(lines_emp) if len(lines_emp) > 2 else "\n".join(lines_emp + ["(нет записей)"])
+    )
+
+    service_by_id = {s.id: s for s in services}
+    specialist_by_id = {r.id: r for r in specialists}
+    employee_name_by_external_id = {
+        e.external_id: sanitize_rich_text(e.full_name)
+        for e in employees
+        if e.external_id is not None and sanitize_rich_text(e.full_name)
+    }
+
+    lines_rel: list[str] = [
+        "# Связи доменных сущностей",
+        "",
+        "## Услуга -> Специалист/Сотрудник",
+        "",
+    ]
+    for link in links:
+        if link.resource_id not in resource_ids:
+            continue
+        svc = service_by_id.get(link.service_id)
+        spec = specialist_by_id.get(link.resource_id)
+        if svc is None or spec is None:
+            continue
+        service_name = sanitize_rich_text(svc.name) or f"service:{svc.external_id}"
+        specialist_name = employee_name_by_external_id.get(spec.external_id) or sanitize_rich_text(spec.name)
+        specialist_name = specialist_name or f"specialist:{spec.external_id}"
+        duration_part = (
+            f"; override_duration_sec={link.duration_seconds}"
+            if link.duration_seconds is not None
+            else ""
+        )
+        lines_rel.append(
+            f"- Услуга '{service_name}' связана со специалистом '{specialist_name}'{duration_part}"
+        )
+
+    lines_rel.extend(["", "## Услуга -> Категория", ""])
+    for svc in services:
+        service_name = sanitize_rich_text(svc.name)
+        category_name = sanitize_rich_text(svc.category)
+        if not service_name or not category_name:
+            continue
+        lines_rel.append(
+            f"- Услуга '{service_name}' относится к категории '{category_name}'"
+        )
+
+    sections["input/04_relations.txt"] = (
+        "\n".join(lines_rel) if len(lines_rel) > 5 else "\n".join(lines_rel + ["(нет связей)"])
     )
 
     flow_stmt = (
@@ -238,7 +280,7 @@ async def gather_sqns_graphrag_sections(
             flow_definition=flow.flow_definition or {},
             profile_lookup=profile_lookup,
         )
-        lines_sf.append(f"## {sanitize_rich_text(flow.name)} (id={flow.id})\n\n{compiled}\n")
+        lines_sf.append(f"## {sanitize_rich_text(flow.name)}\n\n{compiled}\n")
     sections["input/06_script_flows.txt"] = (
         "\n".join(lines_sf) if len(lines_sf) > 2 else "\n".join(lines_sf + ["(нет опубликованных сценариев)"])
     )
@@ -256,7 +298,7 @@ async def gather_sqns_graphrag_sections(
     lines_kn: list[str] = ["# Файлы базы знаний", ""]
     for f in kfiles:
         body = sanitize_rich_text(f.content)[:120_000]
-        lines_kn.append(f"## {sanitize_rich_text(f.title)} (id={f.id})\n{body}\n")
+        lines_kn.append(f"## {sanitize_rich_text(f.title)}\n{body}\n")
     sections["input/07_knowledge_files.txt"] = (
         "\n".join(lines_kn) if len(lines_kn) > 2 else "\n".join(lines_kn + ["(нет файлов)"])
     )
@@ -274,7 +316,8 @@ async def gather_sqns_graphrag_sections(
     dirs = (await db.execute(d_stmt)).scalars().all()
     lines_dir: list[str] = ["# Справочники", ""]
     for d in dirs:
-        lines_dir.append(f"## {sanitize_rich_text(d.name)} (slug={d.slug}, template={d.template})\n")
+        lines_dir.append(f"## {sanitize_rich_text(d.name)}\n")
+        lines_dir.append(f"Тип шаблона: {sanitize_rich_text(d.template)}")
         for item in d.items[:5000]:
             try:
                 lines_dir.append(json.dumps(item.data, ensure_ascii=False)[:8000])

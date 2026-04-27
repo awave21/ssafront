@@ -120,6 +120,21 @@ export const useLayoutState = () => {
     () => null,
   )
 
+  // Knowledge graph page actions (sidebar header buttons)
+  const knowledgeGraphRebuildAction = useState<(() => void) | null>('knowledge-graph-rebuild-action', () => null)
+  const knowledgeGraphRefreshAction = useState<(() => void) | null>('knowledge-graph-refresh-action', () => null)
+  const knowledgeGraphRebuildBusy = useState<boolean>('knowledge-graph-rebuild-busy', () => false)
+  const knowledgeGraphRefreshBusy = useState<boolean>('knowledge-graph-refresh-busy', () => false)
+  const knowledgeGraphRebuildLabel = useState<string>('knowledge-graph-rebuild-label', () => 'Пересобрать граф')
+
+  const resetKnowledgeGraphHeaderState = () => {
+    knowledgeGraphRebuildAction.value = null
+    knowledgeGraphRefreshAction.value = null
+    knowledgeGraphRebuildBusy.value = false
+    knowledgeGraphRefreshBusy.value = false
+    knowledgeGraphRebuildLabel.value = 'Пересобрать граф'
+  }
+
   const toggleSidebar = () => {
     isCollapsed.value = !isCollapsed.value
     if (import.meta.client) {
@@ -166,5 +181,11 @@ export const useLayoutState = () => {
     scriptFlowSandboxOpen,
     scriptFlowCoverageOpen,
     scriptFlowToolbarPayload,
+    knowledgeGraphRebuildAction,
+    knowledgeGraphRefreshAction,
+    knowledgeGraphRebuildBusy,
+    knowledgeGraphRefreshBusy,
+    knowledgeGraphRebuildLabel,
+    resetKnowledgeGraphHeaderState,
   }
 }

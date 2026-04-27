@@ -2,7 +2,7 @@
   <div class="fixed bottom-6 right-20 z-40">
     <div
       v-if="open"
-      class="mb-3 relative w-[min(24rem,calc(100vw-1.5rem))] h-[30rem] overflow-hidden rounded-2xl p-[1px] bg-gradient-to-br from-indigo-500/40 via-sky-500/30 to-fuchsia-500/40 shadow-2xl"
+      class="absolute bottom-16 right-0 mb-3 h-[30rem] w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-500/40 via-sky-500/30 to-fuchsia-500/40 p-[1px] shadow-2xl"
     >
       <div class="relative flex h-full flex-col rounded-2xl border border-white/10 bg-slate-950/95 backdrop-blur-xl overflow-hidden">
         <div class="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_20%_20%,rgba(99,102,241,0.18),transparent_50%),radial-gradient(circle_at_80%_70%,rgba(236,72,153,0.12),transparent_45%)]" />

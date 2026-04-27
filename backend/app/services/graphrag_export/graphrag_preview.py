@@ -148,7 +148,7 @@ def load_graphrag_preview_from_workspace(ws: Path) -> dict[str, Any]:
             name_val = _cell_str(row, name_c) if name_c and name_c != title_c else ""
             # Один ключ для узла в API/UI — тот же namespace, что у рёбер в relationships.parquet.
             rid = hr_val or id_val or str(uuid.uuid4())
-            label = (title_val or name_val or hr_val or rid)[:500]
+            label = (name_val or title_val or hr_val or rid)[:500]
             ntype = str(row[type_c]) if type_c and type_c in row.index and row[type_c] is not None else "entity"
             desc = ""
             if desc_c and desc_c in row.index and row[desc_c] is not None:
