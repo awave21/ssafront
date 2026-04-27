@@ -138,7 +138,7 @@
               <DropdownMenuContent align="end" class="w-72 p-1.5">
                 <DropdownMenuItem
                   class="cursor-pointer flex items-start gap-3 rounded-md px-3 py-2.5"
-                  @click="isTemplatePickerOpen = true"
+                  @click="openTemplatePickerFromMenu"
                 >
                   <Sparkles class="mt-0.5 size-4 shrink-0" />
                   <div class="space-y-0.5">
@@ -394,7 +394,7 @@
     <Sheet
       :open="isTemplatePickerOpen"
       :modal="false"
-      @update:open="isTemplatePickerOpen = $event"
+      @update:open="onTemplatePickerOpenChange"
     >
       <SheetContent
         side="right"
@@ -1106,9 +1106,33 @@ const isTemplatePickerOpen = ref(false)
 const isStatusSheetOpen = ref(false)
 const isCanvasGuideOpen = ref(false)
 const pendingTemplateId = ref<string | null>(null)
+const templatePickerOpenedAtMs = ref<number | null>(null)
 const pendingTemplate = computed(() =>
   SCRIPT_FLOW_TEMPLATE_LIST.find(t => t.id === pendingTemplateId.value) ?? null,
 )
+
+/**
+ * Открываем Sheet с шаблонами на следующий кадр, чтобы избежать конфликта
+ * с событием закрытия DropdownMenu (иначе шит может сразу схлопнуться).
+ */
+const openTemplatePickerFromMenu = () => {
+  requestAnimationFrame(() => {
+    templatePickerOpenedAtMs.value = Date.now()
+    isTemplatePickerOpen.value = true
+  })
+}
+
+const onTemplatePickerOpenChange = (next: boolean) => {
+  if (!next && templatePickerOpenedAtMs.value !== null) {
+    const elapsed = Date.now() - templatePickerOpenedAtMs.value
+    // Dropdown и Sheet делят один цикл interaction outside — игнорируем "мгновенный" close.
+    if (elapsed < 300)
+      return
+  }
+  isTemplatePickerOpen.value = next
+  if (!next)
+    templatePickerOpenedAtMs.value = null
+}
 
 // ── Инспектор: открывается как боковой Sheet при выборе узла ─────────────────
 const inspectorNodeId = ref<string | null>(null)

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import event
 from sqlalchemy.exc import OperationalError, DisconnectionError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.util import await_only
 
 from app.core.config import get_settings
 from app.utils.debug_logging import emit_debug_log
@@ -22,6 +24,19 @@ def create_engine() -> tuple[async_sessionmaker[AsyncSession], str]:
         echo=False,  # Логирование SQL (можно включить для отладки)
         future=True,  # Использовать новый API SQLAlchemy 2.0
     )
+
+    # asyncpg + SQLAlchemy: `connect` event получает `AsyncAdapt_asyncpg_connection`, а не raw asyncpg conn.
+    # В новых версиях pgvector `register_vector` — coroutine; из sync-хука его нужно await'ить через `await_only`.
+    @event.listens_for(engine.sync_engine, "connect")
+    def _register_pgvector(dbapi_connection, _connection_record) -> None:  # type: ignore[no-untyped-def]
+        try:
+            from pgvector.asyncpg import register_vector
+
+            await_only(register_vector(dbapi_connection.driver_connection))
+        except Exception:
+            # Не валим старт приложения: без pgvector индексы embeddings просто не заработают.
+            return
+
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     # region agent log
     emit_debug_log(

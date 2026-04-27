@@ -63,6 +63,8 @@ from app.db.models.script_node import ScriptNode
 from app.db.models.scenario_delayed_message import ScenarioDelayedMessage
 from app.db.models.session_script_context import SessionScriptContext
 from app.db.models.agent_kg_entity import AgentKgEntity
+from app.db.models.agent_unified_graph_node import AgentUnifiedGraphNode
+from app.db.models.agent_unified_graph_relation import AgentUnifiedGraphRelation
 
 __all__ = [
     "Agent",
@@ -133,4 +135,6 @@ __all__ = [
     "ScenarioDelayedMessage",
     "SessionScriptContext",
     "AgentKgEntity",
+    "AgentUnifiedGraphNode",
+    "AgentUnifiedGraphRelation",
 ]

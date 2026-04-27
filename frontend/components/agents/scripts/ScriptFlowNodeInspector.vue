@@ -90,148 +90,6 @@
           </div>
         </div>
 
-        <div class="mx-4 mt-4 rounded-xl border border-border bg-background px-4 py-4 shadow-sm">
-          <p class="text-[11px] font-semibold text-foreground">Быстрый переход к следующему шагу</p>
-          <p class="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-            Если уже понятно, что должно идти дальше, выберите следующий шаг здесь. Это самый простой способ собрать карту разговора.
-          </p>
-          <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <select v-model="selectedStepToConnect" class="insp-input sm:flex-1">
-              <option value="">Выберите следующий шаг…</option>
-              <option v-for="opt in availableScenarioStepOptions" :key="opt.id" :value="opt.id">
-                {{ opt.title }}
-              </option>
-            </select>
-            <button
-              type="button"
-              class="rounded-md border border-border px-3 py-2 text-[11px] font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-              :disabled="!selectedStepToConnect"
-              @click="connectSelectedStep"
-            >
-              Добавить переход
-            </button>
-          </div>
-        </div>
-
-        <div class="mx-4 mt-4 rounded-xl border border-border bg-background px-4 py-4 shadow-sm">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <p class="text-[11px] font-semibold text-foreground">Связи этого шага на карте разговора</p>
-              <p class="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-                Здесь можно быстро понять, что обычно происходит до этого шага и что идёт после него.
-                Так проще собирать сценарий как живой разговор, а не как техническую схему.
-              </p>
-            </div>
-            <span
-              class="shrink-0 rounded-full border border-border px-2 py-0.5 text-[9px] font-medium text-muted-foreground"
-            >
-              {{ incomingConnections.length + outgoingConnections.length }} переходов
-            </span>
-          </div>
-
-          <div v-if="hasScenarioConnections" class="mt-3 grid gap-3 xl:grid-cols-2">
-            <div class="space-y-2">
-              <p class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Что обычно приводит к этому шагу
-              </p>
-              <div v-if="incomingConnections.length" class="space-y-1.5">
-                <div
-                  v-for="conn in incomingConnections"
-                  :key="`in-${conn.edgeId}`"
-                  class="rounded-md border border-border bg-background px-2.5 py-2"
-                >
-                  <div class="flex items-start justify-between gap-3">
-                    <div class="min-w-0">
-                      <p class="text-[11px] font-medium text-foreground">{{ conn.title }}</p>
-                      <p class="mt-0.5 text-[10px] text-muted-foreground">{{ conn.relationLabel }}</p>
-                    </div>
-                    <div class="shrink-0 flex flex-col items-end gap-1">
-                      <button
-                        type="button"
-                        class="rounded-md border border-border px-2 py-1 text-[10px] hover:bg-muted"
-                        @click="$emit('openNode', conn.nodeId)"
-                      >
-                        Перейти к шагу
-                      </button>
-                      <div class="flex items-center gap-2 text-[10px]">
-                        <button
-                          type="button"
-                          class="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                          @click="$emit('focusNode', conn.nodeId)"
-                        >
-                          На схеме
-                        </button>
-                        <button
-                          type="button"
-                          class="text-destructive underline-offset-2 hover:underline"
-                          @click="$emit('removeConnection', conn.edgeId)"
-                        >
-                          Убрать переход
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <p v-else class="text-[10px] leading-relaxed text-muted-foreground">
-                Пока не задано, из каких шагов обычно приходят сюда.
-              </p>
-            </div>
-
-            <div class="space-y-2">
-              <p class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Что происходит дальше
-              </p>
-              <div v-if="outgoingConnections.length" class="space-y-1.5">
-                <div
-                  v-for="conn in outgoingConnections"
-                  :key="`out-${conn.edgeId}`"
-                  class="rounded-md border border-border bg-background px-2.5 py-2"
-                >
-                  <div class="flex items-start justify-between gap-3">
-                    <div class="min-w-0">
-                      <p class="text-[11px] font-medium text-foreground">{{ conn.title }}</p>
-                      <p class="mt-0.5 text-[10px] text-muted-foreground">{{ conn.relationLabel }}</p>
-                    </div>
-                    <div class="shrink-0 flex flex-col items-end gap-1">
-                      <button
-                        type="button"
-                        class="rounded-md border border-border px-2 py-1 text-[10px] hover:bg-muted"
-                        @click="$emit('openNode', conn.nodeId)"
-                      >
-                        Перейти к шагу
-                      </button>
-                      <div class="flex items-center gap-2 text-[10px]">
-                        <button
-                          type="button"
-                          class="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                          @click="$emit('focusNode', conn.nodeId)"
-                        >
-                          На схеме
-                        </button>
-                        <button
-                          type="button"
-                          class="text-destructive underline-offset-2 hover:underline"
-                          @click="$emit('removeConnection', conn.edgeId)"
-                        >
-                          Убрать переход
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <p v-else class="text-[10px] leading-relaxed text-muted-foreground">
-                Пока не задано, что должно происходить после этого шага.
-              </p>
-            </div>
-          </div>
-
-          <p v-else class="mt-3 text-[10px] leading-relaxed text-muted-foreground">
-            Этот шаг пока не встроен в общий ход разговора.
-          </p>
-        </div>
-
         <component :is="activePanel" v-bind="panelExtraProps" />
       </div>
     </template>
@@ -239,7 +97,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, provide, ref, toRef, watch, type Component, type Ref } from 'vue'
+import { computed, inject, provide, ref, toRef, type Component, type Ref } from 'vue'
 import {
   SCRIPT_FLOW_INSPECTOR_KEY,
   useScriptFlowInspectorModel,
@@ -255,10 +113,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   clear: []
-  openNode: [id: string]
-  focusNode: [id: string]
-  removeConnection: [edgeId: string]
-  addConnection: [targetNodeId: string]
 }>()
 
 const nodeIdRef = toRef(props, 'nodeId')
@@ -278,25 +132,7 @@ const {
   localObjectionIds,
   localConstraintIds,
   localOutcomeId,
-  incomingConnections,
-  outgoingConnections,
-  hasScenarioConnections,
-  availableScenarioStepOptions,
 } = model
-
-const selectedStepToConnect = ref('')
-
-watch(() => props.nodeId, () => {
-  selectedStepToConnect.value = ''
-})
-
-const connectSelectedStep = () => {
-  const targetId = selectedStepToConnect.value.trim()
-  if (!targetId)
-    return
-  emit('addConnection', targetId)
-  selectedStepToConnect.value = ''
-}
 
 const kgLinkTotal = computed(() =>
   localMotiveIds.value.length

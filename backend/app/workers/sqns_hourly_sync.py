@@ -14,6 +14,7 @@ from app.db.session import async_session_factory
 from app.services.sqns.client_factory import SqnsClientConfigurationError, build_sqns_client_for_agent
 from app.services.sqns.sync import sync_sqns_entities
 from app.services.sqns.sync_locks import sqns_agent_lock
+from app.services.graphrag_export.corpus_dispatch import maybe_auto_dispatch_graphrag_corpus
 
 logger = structlog.get_logger(__name__)
 
@@ -77,6 +78,8 @@ async def _sync_agent(agent_id: UUID) -> None:
                 agent.sqns_error = result.message[:2000]
                 agent.sqns_last_activity_at = datetime.utcnow()
             await db.commit()
+            if result.success:
+                await maybe_auto_dispatch_graphrag_corpus(agent.id, agent.tenant_id)
 
 
 async def run_hourly_sync_loop() -> None:

@@ -70,7 +70,9 @@ class ScriptFlowGraphRAGStore:
                         "top_types": dict(type_counter),
                         "key_points": summary_payload.key_points if summary_payload else [],
                         "recommended_next_step": (
-                            summary_payload.recommended_next_step if summary_payload else None
+                            (summary_payload.recommended_next_step or "")
+                            if summary_payload
+                            else ""
                         ),
                         "summary_source": "llm" if summary_payload else "fallback",
                     },
@@ -85,7 +87,7 @@ class ScriptFlowGraphRAGStore:
         for node in nodes:
             if node.node_kind == GraphNodeKind.community:
                 continue
-            node.community_key = community_map.get(node.graph_node_id)
+            node.community_key = community_map.get(node.graph_node_id) or ""
 
         return communities
 
@@ -111,7 +113,9 @@ class ScriptFlowGraphRAGStore:
                 or settings.pydanticai_default_model
             )
 
-            schema = StructuredCommunitySummary.model_json_schema()
+            from app.utils.openai_json_schema_strict import openai_strict_json_schema
+
+            schema = openai_strict_json_schema(StructuredCommunitySummary.model_json_schema())
             response = await client.chat.completions.create(
                 model=effective_model,
                 temperature=0,

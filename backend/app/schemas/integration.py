@@ -20,6 +20,10 @@ class ChatResponse(BaseModel):
     response: str
     session_id: str
     run_id: UUID
+    tool_names: list[str] = Field(
+        default_factory=list,
+        description="Имена инструментов, вызванных в этом прогоне (для проверки RAG / unified graph и др.).",
+    )
 
 
 class ChatMessage(BaseModel):

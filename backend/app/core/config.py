@@ -185,6 +185,48 @@ class Settings(BaseSettings):
     neo4j_username: str | None = Field(default=None, validation_alias="NEO4J_USERNAME")
     neo4j_password: str | None = Field(default=None, validation_alias="NEO4J_PASSWORD")
     neo4j_database: str | None = Field(default=None, validation_alias="NEO4J_DATABASE")
+
+    microsoft_graphrag_workspace_root: str | None = Field(
+        default=None,
+        validation_alias="MICROSOFT_GRAPHRAG_WORKSPACE_ROOT",
+        description="Корень каталогов workspace GraphRAG по tenant_id/agent (локальный graphrag index).",
+    )
+    microsoft_graphrag_index_webhook_url: str | None = Field(
+        default=None,
+        validation_alias="MICROSOFT_GRAPHRAG_INDEX_WEBHOOK_URL",
+        description="URL webhook для POST корпуса (.txt) вместо локального index.",
+    )
+    microsoft_graphrag_index_webhook_bearer: str | None = Field(
+        default=None,
+        validation_alias="MICROSOFT_GRAPHRAG_INDEX_WEBHOOK_BEARER",
+    )
+    microsoft_graphrag_webhook_timeout_seconds: float = Field(
+        default=600.0,
+        ge=30.0,
+        validation_alias="MICROSOFT_GRAPHRAG_WEBHOOK_TIMEOUT_SECONDS",
+    )
+    microsoft_graphrag_auto_dispatch_corpus: bool = Field(
+        default=False,
+        validation_alias="MICROSOFT_GRAPHRAG_AUTO_DISPATCH_CORPUS",
+        description="После синхронизации SQNS / индекса сценария автоматически отправлять корпус в GraphRAG.",
+    )
+    microsoft_graphrag_subprocess_timeout_seconds: float = Field(
+        default=7200.0,
+        ge=60.0,
+        validation_alias="MICROSOFT_GRAPHRAG_SUBPROCESS_TIMEOUT_SECONDS",
+        description="Таймаут для graphrag init/index в локальном режиме (секунды).",
+    )
+    microsoft_graphrag_cli: str | None = Field(
+        default=None,
+        validation_alias="MICROSOFT_GRAPHRAG_CLI",
+        description="Путь к graphrag, если нет в PATH.",
+    )
+    microsoft_graphrag_prompt_tune_language: str | None = Field(
+        default="Russian",
+        validation_alias="MICROSOFT_GRAPHRAG_PROMPT_LANGUAGE",
+        description="Аргумент --language для graphrag prompt-tune; пусто/off — не вызывать.",
+    )
+
     runtime_tool_calls_limit: int = Field(
         default=5,
         ge=1,

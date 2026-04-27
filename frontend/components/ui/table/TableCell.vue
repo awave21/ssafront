@@ -1,6 +1,6 @@
 <template>
   <td
-    :class="['px-2 py-2 text-sm text-slate-600 border-r border-slate-100 last:border-r-0 align-top text-left', className]"
+    :class="['px-2 py-2 text-sm text-slate-600 border-r border-slate-100 last:border-r-0 align-top text-left whitespace-nowrap', className]"
     v-bind="attrs"
   >
     <slot />

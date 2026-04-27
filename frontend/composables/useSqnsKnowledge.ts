@@ -80,9 +80,9 @@ export const useSqnsKnowledge = (agentId: string) => {
   }
 
   const updateSpecialistInfo = async (specialistId: string, information: string) => {
-    await updateSqnsSpecialist(agentId, specialistId, { information: information || null })
+    await updateSqnsSpecialist(agentId, specialistId, { information })
     const row = specialists.value.find((x) => x.id === specialistId)
-    if (row) row.information = information ? information : null
+    if (row) row.information = information.trim() ? information : null
   }
 
   const updateServiceDescription = async (serviceId: string, description: string) => {

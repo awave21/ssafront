@@ -162,6 +162,19 @@ export type WsDialogLeftEvent = {
   }
 }
 
+/** script_flow_index_updated — статус индексации потока сценария (воркер / publish). */
+export type WsScriptFlowIndexUpdatedEvent = {
+  type: 'script_flow_index_updated'
+  data: {
+    agent_id: string
+    flow_id: string
+    index_status: string
+    published_version: number
+    index_error?: string | null
+    index_progress?: number | null
+  }
+}
+
 export type WsIncomingMessage =
   | WsMessageCreatedEvent
   | WsMessageUpdatedEvent
@@ -174,6 +187,7 @@ export type WsIncomingMessage =
   | WsStatusEvent
   | WsDialogJoinedEvent
   | WsDialogLeftEvent
+  | WsScriptFlowIndexUpdatedEvent
 
 // ===========================================
 // Helper types for composable
@@ -190,6 +204,7 @@ export type WsEventHandlers = {
   onRunStart?: WsEventHandler<'run_start'>
   onRunResult?: WsEventHandler<'run_result'>
   onRunError?: WsEventHandler<'run_error'>
+  onScriptFlowIndexUpdated?: WsEventHandler<'script_flow_index_updated'>
   onError?: WsEventHandler<'error'>
   onStatusChange?: (state: WsConnectionState) => void
 }

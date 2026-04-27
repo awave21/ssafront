@@ -1,5 +1,5 @@
 <template>
-  <div class="w-full">
+  <div class="w-full space-y-4">
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:gap-5">
       <!-- Прямые вопросы -->
       <button

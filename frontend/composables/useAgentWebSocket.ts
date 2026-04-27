@@ -21,6 +21,14 @@ export const useAgentWebSocket = (
   options?: {
     autoConnect?: boolean
     reconnectConfig?: Partial<WsReconnectConfig>
+    onScriptFlowIndexUpdated?: (data: {
+      agent_id: string
+      flow_id: string
+      index_status: string
+      published_version: number
+      index_error?: string | null
+      index_progress?: number | null
+    }) => void
   }
 ) => {
   const dialogsStore = useDialogs()
@@ -251,6 +259,11 @@ export const useAgentWebSocket = (
         case 'dialog_joined':
         case 'dialog_left':
           break
+
+        case 'script_flow_index_updated': {
+          options?.onScriptFlowIndexUpdated?.(message.data)
+          break
+        }
 
         default: {
           console.warn('[WebSocket] Unknown message type:', (message as any).type)

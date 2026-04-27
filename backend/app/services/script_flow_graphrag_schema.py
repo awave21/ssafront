@@ -18,41 +18,54 @@ class GraphEntity(BaseModel):
     node_kind: GraphNodeKind
     entity_type: str
     title: str
-    description: str | None = None
-    source_node_ids: list[str] = Field(default_factory=list)
-    properties: dict[str, Any] = Field(default_factory=dict)
-    community_key: str | None = None
+    # OpenAI `strict` structured outputs require every `properties` key to appear in `required`.
+    # Represent "optional text" as empty string instead of JSON `null`.
+    description: str = ""
+    source_node_ids: list[str]
+    properties: dict[str, Any]
+    # Empty string means "unset" (OpenAI strict mode dislikes optional object keys without defaults).
+    community_key: str = ""
 
 
 class GraphRelation(BaseModel):
     source_graph_node_id: str
     target_graph_node_id: str
     relation_type: str
-    weight: float = 1.0
-    properties: dict[str, Any] = Field(default_factory=dict)
+    weight: float
+    properties: dict[str, Any]
 
 
 class GraphCommunity(BaseModel):
     community_key: str
     title: str
-    summary: str | None = None
-    node_ids: list[str] = Field(default_factory=list)
-    properties: dict[str, Any] = Field(default_factory=dict)
+    summary: str = ""
+    node_ids: list[str]
+    properties: dict[str, Any]
 
 
 class StructuredCommunitySummary(BaseModel):
     title: str
     summary: str
-    key_points: list[str] = Field(default_factory=list)
-    recommended_next_step: str | None = None
+    key_points: list[str]
+    recommended_next_step: str = ""
+
+
+class StructuredKeyValue(BaseModel):
+    """OpenAI `strict` mode rejects `dict[str, Any]` (it becomes `{}` + `additionalProperties: false`).
+
+    Represent arbitrary string metadata as a list of key/value rows instead.
+    """
+
+    key: str
+    value: str
 
 
 class StructuredExtractedEntity(BaseModel):
     entity_type: str
     title: str
-    description: str | None = None
-    properties: dict[str, Any] = Field(default_factory=dict)
-    confidence: float = 0.8
+    description: str = ""
+    extra: list[StructuredKeyValue]
+    confidence: float
 
 
 class StructuredExtractedRelation(BaseModel):
@@ -61,14 +74,14 @@ class StructuredExtractedRelation(BaseModel):
     )
     target_ref: str = Field(description="Entity title of the target")
     relation_type: str
-    weight: float = 1.0
-    properties: dict[str, Any] = Field(default_factory=dict)
+    weight: float
+    extra: list[StructuredKeyValue]
 
 
 class StructuredNodeExtractionResult(BaseModel):
-    entities: list[StructuredExtractedEntity] = Field(default_factory=list)
-    relations: list[StructuredExtractedRelation] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
+    entities: list[StructuredExtractedEntity]
+    relations: list[StructuredExtractedRelation]
+    notes: list[str]
 
 
 class ScriptFlowGraphPreview(BaseModel):

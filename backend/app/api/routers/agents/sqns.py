@@ -7,7 +7,7 @@ from typing import Any, Awaitable, Callable, TypeVar
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 from sqlalchemy import desc, func, nulls_last, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +38,7 @@ from app.services.sqns import SQNSClient, SQNSClientError, fetch_token_by_login
 from app.services.sqns.client_factory import SqnsClientConfigurationError, build_sqns_client_for_agent
 from app.services.sqns.sync import sync_sqns_entities
 from app.services.sqns.sync_locks import sqns_agent_lock
+from app.services.graphrag_export.corpus_dispatch import maybe_auto_dispatch_graphrag_corpus
 from app.schemas.analytics import AnalyticsRevenueBasis
 from app.services.analytics import (
     build_analytics_period,
@@ -805,17 +806,22 @@ async def sqns_update_specialist(
             detail="Specialist not found",
         )
 
-    if payload.active is None and payload.information is None:
+    # Различаем «поле не передали» и «передали null / пустую строку» (очистка текста).
+    update_data = payload.model_dump(exclude_unset=True)
+    if not update_data:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one field (active or information) must be provided",
         )
 
-    if payload.active is not None:
+    if "active" in update_data and payload.active is not None:
         specialist.active = payload.active
-    if payload.information is not None:
-        information = payload.information.strip()
-        specialist.information = information or None
+    if "information" in update_data:
+        if payload.information is None:
+            specialist.information = None
+        else:
+            information = str(payload.information).strip()
+            specialist.information = information or None
 
     await db.commit()
     await db.refresh(specialist)
@@ -1663,6 +1669,7 @@ async def sqns_client_cached_visits(
 @router.post("/{agent_id}/sqns/sync")
 async def sqns_sync_services(
     agent_id: UUID,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: AuthContext = Depends(require_scope("agents:write")),
 ):
@@ -1705,6 +1712,7 @@ async def sqns_sync_services(
         agent.sqns_error = None
         await db.commit()
         await db.refresh(agent)
+        background_tasks.add_task(maybe_auto_dispatch_graphrag_corpus, agent.id, user.tenant_id)
     else:
         agent.sqns_status = "error"
         agent.sqns_error = sync_result.message[:2000]

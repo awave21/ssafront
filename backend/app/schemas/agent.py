@@ -210,6 +210,27 @@ class AgentUpdate(BaseModel):
             "без перечисленного; инструкции и факты — в шаблоне промпта и в ответах тулов."
         ),
     )
+    microsoft_graphrag_enabled: bool | None = Field(
+        default=None,
+        description="Включить тул query_microsoft_graphrag (нужен MICROSOFT_GRAPHRAG_QUERY_BASE_URL).",
+    )
+    microsoft_graphrag_workspace_slug: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Подкаталог workspace на томе GraphRAG; если пусто — используется id агента.",
+    )
+    microsoft_graphrag_tool_description: str | None = Field(
+        default=None,
+        description="Переопределение описания тула query_microsoft_graphrag для LLM.",
+    )
+
+    @field_validator("microsoft_graphrag_workspace_slug", mode="before")
+    @classmethod
+    def _strip_workspace_slug(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
 
     @field_validator('timezone')
     @classmethod
@@ -267,6 +288,10 @@ class AgentRead(AgentBase):
     summary_prompt: str | None = None
     knowledge_tool_description: str | None = None
     runtime_bridges_mode: str = Field(default="manual")
+    microsoft_graphrag_enabled: bool = Field(default=False)
+    microsoft_graphrag_workspace_slug: str | None = None
+    microsoft_graphrag_tool_description: str | None = None
+    microsoft_graphrag_last_indexed_at: datetime | None = None
     total_cost_usd: Decimal = Field(default=Decimal("0"), description="Суммарные расходы агента в USD")
     total_cost_rub: Decimal = Field(default=Decimal("0"), description="Суммарные расходы агента в RUB")
 

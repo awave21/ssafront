@@ -82,6 +82,14 @@ class Agent(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     runtime_bridges_mode: Mapped[str] = mapped_column(
         String(20), default="manual", server_default="manual", nullable=False
     )
+    microsoft_graphrag_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    microsoft_graphrag_workspace_slug: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    microsoft_graphrag_tool_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    microsoft_graphrag_last_indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     bindings: Mapped[list["AgentToolBinding"]] = relationship(
         back_populates="agent",

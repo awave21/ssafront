@@ -161,7 +161,7 @@ class ScriptFlowGraphRAGExtractor:
                     properties={
                         "node_id": node_id,
                         "node_type": node_type,
-                        "stage": stage or None,
+                        "stage": stage or "",
                     },
                 ),
             )
@@ -188,6 +188,7 @@ class ScriptFlowGraphRAGExtractor:
                         source_graph_node_id=f"canvas:{node_id}",
                         target_graph_node_id=stage_id,
                         relation_type="occurs_at_stage",
+                        weight=1.0,
                         properties={"source": "node.stage"},
                     ),
                 )
@@ -204,6 +205,7 @@ class ScriptFlowGraphRAGExtractor:
                         entity_type="variable",
                         title=var_name.replace("_", " "),
                         description=f"Динамическая переменная ({source_type})",
+                        source_node_ids=[node_id],
                         properties={"name": var_name, "source_type": source_type},
                     ),
                 )
@@ -215,6 +217,7 @@ class ScriptFlowGraphRAGExtractor:
                             source_graph_node_id=f"canvas:{node_id}",
                             target_graph_node_id=var_id,
                             relation_type="uses_variable",
+                            weight=1.0,
                             properties={"source": "flow_metadata.variables"},
                         ),
                     )
@@ -255,6 +258,7 @@ class ScriptFlowGraphRAGExtractor:
                             source_graph_node_id=f"canvas:{node_id}",
                             target_graph_node_id=graph_node_id,
                             relation_type=relation_type,
+                            weight=1.0,
                             properties={"source": field},
                         ),
                     )
@@ -308,6 +312,7 @@ class ScriptFlowGraphRAGExtractor:
                                 source_graph_node_id=f"canvas:{node_id}",
                                 target_graph_node_id=graph_node_id,
                                 relation_type=relation_type,
+                                weight=1.0,
                                 properties={"source": "keyword_heuristic", "keyword": keyword},
                             ),
                         )
@@ -329,7 +334,7 @@ class ScriptFlowGraphRAGExtractor:
                             description=item.description,
                             source_node_ids=[node_id],
                             properties={
-                                **(item.properties or {}),
+                                **{row.key: row.value for row in item.extra},
                                 "confidence": item.confidence,
                                 "source": "llm_structured_extraction",
                             },
@@ -351,7 +356,10 @@ class ScriptFlowGraphRAGExtractor:
                             target_graph_node_id=target_graph_node_id,
                             relation_type=rel.relation_type,
                             weight=rel.weight,
-                            properties={**(rel.properties or {}), "source": "llm_structured_extraction"},
+                            properties={
+                                **{row.key: row.value for row in rel.extra},
+                                "source": "llm_structured_extraction",
+                            },
                         ),
                     )
 
@@ -374,7 +382,8 @@ class ScriptFlowGraphRAGExtractor:
                     source_graph_node_id=f"canvas:{source}",
                     target_graph_node_id=f"canvas:{target}",
                     relation_type="next_step_to",
-                    properties={"branch_label": branch_label or None, "source_handle": source_handle or None},
+                    weight=1.0,
+                    properties={"branch_label": branch_label or "", "source_handle": source_handle or ""},
                 ),
             )
 
@@ -422,7 +431,8 @@ class ScriptFlowGraphRAGExtractor:
             "references_specialist, references_service, supported_by_proof, blocked_by_constraint, "
             "leads_to_outcome, relevant_for_persona, motivated_by, occurs_at_stage, next_step_to, relates_to. "
             "source_ref='canvas' означает связь от текущего узла канваса. target_ref и source_ref для других "
-            "сущностей должны совпадать с title сущности в entities."
+            "сущностей должны совпадать с title сущности в entities. "
+            "Произвольные атрибуты клади в `extra` как список пар {key,value} (строки)."
         )
         user_prompt = (
             f"node_id: {node_id}\n"
@@ -434,7 +444,9 @@ class ScriptFlowGraphRAGExtractor:
             "Верни только значимые для GraphRAG сущности и связи. Если сущностей нет — верни пустые списки."
         )
 
-        schema = StructuredNodeExtractionResult.model_json_schema()
+        from app.utils.openai_json_schema_strict import openai_strict_json_schema
+
+        schema = openai_strict_json_schema(StructuredNodeExtractionResult.model_json_schema())
         response_format = {
             "type": "json_schema",
             "json_schema": {

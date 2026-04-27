@@ -630,8 +630,16 @@ async def execute_post_actions(
             if action.action_type == "send_message":
                 template = str(cfg.get("message", "")).strip()
                 rendered_message = _render_template(template, output_context)
-                output_context.setdefault("messages_to_send", []).append(rendered_message)
-                results.append(ActionResult(action.id, action.action_type, "success", {"message": rendered_message}))
+                if str(rendered_message).strip():
+                    output_context.setdefault("messages_to_send", []).append(str(rendered_message).strip())
+                results.append(
+                    ActionResult(
+                        action.id,
+                        action.action_type,
+                        "success",
+                        {"message": rendered_message},
+                    )
+                )
                 continue
 
             if action.action_type == "augment_prompt":

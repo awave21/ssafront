@@ -1335,9 +1335,9 @@ const handleSaveSpecialistInformation = async () => {
 
   try {
     await updateSqnsSpecialist(props.agentId, specialist.id, {
-      information: infoValue || null
+      information: infoValue,
     })
-    specialist.information = infoValue || null
+    specialist.information = infoValue ? infoValue : null
     toastSuccess('Информация обновлена', `Для сотрудника "${specialist.name}" сохранено описание`)
     closeSpecialistInformationSheet()
   } catch (err: any) {

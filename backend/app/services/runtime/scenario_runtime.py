@@ -177,8 +177,17 @@ async def apply_dialog_scenario_phases_before_llm(
     if prompt_assembly.system_prompt_override:
         out_override = prompt_assembly.system_prompt_override
 
-    if merged_scenario_ctx.get("messages_to_send"):
-        first_reply = str(merged_scenario_ctx["messages_to_send"][0]).strip()
+    # Непустой список с пустыми строками (например шаблон send_message дал "")
+    # не должен обрывать цепочку: иначе ответ клиенту будет пустым без вызова LLM.
+    msgs = merged_scenario_ctx.get("messages_to_send")
+    first_reply = ""
+    if isinstance(msgs, list):
+        for item in msgs:
+            text = str(item).strip()
+            if text:
+                first_reply = text
+                break
+    if first_reply:
         short_circuit_result = AgentRunResult(output=first_reply)
         scenario_short_circuit = True
     else:

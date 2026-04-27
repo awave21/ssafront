@@ -12,12 +12,14 @@
       maxWidth: '296px',
     }"
   >
-    <Handle
-      type="target"
-      :position="Position.Left"
-      id="target"
-      class="!w-2.5 !h-2.5 !border-2 !border-background"
-      :style="{ backgroundColor: accent }"
+    <FlowN8nConnector
+      :node-id="id"
+      handle-type="target"
+      handle-id="target"
+      :connect-position="Position.Left"
+      :accent="accent"
+      :highlight-line="isSelected"
+      side="left"
     />
 
     <div
@@ -73,19 +75,22 @@
       </span>
     </div>
 
-    <Handle
-      type="source"
-      :position="Position.Right"
-      id="source"
-      class="!w-2.5 !h-2.5 !border-2 !border-background"
-      :style="{ backgroundColor: accent }"
+    <FlowN8nConnector
+      :node-id="id"
+      handle-type="source"
+      handle-id="source"
+      :connect-position="Position.Right"
+      :accent="accent"
+      :highlight-line="isSelected"
+      side="right"
     />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, ref, type Ref } from 'vue'
-import { Handle, Position } from '@vue-flow/core'
+import { Position } from '@vue-flow/core'
+import FlowN8nConnector from './FlowN8nConnector.vue'
 import type { ScriptNodeData, NodeType, ConversationStage, ScriptFlowToolUsageNode } from '~/types/scriptFlow'
 import { NODE_TYPE_COLORS, CONVERSATION_STAGES } from '~/types/scriptFlow'
 import KgReadinessBadge from './KgReadinessBadge.vue'
@@ -116,7 +121,12 @@ const props = defineProps<{
 }>()
 
 const inspectorNodeId = inject<Ref<string | null>>('inspectorNodeId', ref(null))
-const isSelected = computed(() => props.selected || inspectorNodeId.value === props.id)
+const flowCanvasSelectedId = inject<Ref<string | null>>('flowCanvasSelectedId', ref(null))
+const isSelected = computed(() =>
+  props.selected
+  || inspectorNodeId.value === props.id
+  || flowCanvasSelectedId.value === props.id,
+)
 
 const nodeType = computed(() => (props.data.node_type as NodeType) || 'expertise')
 const accent = computed(() => NODE_TYPE_COLORS[nodeType.value] || '#10b981')

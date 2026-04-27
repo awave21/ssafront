@@ -174,7 +174,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, toRaw, watch, watchEffect } from 'vue'
 import { navigateTo, useRoute } from '#app'
-import { useEventListener } from '@vueuse/core'
+import { useEventListener, useIntervalFn } from '@vueuse/core'
 import AgentPageShell from '~/components/agents/AgentPageShell.vue'
 import ScriptFlowEditor from '~/components/agents/scripts/ScriptFlowEditor.vue'
 import TacticLibraryView from '~/components/agents/scripts/TacticLibraryView.vue'
@@ -190,6 +190,7 @@ import {
   DialogTitle,
 } from '~/components/ui/dialog'
 import { useScriptFlows } from '~/composables/useScriptFlows'
+import { useAgentWebSocket } from '~/composables/useAgentWebSocket'
 import { useScriptFlowCoverageInline } from '~/composables/useScriptFlowCoverageInline'
 import { useSqnsKnowledge } from '~/composables/useSqnsKnowledge'
 import { useAgentKgEntities } from '~/composables/useAgentKgEntities'
@@ -339,7 +340,20 @@ const loadError = ref<string | null>(null)
 const saveError = ref<string | null>(null)
 const saving = ref(false)
 const editorRevision = ref(0)
-const viewMode = ref<'schema' | 'list'>('list')
+
+const viewModeFromQuery = (q: unknown): 'schema' | 'list' => {
+  const s = Array.isArray(q) ? q[0] : q
+  return s === 'list' ? 'list' : 'schema'
+}
+/** Канвас по умолчанию; с карточки списка — `?view=schema`; глубокая ссылка `?view=list` — список узлов. */
+const viewMode = ref<'schema' | 'list'>(viewModeFromQuery(route.query.view))
+
+watch(
+  () => route.query.view,
+  v => {
+    viewMode.value = viewModeFromQuery(v)
+  },
+)
 
 const publishing = ref(false)
 const retrying = ref(false)
@@ -682,6 +696,44 @@ const loadFlow = async (opts: { keepCanvas?: boolean } = {}) => {
   }
 }
 
+const currentFlowId = computed(() => route.params.flowId as string)
+
+const flowIndexInProgress = computed(() =>
+  flow.value?.index_status === 'pending' || flow.value?.index_status === 'indexing',
+)
+
+const { isConnected } = useAgentWebSocket(computed(() => agentId), {
+  onScriptFlowIndexUpdated: (data) => {
+    if (data.agent_id !== agentId) return
+    if (data.flow_id !== currentFlowId.value) return
+    void loadFlow({ keepCanvas: true })
+  },
+})
+
+watch(isConnected, (connected, was) => {
+  if (connected && was === false && flowIndexInProgress.value)
+    void loadFlow({ keepCanvas: true })
+})
+
+const { pause: pauseIndexPoll, resume: resumeIndexPoll } = useIntervalFn(
+  () => {
+    void loadFlow({ keepCanvas: true })
+  },
+  10_000,
+  { immediate: false },
+)
+
+watch(
+  flowIndexInProgress,
+  (busy) => {
+    if (busy)
+      resumeIndexPoll()
+    else
+      pauseIndexPoll()
+  },
+  { immediate: true },
+)
+
 const persistFlowOnce = async () => {
   const fid = route.params.flowId as string
   if (!flow.value) return
@@ -943,6 +995,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  pauseIndexPoll()
   scriptFlowToolbarPayload.value = null
   scriptFlowActionsVisible.value = false
   breadcrumbBackPath.value = null

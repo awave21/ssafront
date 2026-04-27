@@ -8,13 +8,15 @@
     ]"
     :style="{ minWidth: '224px', maxWidth: '312px' }"
   >
-    <Handle
+    <FlowN8nConnector
       v-if="!standalone"
-      type="target"
-      :position="Position.Left"
-      id="target"
-      class="!w-2.5 !h-2.5 !border-2 !border-background"
-      style="background: #0ea5e9"
+      :node-id="id"
+      handle-type="target"
+      handle-id="target"
+      :connect-position="Position.Left"
+      accent="#0ea5e9"
+      :highlight-line="isSelected"
+      side="left"
     />
 
     <div class="flex items-center gap-2 rounded-t-[24px] border-b border-white/60 bg-[linear-gradient(180deg,rgba(14,165,233,0.16),rgba(14,165,233,0.08))] px-3.5 py-2.5">
@@ -38,20 +40,23 @@
       <p v-else class="text-[10px] italic text-muted-foreground">Выберите сотрудника или услугу справа</p>
     </div>
 
-    <Handle
+    <FlowN8nConnector
       v-if="!standalone"
-      type="source"
-      :position="Position.Right"
-      id="source"
-      class="!w-2.5 !h-2.5 !border-2 !border-background"
-      style="background: #0ea5e9"
+      :node-id="id"
+      handle-type="source"
+      handle-id="source"
+      :connect-position="Position.Right"
+      accent="#0ea5e9"
+      :highlight-line="isSelected"
+      side="right"
     />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, ref, type Ref } from 'vue'
-import { Handle, Position } from '@vue-flow/core'
+import { Position } from '@vue-flow/core'
+import FlowN8nConnector from './FlowN8nConnector.vue'
 import type { ScriptNodeData, ScriptFlowToolUsageNode } from '~/types/scriptFlow'
 import { isStandaloneCatalogRule } from '~/utils/scriptFlowNodeRole'
 import KgReadinessBadge from './KgReadinessBadge.vue'
@@ -76,7 +81,12 @@ const serviceById = inject<Ref<Record<string, { description?: string | null }>> 
 )
 
 const inspectorNodeId = inject<Ref<string | null>>('inspectorNodeId', ref(null))
-const isSelected = computed(() => props.selected || inspectorNodeId.value === props.id)
+const flowCanvasSelectedId = inject<Ref<string | null>>('flowCanvasSelectedId', ref(null))
+const isSelected = computed(() =>
+  props.selected
+  || inspectorNodeId.value === props.id
+  || flowCanvasSelectedId.value === props.id,
+)
 
 const standalone = computed(() => isStandaloneCatalogRule(props.data))
 

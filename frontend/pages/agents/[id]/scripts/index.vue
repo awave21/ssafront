@@ -174,14 +174,24 @@
                 Открыть
               </button>
               <button
+                v-if="!isFlowIndexing(flow) && publishingId !== flow.id"
                 type="button"
                 class="inline-flex h-8 items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
-                :disabled="publishingId === flow.id"
-                title="Опубликовать → индексация в LightRAG"
+                title="Опубликовать поток и поставить индексацию в очередь"
                 @click="handlePublish(flow)"
               >
                 <UploadCloud class="h-3.5 w-3.5" />
-                {{ publishingId === flow.id ? '…' : 'Опубликовать' }}
+                Опубликовать
+              </button>
+              <button
+                v-else-if="publishingId === flow.id"
+                type="button"
+                disabled
+                class="inline-flex h-8 items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-xs font-medium text-emerald-700 opacity-50"
+                title="Публикация…"
+              >
+                <UploadCloud class="h-3.5 w-3.5" />
+                …
               </button>
               <button
                 type="button"
@@ -200,7 +210,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { navigateTo, useRoute } from '#app'
 import {
   AlertTriangle,
@@ -214,7 +224,9 @@ import {
   UploadCloud,
   Workflow,
 } from 'lucide-vue-next'
+import { useIntervalFn } from '@vueuse/core'
 import AgentPageShell from '~/components/agents/AgentPageShell.vue'
+import { useAgentWebSocket } from '~/composables/useAgentWebSocket'
 import { useScriptFlows } from '~/composables/useScriptFlows'
 import { useToast } from '~/composables/useToast'
 import type { ScriptFlow, ScriptFlowIndexStatus } from '~/types/scriptFlow'
@@ -244,6 +256,49 @@ const searchQuery = ref('')
 const publishedCount = computed(() =>
   flows.value.filter((f) => f.flow_status === 'published').length,
 )
+
+const isFlowIndexing = (flow: ScriptFlow) =>
+  flow.index_status === 'pending' || flow.index_status === 'indexing'
+
+const hasAnyFlowIndexing = computed(() =>
+  flows.value.some((f) => f.index_status === 'pending' || f.index_status === 'indexing'),
+)
+
+const { isConnected } = useAgentWebSocket(computed(() => agentId), {
+  onScriptFlowIndexUpdated: (data) => {
+    if (data.agent_id !== agentId) return
+    void fetchFlows()
+  },
+})
+
+watch(isConnected, (connected, was) => {
+  if (connected && was === false && hasAnyFlowIndexing.value)
+    void fetchFlows()
+})
+
+/** Пока воркер крутит индексацию, периодически подтягиваем список — WS может быть недоступен за прокси. */
+const { pause: pauseIndexPoll, resume: resumeIndexPoll } = useIntervalFn(
+  () => {
+    void fetchFlows()
+  },
+  10_000,
+  { immediate: false },
+)
+
+watch(
+  hasAnyFlowIndexing,
+  (busy) => {
+    if (busy)
+      resumeIndexPoll()
+    else
+      pauseIndexPoll()
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  pauseIndexPoll()
+})
 
 const filteredFlows = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
@@ -317,7 +372,7 @@ const indexBadge = (status: ScriptFlowIndexStatus) => {
 }
 
 const openFlow = async (flowId: string) => {
-  await navigateTo(`/agents/${agentId}/scripts/${flowId}`)
+  await navigateTo(`/agents/${agentId}/scripts/${flowId}?view=schema`)
 }
 
 const handleCreate = async () => {
@@ -332,7 +387,7 @@ const handleCreate = async () => {
     })
     await fetchFlows()
     toastSuccess('Поток создан')
-    await navigateTo(`/agents/${agentId}/scripts/${created.id}`)
+    await navigateTo(`/agents/${agentId}/scripts/${created.id}?view=schema`)
   } catch (err: unknown) {
     toastError(err instanceof Error ? err.message : 'Не удалось создать поток')
   } finally {
@@ -356,7 +411,7 @@ const handlePublish = async (flow: ScriptFlow) => {
   try {
     await publishFlow(flow.id)
     await fetchFlows()
-    toastSuccess('Поток опубликован — идёт индексация в LightRAG')
+    toastSuccess('Поток опубликован — индексация поставлена в очередь')
   } catch (err: unknown) {
     toastError(err instanceof Error ? err.message : 'Не удалось опубликовать поток')
   } finally {

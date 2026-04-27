@@ -215,6 +215,11 @@ export const getReadableErrorMessage = (
     if (httpStatus === 422 && apiMessage) {
       return `Ошибка валидации: ${apiMessage}`
     }
+    // Текст из ответа API (часто `detail` у FastAPI при 400/403/502) важнее общего маппинга по статусу,
+    // иначе пользователь видит «Некорректный запрос» вместо реальной причины.
+    if (apiMessage && !isTechnicalMessage(apiMessage)) {
+      return apiMessage
+    }
     const httpMsg = HTTP_STATUS_MESSAGES[httpStatus]
     if (httpMsg) return httpMsg
   }

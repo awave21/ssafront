@@ -2,6 +2,9 @@
 .env.*
 !env.example
 logs/
+# Артефакты GraphRAG (parquet, cache) — не коммитим
+data/graphrag/*
+!data/graphrag/.gitkeep
 *.log
 *.pid
 *.sock

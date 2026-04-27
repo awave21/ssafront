@@ -36,8 +36,47 @@ from app.services.runtime.script_flow_graphrag_neo4j_read import (
 )
 from app.services.script_flow_sqns_profiles import build_sqns_profile_lookup
 from app.services.tenant_llm_config import get_decrypted_api_key
+from app.utils.broadcast import broadcaster
+
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+
+async def _broadcast_script_flow_index_update(
+    *,
+    agent_id: UUID,
+    flow_id: UUID,
+    index_status: str,
+    published_version: int,
+    index_error: str | None = None,
+    index_progress: int | None = None,
+) -> None:
+    """Уведомить открытые WebSocket-клиенты об изменении статуса индексации потока."""
+    payload: dict[str, Any] = {
+        "type": "script_flow_index_updated",
+        "data": {
+            "agent_id": str(agent_id),
+            "flow_id": str(flow_id),
+            "index_status": index_status,
+            "published_version": int(published_version or 0),
+        },
+    }
+    if index_error is not None:
+        payload["data"]["index_error"] = index_error
+    if index_progress is not None:
+        payload["data"]["index_progress"] = index_progress
+    try:
+        await broadcaster.publish(agent_id, payload)
+    except Exception as exc:
+        logger.warning(
+            "script_flow_index_broadcast_failed",
+            agent_id=str(agent_id),
+            flow_id=str(flow_id),
+            error=str(exc),
+        )
 
 
 def _api_error(code: str, message: str, http_status: int) -> HTTPException:
@@ -688,6 +727,12 @@ async def publish_script_flow(
     db.add(snap)
     await db.commit()
     await db.refresh(flow)
+    await _broadcast_script_flow_index_update(
+        agent_id=agent_id,
+        flow_id=flow.id,
+        index_status=flow.index_status,
+        published_version=int(flow.published_version or 0),
+    )
     return {
         "id": str(flow.id),
         "flow_status": flow.flow_status,
@@ -713,6 +758,12 @@ async def unpublish_script_flow(
     flow.index_retry_count = 0
     await db.commit()
     await db.refresh(flow)
+    await _broadcast_script_flow_index_update(
+        agent_id=agent_id,
+        flow_id=flow.id,
+        index_status=flow.index_status,
+        published_version=int(flow.published_version or 0),
+    )
     return {
         "id": str(flow.id),
         "flow_status": flow.flow_status,
@@ -743,6 +794,12 @@ async def retry_script_flow_index(
     flow.index_progress = None
     await db.commit()
     await db.refresh(flow)
+    await _broadcast_script_flow_index_update(
+        agent_id=agent_id,
+        flow_id=flow.id,
+        index_status=flow.index_status,
+        published_version=int(flow.published_version or 0),
+    )
     return {
         "id": str(flow.id),
         "index_status": flow.index_status,
@@ -827,6 +884,19 @@ async def reindex_published_script_flows(
         )
     )
     await db.commit()
+
+    rows = (
+        await db.execute(
+            select(ScriptFlow.id, ScriptFlow.published_version).where(ScriptFlow.id.in_(flow_ids)),
+        )
+    ).all()
+    for fid, pub_ver in rows:
+        await _broadcast_script_flow_index_update(
+            agent_id=agent_id,
+            flow_id=fid,
+            index_status="pending",
+            published_version=int(pub_ver or 0),
+        )
 
     return {
         "queued": len(flow_ids),

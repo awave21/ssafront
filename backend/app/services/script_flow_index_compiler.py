@@ -35,6 +35,15 @@ def _as_list_of_str(value: Any) -> list[str]:
     return out
 
 
+def _truncate(value: Any, max_len: int) -> str:
+    s = _str(value)
+    if not s:
+        return ""
+    if len(s) <= max_len:
+        return s
+    return s[:max_len]
+
+
 def _node_data(node: dict[str, Any]) -> dict[str, Any]:
     data = node.get("data")
     return data if isinstance(data, dict) else {}
@@ -117,9 +126,10 @@ def compile_script_flow_index_payload(flow: ScriptFlow) -> ScriptFlowIndexPayloa
     node_indexes: list[ScriptFlowNodeIndex] = []
     for node_id, node in node_by_id.items():
         data = _node_data(node)
-        node_type = _node_type(node)
-        title = _node_title(node)
-        stage = _str(data.get("stage")) or None
+        node_type = _truncate(_node_type(node), 50)
+        title = _truncate(_node_title(node), 255)
+        stage_s = _truncate(data.get("stage"), 50)
+        stage = stage_s or None
         content_text = _render_node_content_text(data, variables)
         filters = _collect_node_filters(data, flow_metadata=flow_metadata)
         is_searchable = data.get("is_searchable")
@@ -137,7 +147,7 @@ def compile_script_flow_index_payload(flow: ScriptFlow) -> ScriptFlowIndexPayloa
                 agent_id=flow.agent_id,
                 flow_id=flow.id,
                 flow_version=int(flow.published_version or 0),
-                node_id=node_id,
+                node_id=_truncate(node_id, 120),
                 node_type=node_type,
                 stage=stage,
                 title=title,
@@ -149,7 +159,7 @@ def compile_script_flow_index_payload(flow: ScriptFlow) -> ScriptFlowIndexPayloa
                 proof_ids=filters["proof_ids"],
                 constraint_ids=filters["constraint_ids"],
                 required_followup_question=_str(data.get("required_followup_question")) or None,
-                communication_style=_str(data.get("communication_style")) or None,
+                communication_style=_truncate(data.get("communication_style"), 100) or None,
                 preferred_phrases=_as_list_of_str(data.get("preferred_phrases")),
                 forbidden_phrases=_as_list_of_str(data.get("forbidden_phrases")),
                 is_searchable=is_searchable,
@@ -181,10 +191,10 @@ def compile_script_flow_index_payload(flow: ScriptFlow) -> ScriptFlowIndexPayloa
                 tenant_id=flow.tenant_id,
                 agent_id=flow.agent_id,
                 flow_id=flow.id,
-                source_node_id=source_node_id,
-                target_node_id=target_node_id,
-                source_handle=source_handle or None,
-                branch_label=branch_label or None,
+                source_node_id=_truncate(source_node_id, 120),
+                target_node_id=_truncate(target_node_id, 120),
+                source_handle=_truncate(source_handle, 120) or None,
+                branch_label=_truncate(branch_label, 255) or None,
             )
         )
 

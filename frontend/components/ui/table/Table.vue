@@ -1,6 +1,6 @@
 <template>
   <div :class="['overflow-x-auto rounded-md border border-slate-200 bg-white', wrapperClass]">
-    <table class="min-w-full border-collapse text-left table-fixed" v-bind="attrs">
+    <table class="w-max min-w-full border-collapse text-left table-auto" v-bind="attrs">
       <slot />
     </table>
   </div>

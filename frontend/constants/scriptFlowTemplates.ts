@@ -18,7 +18,7 @@ export const SCRIPT_FLOW_TEMPLATE_LIST: ScriptFlowTemplateItem[] = [
     id: 'biorevitalization',
     title: SCRIPT_FLOW_EXAMPLE_BIOREVITALIZATION_TITLE,
     description:
-      'Готовая карта разговора: от первого вопроса о биоревитализации до записи, консультации или мягкого follow-up. При загрузке в библиотеку добавляются типовые мотивы и связываются с ключевыми шагами.',
+      'Шаблон адаптирован под новый канвас: узлы, связи и формат данных совпадают с текущим редактором. Карта от первого вопроса о биоревитализации до записи, консультации или мягкого follow-up. При загрузке в библиотеку добавляются типовые мотивы и связываются с ключевыми шагами.',
     definition: SCRIPT_FLOW_EXAMPLE_BIOREVITALIZATION,
     entryNodeId: SCRIPT_FLOW_EXAMPLE_BIOREVITALIZATION_ENTRY_NODE_ID,
   },

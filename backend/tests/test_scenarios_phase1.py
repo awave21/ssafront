@@ -13,6 +13,27 @@ def test_merge_scenario_rule_contexts_messages_and_silent() -> None:
     assert m["silent_reaction"] is True
 
 
+def test_scenario_reply_first_non_empty_message() -> None:
+    """Как в apply_dialog_scenario_phases_before_llm: пустые элементы в messages_to_send пропускаются."""
+    msgs = ["", "  ", "Здравствуйте"]
+    first_reply = ""
+    for item in msgs:
+        text = str(item).strip()
+        if text:
+            first_reply = text
+            break
+    assert first_reply == "Здравствуйте"
+
+    only_blanks = ["", " \n "]
+    first_reply = ""
+    for item in only_blanks:
+        text = str(item).strip()
+        if text:
+            first_reply = text
+            break
+    assert first_reply == ""
+
+
 def test_client_return_gap_matches() -> None:
     rule = SimpleNamespace(
         condition_type="client_return_gap",

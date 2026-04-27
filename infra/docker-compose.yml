@@ -40,6 +40,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
       REDIS_URL: ${REDIS_URL}
       PYTHONPATH: /app
+      # Локальный Microsoft GraphRAG: каталог на хосте ./data/graphrag → /data/graphrag в контейнере
+      MICROSOFT_GRAPHRAG_WORKSPACE_ROOT: ${MICROSOFT_GRAPHRAG_WORKSPACE_ROOT:-/data/graphrag}
     depends_on:
       db:
         condition: service_healthy
@@ -47,6 +49,7 @@ services:
         condition: service_healthy
     volumes:
       - ./logs:/logs
+      - ./data/graphrag:/data/graphrag
     expose:
       - "8000"
     ports:

@@ -14,6 +14,7 @@ from app.api.routers.agents.script_flows import router as script_flows_router
 from app.api.routers.agents.kg_entities import router as kg_entities_router
 from app.api.routers.agents.user_states import router as user_states_router
 from app.api.routers.agents.knowledge_files import router as knowledge_files_router
+from app.api.routers.agents.unified_graph import router as unified_graph_router
 
 router = base_router
 router.include_router(channels_router)
@@ -39,5 +40,10 @@ router.include_router(kg_entities_router, prefix="/{agent_id}", tags=["kg-entiti
 router.include_router(user_states_router, prefix="/{agent_id}", tags=["user-states"])
 router.include_router(analysis_router, prefix="/{agent_id}", tags=["analysis"])
 router.include_router(analytics_router, prefix="/{agent_id}", tags=["analytics"])
+router.include_router(
+    unified_graph_router,
+    prefix="/{agent_id}/unified-graph",
+    tags=["unified-graph"],
+)
 
 __all__ = ["router", "_build_sqns_client"]

@@ -7,7 +7,6 @@ import { CONVERSATION_STAGES } from '~/types/scriptFlow'
 import {
   branchSourceHandleId,
   normalizeConditionsToBranches,
-  parseBranchHandleId,
 } from '~/utils/scriptFlowNodeRole'
 
 /**
@@ -16,15 +15,6 @@ import {
  */
 export function useScriptFlowInspectorModel(nodeId: Ref<string | null>) {
   const { findNode, updateNodeData, edges, getNodes } = useVueFlow(AGENT_SCRIPT_FLOW_VUE_FLOW_ID)
-
-  type StepConnectionSummary = {
-    edgeId: string
-    nodeId: string
-    title: string
-    nodeType: string
-    relationLabel: string
-    direction: 'incoming' | 'outgoing'
-  }
 
   const localTitle = ref('')
   const localNodeType = ref<NodeType>('expertise')
@@ -479,86 +469,6 @@ export function useScriptFlowInspectorModel(nodeId: Ref<string | null>) {
       : 'Контекст: где в воронке задаём вопрос, источники данных. Формулировки: сам вопрос и варианты.'
   })
 
-  const connectionTitle = (nid: string): string => {
-    const n = findNode(nid)
-    const d = (n?.data || {}) as ScriptNodeData
-    return String(d.title ?? d.label ?? nid)
-  }
-
-  const connectionNodeType = (nid: string): string => {
-    const n = findNode(nid)
-    const d = (n?.data || {}) as ScriptNodeData
-    return String(d.node_type ?? '')
-  }
-
-  const branchLabelFromHandle = (sourceNid: string, sourceHandle?: string | null): string | null => {
-    const branchId = parseBranchHandleId(sourceHandle)
-    if (!branchId)
-      return null
-    const n = findNode(sourceNid)
-    const d = (n?.data || {}) as ScriptNodeData
-    const branches = Array.isArray(d.conditions) ? d.conditions : []
-    const branch = branches.find(b => b?.id === branchId)
-    const label = String(branch?.label ?? '').trim()
-    return label || null
-  }
-
-  const incomingConnections = computed<StepConnectionSummary[]>(() => {
-    const id = nodeId.value
-    if (!id) return []
-    return edges.value
-      .filter(e => e.target === id)
-      .map((e) => {
-        const branchLabel = branchLabelFromHandle(String(e.source ?? ''), e.sourceHandle)
-        return {
-          edgeId: String(e.id ?? ''),
-          nodeId: String(e.source ?? ''),
-          title: connectionTitle(String(e.source ?? '')),
-          nodeType: connectionNodeType(String(e.source ?? '')),
-          relationLabel: branchLabel ? `По ветке: ${branchLabel}` : 'Прямой переход',
-          direction: 'incoming' as const,
-        }
-      })
-  })
-
-  const outgoingConnections = computed<StepConnectionSummary[]>(() => {
-    const id = nodeId.value
-    if (!id) return []
-    return edges.value
-      .filter(e => e.source === id)
-      .map((e) => {
-        const branchLabel = branchLabelFromHandle(id, e.sourceHandle)
-        return {
-          edgeId: String(e.id ?? ''),
-          nodeId: String(e.target ?? ''),
-          title: connectionTitle(String(e.target ?? '')),
-          nodeType: connectionNodeType(String(e.target ?? '')),
-          relationLabel: branchLabel ? `Если: ${branchLabel}` : 'Следующий шаг',
-          direction: 'outgoing' as const,
-        }
-      })
-  })
-
-  const hasScenarioConnections = computed(() =>
-    incomingConnections.value.length > 0 || outgoingConnections.value.length > 0,
-  )
-
-  const availableScenarioStepOptions = computed(() => {
-    const currentId = String(nodeId.value ?? '')
-    return getNodes.value
-      .map((n) => {
-        const nid = String(n.id ?? '')
-        const d = (n.data || {}) as ScriptNodeData
-        return {
-          id: nid,
-          title: String(d.title ?? d.label ?? nid),
-          nodeType: String(d.node_type ?? ''),
-        }
-      })
-      .filter((row) => row.id && row.id !== currentId)
-      .sort((a, b) => a.title.localeCompare(b.title, 'ru'))
-  })
-
   return {
     localTitle,
     localNodeType,
@@ -622,10 +532,6 @@ export function useScriptFlowInspectorModel(nodeId: Ref<string | null>) {
     showAxisTabs,
     axisTab,
     nodeFormHint,
-    incomingConnections,
-    outgoingConnections,
-    hasScenarioConnections,
-    availableScenarioStepOptions,
     CONVERSATION_STAGES,
   }
 }

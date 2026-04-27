@@ -12,12 +12,14 @@
       maxWidth: isCondition ? '336px' : '296px',
     }"
   >
-    <Handle
-      type="target"
-      :position="Position.Left"
-      id="target"
-      class="!w-2.5 !h-2.5 !border-2 !border-background"
-      :style="{ backgroundColor: accent }"
+    <FlowN8nConnector
+      :node-id="id"
+      handle-type="target"
+      handle-id="target"
+      :connect-position="Position.Left"
+      :accent="accent"
+      :highlight-line="isSelected"
+      side="left"
     />
 
     <div
@@ -39,26 +41,34 @@
         <div
           v-for="(br, i) in branchList"
           :key="br.id"
-          class="group relative flex min-h-[38px] items-center rounded-2xl px-3 pr-7 shadow-[0_8px_20px_rgba(15,23,42,0.05)]"
+          class="group relative flex min-h-[38px] items-center gap-1.5 rounded-2xl px-3 pr-2 shadow-[0_8px_20px_rgba(15,23,42,0.05)]"
           :style="{ background: `${accent}10`, boxShadow: `inset 2px 0 0 ${accent}88` }"
         >
-          <span class="text-[10px] font-medium leading-snug text-foreground/90 line-clamp-1">{{ String(br.label).trim() || `Ветка ${i + 1}` }}</span>
-          <Handle
-            type="source"
-            :position="Position.Right"
-            :id="branchHandleId(br.id)"
-            class="!w-3 !h-3 !border-2 !border-background !absolute !right-1 !top-1/2 !-translate-y-1/2"
-            :style="{ backgroundColor: accent }"
+          <span class="min-w-0 flex-1 text-[10px] font-medium leading-snug text-foreground/90 line-clamp-1">{{ String(br.label).trim() || `Ветка ${i + 1}` }}</span>
+          <FlowN8nConnector
+            :node-id="id"
+            variant="inline"
+            handle-type="source"
+            :handle-id="branchHandleId(br.id)"
+            :connect-position="Position.Right"
+            :accent="accent"
+            :highlight-line="isSelected"
+            line-width-class="w-3"
+            compact
           />
         </div>
-        <div class="relative flex min-h-[38px] items-center rounded-2xl bg-muted/35 px-3 pr-7 shadow-[0_8px_20px_rgba(15,23,42,0.04)]" style="box-shadow: inset 2px 0 0 hsl(var(--border));">
-          <span class="text-[10px] italic text-muted-foreground">По умолчанию</span>
-          <Handle
-            type="source"
-            :position="Position.Right"
-            id="cond-default"
-            class="!w-3 !h-3 !border-2 !border-background !absolute !right-1 !top-1/2 !-translate-y-1/2"
-            style="background: hsl(var(--muted-foreground) / 0.45)"
+        <div class="relative flex min-h-[38px] items-center gap-1.5 rounded-2xl bg-muted/35 px-3 pr-2 shadow-[0_8px_20px_rgba(15,23,42,0.04)]" style="box-shadow: inset 2px 0 0 hsl(var(--border));">
+          <span class="min-w-0 flex-1 text-[10px] italic text-muted-foreground">По умолчанию</span>
+          <FlowN8nConnector
+            :node-id="id"
+            variant="inline"
+            handle-type="source"
+            handle-id="cond-default"
+            :connect-position="Position.Right"
+            accent="hsl(var(--muted-foreground) / 0.85)"
+            :highlight-line="isSelected"
+            line-width-class="w-3"
+            compact
           />
         </div>
       </div>
@@ -73,12 +83,14 @@
       <div class="flex items-center justify-between gap-1 border-t border-white/60 px-3.5 py-2.5 rounded-b-[24px]" :style="{ background: `linear-gradient(180deg, ${accent}08, rgba(255,255,255,0.72))` }">
         <ReadinessTone :tone="readinessTone" />
       </div>
-      <Handle
-        type="source"
-        :position="Position.Right"
-        id="source"
-        class="!w-2.5 !h-2.5 !border-2 !border-background"
-        :style="{ backgroundColor: accent }"
+      <FlowN8nConnector
+        :node-id="id"
+        handle-type="source"
+        handle-id="source"
+        :connect-position="Position.Right"
+        :accent="accent"
+        :highlight-line="isSelected"
+        side="right"
       />
     </template>
   </div>
@@ -86,7 +98,8 @@
 
 <script setup lang="ts">
 import { computed, inject, ref, type Ref } from 'vue'
-import { Handle, Position } from '@vue-flow/core'
+import { Position } from '@vue-flow/core'
+import FlowN8nConnector from './FlowN8nConnector.vue'
 import type { FlowBranch, ScriptNodeData, NodeType, ConversationStage, ScriptFlowToolUsageNode } from '~/types/scriptFlow'
 import { NODE_TYPE_COLORS, CONVERSATION_STAGES } from '~/types/scriptFlow'
 import KgReadinessBadge from './KgReadinessBadge.vue'
@@ -106,7 +119,12 @@ const props = defineProps<{
 }>()
 
 const inspectorNodeId = inject<Ref<string | null>>('inspectorNodeId', ref(null))
-const isSelected = computed(() => props.selected || inspectorNodeId.value === props.id)
+const flowCanvasSelectedId = inject<Ref<string | null>>('flowCanvasSelectedId', ref(null))
+const isSelected = computed(() =>
+  props.selected
+  || inspectorNodeId.value === props.id
+  || flowCanvasSelectedId.value === props.id,
+)
 
 const nodeType = computed(() => (props.data.node_type as NodeType) || 'question')
 const isCondition = computed(() => nodeType.value === 'condition')

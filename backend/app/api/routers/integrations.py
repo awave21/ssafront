@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import time
 import structlog
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -29,9 +27,32 @@ from app.services.run_service import (
 )
 from app.services.runtime import logger as runtime_logger
 from app.services.tool_executor import ToolExecutionError
+from app.utils.message_mapping import extract_text_contents, infer_role
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
+
+
+def _integration_chat_role_display(raw_role: str) -> str:
+    """Роль для публичного API: agent → assistant (привычнее клиентам)."""
+    if raw_role == "agent":
+        return "assistant"
+    return raw_role
+
+
+def _integration_chat_plain_text(msg_data: dict) -> str:
+    chunks = extract_text_contents(msg_data)
+    return "\n".join(chunks).strip()
+
+
+def _tool_names_from_run(run: Run) -> list[str]:
+    names: list[str] = []
+    for item in run.tools_called or []:
+        if isinstance(item, dict):
+            n = item.get("name")
+            if isinstance(n, str) and n.strip():
+                names.append(n.strip())
+    return names
 
 
 async def _run_chat(
@@ -121,6 +142,7 @@ async def _run_chat(
         response=run.output_message or "",
         session_id=effective_session_id,
         run_id=run.id,
+        tool_names=_tool_names_from_run(run),
     )
 
 
@@ -243,7 +265,15 @@ async def stream_chat(
                 await session.merge(run)
                 await session.commit()
                 schedule_logfire_cost_reconcile(run_id=run.id, trace_id=trace_id)
-                yield {"event": "result", "data": json.dumps({"output": result.output})}
+                yield {
+                    "event": "result",
+                    "data": json.dumps(
+                        {
+                            "output": result.output,
+                            "tool_names": _tool_names_from_run(run),
+                        }
+                    ),
+                }
             except ToolExecutionError as exc:
                 run.status = "failed"
                 run.error_message = str(exc)
@@ -265,34 +295,14 @@ async def get_chat_history(
     ctx: IntegrationContext = Depends(get_integration_context),
     db: AsyncSession = Depends(get_db),
 ) -> ChatHistoryResponse:
-    """Get chat history for a given session."""
-    # region agent log
-    try:
-        os.makedirs("/opt/app-agent/myapp/backend/.cursor", exist_ok=True)
-        with open("/opt/app-agent/myapp/backend/.cursor/debug-e26c68.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "sessionId": "e26c68",
-                "runId": "audit-1",
-                "hypothesisId": "H5",
-                "location": "app/api/routers/integrations.py:get_chat_history",
-                "message": "integration_history_request",
-                "data": {
-                    "agent_id": str(ctx.agent_id),
-                    "tenant_id": str(ctx.tenant_id),
-                    "session_id": session_id,
-                    "limit": limit,
-                },
-                "timestamp": int(time.time() * 1000),
-            }) + "\n")
-    except Exception:
-        pass
-    # endregion agent log
-    # Query session messages for this agent and session
+    """История сессии: сообщения в формате pydantic-ai (parts) разворачиваются в текст."""
     stmt = (
         select(SessionMessage)
+        .join(Run, SessionMessage.run_id == Run.id)
         .where(
             SessionMessage.tenant_id == ctx.tenant_id,
             SessionMessage.session_id == session_id,
+            Run.agent_id == ctx.agent_id,
         )
         .order_by(SessionMessage.message_index.asc())
         .limit(limit)
@@ -300,16 +310,17 @@ async def get_chat_history(
     result = await db.execute(stmt)
     messages = result.scalars().all()
 
-    # Convert to ChatMessage format
     chat_messages = []
     for msg in messages:
-        msg_data = msg.message
-        role = msg_data.get("role", "user")
-        content = msg_data.get("content", "")
-        chat_messages.append(ChatMessage(
-            role=role,
-            content=content,
-            created_at=msg.created_at,
-        ))
+        msg_data = msg.message if isinstance(msg.message, dict) else {}
+        role_raw = infer_role(msg_data)
+        content = _integration_chat_plain_text(msg_data)
+        chat_messages.append(
+            ChatMessage(
+                role=_integration_chat_role_display(role_raw),
+                content=content,
+                created_at=msg.created_at,
+            )
+        )
 
     return ChatHistoryResponse(messages=chat_messages)

@@ -182,7 +182,7 @@ import {
   ChevronsUpDown,
   UsersRound,
   ListTree,
-  GitBranch
+  GitBranch,
 } from 'lucide-vue-next'
 import {
   TooltipRoot,

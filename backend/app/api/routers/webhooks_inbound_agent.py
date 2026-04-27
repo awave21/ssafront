@@ -317,8 +317,15 @@ async def process_webhook_inbound_agent_message(
             run.tools_called = []
             return None
 
-        if merged_ctx.get("messages_to_send"):
-            first_reply = str(merged_ctx["messages_to_send"][0]).strip()
+        raw_msgs = merged_ctx.get("messages_to_send")
+        first_reply = ""
+        if isinstance(raw_msgs, list):
+            for item in raw_msgs:
+                text = str(item).strip()
+                if text:
+                    first_reply = text
+                    break
+        if first_reply:
             run.status = "succeeded"
             run.output_message = first_reply
             run.messages = []
