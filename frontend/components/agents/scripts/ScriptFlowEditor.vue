@@ -85,31 +85,10 @@
           <button v-if="viewMode === 'list'" type="button" class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted" title="Режим карты: ветки разговора на холсте" @click="emit('update:viewMode', 'schema')">
             <Network class="size-5" />
           </button>
-          <DropdownMenu v-if="viewMode === 'schema'" :modal="false">
-            <DropdownMenuTrigger as-child>
-              <button type="button" class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted" title="Дополнительные действия">
-                <MoreHorizontal class="size-5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="w-72 p-1.5">
-              <DropdownMenuItem class="cursor-pointer flex items-start gap-3 rounded-md px-3 py-2.5" @click="openTemplatePickerFromMenu">
-                <Sparkles class="mt-0.5 size-4 shrink-0" />
-                <div class="space-y-0.5"><div class="text-sm font-medium">Шаблоны сценария</div><div class="text-[11px] leading-snug text-muted-foreground">Заменить текущую схему готовым шаблоном.</div></div>
-              </DropdownMenuItem>
-              <DropdownMenuItem class="cursor-pointer flex items-start gap-3 rounded-md px-3 py-2.5" @click="scriptFlowCoverageOpen = true">
-                <LayoutGrid class="mt-0.5 size-4 shrink-0" />
-                <div class="space-y-0.5"><div class="text-sm font-medium">Покрытие сценария</div><div class="text-[11px] leading-snug text-muted-foreground">Проверить, где сценарий закрывает услуги и возражения.</div></div>
-              </DropdownMenuItem>
-              <DropdownMenuItem class="cursor-pointer flex items-start gap-3 rounded-md px-3 py-2.5" @click="scriptFlowSandboxOpen = true">
-                <FlaskConical class="mt-0.5 size-4 shrink-0" />
-                <div class="space-y-0.5"><div class="text-sm font-medium">Debug-поиск сценария</div><div class="text-[11px] leading-snug text-muted-foreground">Посмотреть, какой сценарий ассистент найдет по фразе клиента.</div></div>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <div class="h-px w-full bg-border" />
-          <button type="button" class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted" title="Обучение ассистента и статистика" @click="isStatusSheetOpen = true">
-            <Activity class="size-5" />
+          <button v-if="viewMode === 'schema'" type="button" class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted" title="Шаблоны сценария" @click="openTemplatePickerFromMenu">
+            <Sparkles class="size-5" />
           </button>
+
           <button type="button" class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted" title="Как собрать понятный сценарий" @click="isCanvasGuideOpen = true">
             <HelpCircle class="size-5" />
           </button>
@@ -381,236 +360,6 @@
       </SheetContent>
     </Sheet>
 
-    <Sheet
-      :open="isStatusSheetOpen"
-      :modal="false"
-      @update:open="isStatusSheetOpen = $event"
-    >
-      <SheetContent
-        side="right"
-        :hide-overlay="true"
-        class-name="w-full sm:max-w-[360px] p-0 border-l border-border !bg-card shadow-2xl"
-      >
-        <SheetTitle class="sr-only">Статус и статистика</SheetTitle>
-        <div class="flex h-full flex-col overflow-y-auto">
-          <div class="border-b border-border px-4 py-4">
-            <h4 class="text-sm font-bold text-foreground">Статус и статистика</h4>
-          </div>
-
-          <div class="flex flex-col divide-y divide-border border-b border-border">
-            <!-- Индекс -->
-            <div class="flex flex-col gap-1.5 px-4 py-4">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Память ассистента</span>
-                <span
-                  class="rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-tight"
-                  :class="indexStatusClass"
-                >
-                  {{ indexLabel }}
-                </span>
-              </div>
-              <p class="text-[11px] leading-relaxed text-muted-foreground">
-                {{ indexDescription }}
-              </p>
-            </div>
-
-            <!-- Проблемы -->
-            <div class="flex flex-col gap-1.5 px-4 py-4">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Проверка перед публикацией</span>
-                <div v-if="riskSummary" class="flex items-center gap-1.5">
-                  <span
-                    class="rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-tight"
-                    :class="riskPillClass"
-                  >
-                    {{ riskBadgeText }}
-                  </span>
-                </div>
-                <span v-else class="text-[11px] text-muted-foreground">Проверки не проводились</span>
-              </div>
-              <p v-if="riskSummary" class="text-[11px] leading-relaxed text-muted-foreground">
-                {{ riskTitle }}
-              </p>
-              <div class="mt-2 flex flex-col gap-1">
-                <button
-                  type="button"
-                  class="text-left text-[11px] font-semibold text-indigo-600 hover:underline"
-                  @click="emit('update:viewMode', 'schema'); scriptFlowCoverageOpen = true"
-                >
-                  Открыть карту ветвлений и покрытие →
-                </button>
-                <button
-                  v-if="scriptFlowToolbarPayload?.onReadiness"
-                  type="button"
-                  class="text-left text-[11px] font-semibold text-indigo-600 hover:underline"
-                  @click="scriptFlowToolbarPayload.onReadiness()"
-                >
-                  Список всех проверок →
-                </button>
-              </div>
-            </div>
-
-            <!-- Статистика -->
-            <div class="flex flex-col gap-1.5 px-4 py-4">
-              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Использование</span>
-              <div v-if="toolUsageDisplay" class="space-y-2">
-                <div class="flex items-center gap-3">
-                  <div class="flex size-8 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-600">
-                    <BarChart3 class="size-4" />
-                  </div>
-                  <div>
-                    <div class="text-sm font-bold text-foreground">~{{ toolUsageDisplay.calls }} вызовов</div>
-                    <div class="text-[10px] text-muted-foreground">за последние {{ toolUsageDisplay.days }} дн.</div>
-                  </div>
-                </div>
-                <p v-if="toolUsageDisplay.disclaimer" class="text-[10px] leading-snug text-muted-foreground italic">
-                  {{ toolUsageDisplay.disclaimer }}
-                </p>
-              </div>
-              <div v-else class="py-2 text-[11px] text-muted-foreground">
-                Нет данных об использовании за указанный период.
-              </div>
-            </div>
-
-            <!-- GraphRAG -->
-            <div class="flex flex-col gap-2 px-4 py-4">
-              <div class="flex items-center justify-between gap-2">
-                <span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">GraphRAG</span>
-                <button
-                  type="button"
-                  class="text-[11px] font-semibold text-indigo-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                  :disabled="graphPreviewLoading"
-                  @click="loadGraphPreview"
-                >
-                  {{ graphPreviewLoading ? 'Обновляем…' : 'Обновить превью' }}
-                </button>
-              </div>
-
-              <p class="text-[11px] leading-relaxed text-muted-foreground">
-                Показывает, как текущий canvas превращается в граф знаний: узлы, связи, сообщества и качество LLM-извлечения.
-              </p>
-
-              <div v-if="graphPreviewError" class="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
-                {{ graphPreviewError }}
-              </div>
-
-              <div v-else-if="graphPreviewLoading" class="rounded-lg border border-border bg-muted/30 px-3 py-3 text-[11px] text-muted-foreground">
-                Строим GraphRAG-превью по текущему черновику…
-              </div>
-
-              <div v-else-if="graphSummary" class="space-y-3">
-                <div class="grid grid-cols-3 gap-2">
-                  <div class="rounded-lg border border-border bg-muted/20 px-3 py-2">
-                    <div class="text-[10px] uppercase tracking-wider text-muted-foreground">Узлы</div>
-                    <div class="mt-1 text-sm font-bold text-foreground">{{ graphSummary.nodes }}</div>
-                  </div>
-                  <div class="rounded-lg border border-border bg-muted/20 px-3 py-2">
-                    <div class="text-[10px] uppercase tracking-wider text-muted-foreground">Связи</div>
-                    <div class="mt-1 text-sm font-bold text-foreground">{{ graphSummary.relations }}</div>
-                  </div>
-                  <div class="rounded-lg border border-border bg-muted/20 px-3 py-2">
-                    <div class="text-[10px] uppercase tracking-wider text-muted-foreground">Кластеры</div>
-                    <div class="mt-1 text-sm font-bold text-foreground">{{ graphSummary.communities }}</div>
-                  </div>
-                </div>
-
-                <div class="rounded-lg border border-border bg-background/60 px-3 py-2.5 text-[11px]">
-                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span class="font-semibold text-foreground">Режим: {{ graphSummary.extractionMode }}</span>
-                    <span v-if="graphSummary.llmOkNodes !== null" class="text-emerald-700">LLM OK: {{ graphSummary.llmOkNodes }}</span>
-                    <span v-if="graphSummary.llmFailedNodes !== null" class="text-amber-700">LLM fallback: {{ graphSummary.llmFailedNodes }}</span>
-                  </div>
-                </div>
-
-                <div v-if="topGraphCommunities.length" class="space-y-2">
-                  <div class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Главные сообщества знаний
-                  </div>
-                  <div
-                    v-for="community in topGraphCommunities"
-                    :key="community.community_key"
-                    class="rounded-lg border border-border bg-card px-3 py-2.5"
-                  >
-                    <div class="text-xs font-semibold text-foreground">
-                      {{ community.title }}
-                    </div>
-                    <p v-if="community.summary" class="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                      {{ community.summary }}
-                    </p>
-                    <div class="mt-2 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
-                      <span class="rounded border border-border bg-muted/30 px-1.5 py-0.5">
-                        {{ community.node_ids.length }} узл.
-                      </span>
-                      <span
-                        v-if="Array.isArray(community.properties?.key_points) && community.properties?.key_points.length"
-                        class="rounded border border-border bg-muted/30 px-1.5 py-0.5"
-                      >
-                        {{ community.properties?.key_points.length }} ключевых тезисов
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div v-if="topGraphEntities.length" class="space-y-2">
-                  <div class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Извлечённые сущности
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <span
-                      v-for="entity in topGraphEntities"
-                      :key="entity.graph_node_id"
-                      class="rounded-full border border-border bg-muted/30 px-2 py-1 text-[10px] text-foreground"
-                    >
-                      {{ entity.entity_type }} · {{ entity.title }}
-                    </span>
-                  </div>
-                </div>
-
-                <div v-if="topRelationTypes.length" class="space-y-2">
-                  <div class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Основные типы связей
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <span
-                      v-for="[relationType, count] in topRelationTypes"
-                      :key="relationType"
-                      class="rounded border border-border bg-background/70 px-2 py-1 text-[10px] text-muted-foreground"
-                    >
-                      {{ relationType }} ×{{ count }}
-                    </span>
-                  </div>
-                </div>
-
-                <details v-if="graphDiagnosticRaw" class="rounded-lg border border-border bg-muted/10 px-3 py-2.5">
-                  <summary class="cursor-pointer text-[11px] font-semibold text-foreground">
-                    Raw diagnostics
-                  </summary>
-                  <pre class="mt-2 overflow-x-auto whitespace-pre-wrap text-[10px] leading-relaxed text-muted-foreground">{{ graphDiagnosticRaw }}</pre>
-                </details>
-              </div>
-
-              <div v-else class="rounded-lg border border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
-                GraphRAG-превью ещё не загружено.
-              </div>
-            </div>
-          </div>
-
-          <div class="mt-auto border-t border-border p-4">
-            <div class="rounded-lg bg-muted/40 p-3">
-              <div class="flex items-start gap-2.5">
-                <Clock class="mt-0.5 size-3.5 text-muted-foreground" />
-                <div class="space-y-1">
-                  <p class="text-[11px] font-semibold text-foreground leading-none">Последние изменения</p>
-                  <p class="text-[10px] text-muted-foreground leading-relaxed">
-                    {{ dirtyLabel || 'Черновик соответствует опубликованной версии.' }}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </SheetContent>
-    </Sheet>
 
     <Dialog :open="isCanvasGuideOpen" @update:open="isCanvasGuideOpen = $event">
       <DialogContent class="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
@@ -743,15 +492,9 @@ import {
   Search,
   FileText,
   Network,
-  LayoutGrid,
-  FlaskConical,
-  Activity,
   HelpCircle,
   AlertCircle,
-  BarChart3,
-  Clock,
   Sparkles,
-  MoreHorizontal,
 } from 'lucide-vue-next'
 import ExpertNode from './ExpertNode.vue'
 import DedicatedFlowNodes from './nodes/DedicatedFlowNodes.vue'
@@ -769,12 +512,6 @@ import { connectionViolatesCatalogPolicy } from '~/utils/scriptFlowEdges'
 import { useToast } from '~/composables/useToast'
 import { useLayoutState } from '~/composables/useLayoutState'
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '~/components/ui/dropdown-menu'
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -783,8 +520,6 @@ import {
 } from '~/components/ui/dialog'
 import { useScriptFlows } from '~/composables/useScriptFlows'
 import { SCRIPT_FLOW_CANVAS_ADAPTER_KEY } from '~/composables/useScriptFlowInspectorModel'
-import { getReadableErrorMessage } from '~/utils/api-errors'
-import type { ScriptFlowGraphPreview } from '~/types/scriptFlow'
 
 /** Совпадает с подписями в инспекторе (`NODE_TYPES` → «Тип ноды»), чтобы не путать палитру и форму */
 const scenarioPalette = computed(() =>
@@ -844,181 +579,10 @@ const emit = defineEmits<{
   (e: 'template-applied', payload: { templateId: string }): void
 }>()
 
-const { scriptFlowSandboxOpen, scriptFlowCoverageOpen, scriptFlowToolbarPayload } = useLayoutState()
+const { scriptFlowToolbarPayload } = useLayoutState()
 const route = useRoute()
 const agentId = String(route.params.id ?? '')
-const { getGraphRagPreviewDraft } = useScriptFlows(agentId)
 
-const indexLabel = computed(() => {
-  const s = scriptFlowToolbarPayload.value?.flow?.index_status
-  const labels: Record<string, string> = {
-    idle: 'не начато',
-    pending: 'в очереди',
-    indexing: 'обновление',
-    indexed: 'готово',
-    failed: 'ошибка',
-  }
-  return labels[s ?? 'idle'] ?? s ?? '—'
-})
-
-const indexStatusClass = computed(() => {
-  switch (scriptFlowToolbarPayload.value?.flow?.index_status) {
-    case 'indexed':
-      return 'border-emerald-200 bg-emerald-50 text-emerald-800'
-    case 'pending':
-    case 'indexing':
-      return 'border-sky-200 bg-sky-50 text-sky-800'
-    case 'failed':
-      return 'border-destructive/40 bg-destructive/10 text-destructive'
-    default:
-      return 'border-border bg-muted/40 text-muted-foreground'
-  }
-})
-
-const indexDescription = computed(() => {
-  const s = scriptFlowToolbarPayload.value?.flow?.index_status
-  if (s === 'indexed') return 'Ассистент уже опирается на актуальный сценарий при ответах.'
-  if (s === 'failed') return scriptFlowToolbarPayload.value?.flow?.index_error || 'Не удалось обновить память ассистента по этому сценарию.'
-  if (s === 'indexing' || s === 'pending') return 'Обновляем память ассистента по опубликованному сценарию…'
-  return 'После публикации сценарий попадёт в память ассистента для поиска и ответов.'
-})
-
-const riskSummary = computed(() => scriptFlowToolbarPayload.value?.riskSummary)
-
-const riskBadgeText = computed(() =>
-  riskSummary.value ? coverageRiskBadgeLabel(riskSummary.value) : '',
-)
-
-const riskTitle = computed(() => {
-  const s = riskSummary.value
-  if (!s) return ''
-  if (s.level === 'ok') return 'Критических проблем в таблице покрытия нет.'
-  return s.level === 'critical'
-    ? `Критично: ${s.criticalCount} проблем. Публикация заблокирована.`
-    : `Предупреждения: ${s.warningCount}. Публикация возможна.`
-})
-
-const riskPillClass = computed(() => {
-  switch (riskSummary.value?.level) {
-    case 'ok':
-      return 'border-emerald-200/80 bg-emerald-50 text-emerald-900'
-    case 'warn':
-      return 'border-amber-300 bg-amber-50 text-amber-950'
-    case 'critical':
-      return 'border-destructive/50 bg-destructive/15 text-destructive'
-    default:
-      return 'border-border'
-  }
-})
-
-const toolUsageDisplay = computed(() => {
-  const u = scriptFlowToolbarPayload.value?.toolUsage
-  if (!u || typeof u.approximate_flow_tool_calls !== 'number') return null
-  let peakNote = ''
-  const ds = u.daily_series
-  if (Array.isArray(ds) && ds.length) {
-    const mx = ds.reduce((a, b) => (b.count > a.count ? b : a), ds[0]!)
-    peakNote = `Пик: ${mx.count} (${mx.date})`
-  }
-  const disclaimer = [u.disclaimer ?? '', peakNote].filter(Boolean).join(' · ')
-  return {
-    calls: u.approximate_flow_tool_calls,
-    days: typeof u.days === 'number' ? u.days : 7,
-    disclaimer: disclaimer || undefined,
-  }
-})
-
-const dirtyLabel = computed(() => {
-  const flow = scriptFlowToolbarPayload.value?.flow
-  if (flow?.flow_status !== 'published') return ''
-  const meta = flow?.flow_metadata as Record<string, unknown> | undefined
-  const snap = meta?.published_flow_definition
-  if (!snap || typeof snap !== 'object') return ''
-  try {
-    const cur = JSON.stringify(flow?.flow_definition ?? {})
-    const pub = JSON.stringify(snap)
-    return cur !== pub ? 'Черновик отличается от опубликованной версии.' : ''
-  }
-  catch {
-    return ''
-  }
-})
-
-const graphPreviewLoading = ref(false)
-const graphPreviewError = ref<string | null>(null)
-const graphPreview = ref<ScriptFlowGraphPreview | null>(null)
-
-const graphSummary = computed(() => {
-  const preview = graphPreview.value
-  if (!preview) return null
-  const diagnostic = preview.debug?.diagnostic
-  return {
-    nodes: preview.nodes.length,
-    relations: preview.relations.length,
-    communities: preview.communities.length,
-    extractionMode: diagnostic?.extraction_mode || String(preview.debug?.source || 'draft_preview'),
-    llmOkNodes: diagnostic?.llm_ok_nodes ?? null,
-    llmFailedNodes: diagnostic?.llm_failed_nodes ?? null,
-  }
-})
-
-const topGraphCommunities = computed(() =>
-  (graphPreview.value?.communities ?? []).slice(0, 3),
-)
-
-const topGraphEntities = computed(() =>
-  (graphPreview.value?.nodes ?? [])
-    .filter(node => node.node_kind !== 'canvas' && node.entity_type !== 'stage' && node.entity_type !== 'variable')
-    .slice(0, 8),
-)
-
-const topRelationTypes = computed(() => {
-  const counts = new Map<string, number>()
-  for (const rel of graphPreview.value?.relations ?? []) {
-    const key = String(rel.relation_type || '').trim()
-    if (!key) continue
-    counts.set(key, (counts.get(key) ?? 0) + 1)
-  }
-  return Array.from(counts.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 6)
-})
-
-const graphDiagnosticRaw = computed(() => {
-  const raw = graphPreview.value?.debug?.diagnostic?.raw
-  if (!raw || typeof raw !== 'object') return null
-  try {
-    return JSON.stringify(raw, null, 2)
-  }
-  catch {
-    return null
-  }
-})
-
-const loadGraphPreview = async () => {
-  const flowId = String(scriptFlowToolbarPayload.value?.flow?.id ?? '').trim()
-  if (!flowId) {
-    graphPreview.value = null
-    return
-  }
-  graphPreviewLoading.value = true
-  graphPreviewError.value = null
-  try {
-    graphPreview.value = await getGraphRagPreviewDraft(
-      flowId,
-      (props.flowDefinition as Record<string, unknown>) ?? {},
-      (scriptFlowToolbarPayload.value?.flow?.flow_metadata as Record<string, unknown>) ?? {},
-    )
-  }
-  catch (err: unknown) {
-    graphPreviewError.value = getReadableErrorMessage(err, 'Не удалось построить GraphRAG-превью')
-  }
-  finally {
-    graphPreviewLoading.value = false
-  }
-}
-
-import { coverageRiskBadgeLabel } from '~/utils/scriptFlowCoverageRisk'
 
 // ── Canvas wrapper ref (for addNodeAtCenter) ─────────────────────────────────
 const canvasWrapperRef = ref<HTMLDivElement | null>(null)
@@ -1026,7 +590,6 @@ const canvasWrapperRef = ref<HTMLDivElement | null>(null)
 // ── Палитра и экшн-бар ──────────────────────────────────────────────────────
 const isPaletteOpen = ref(false)
 const isTemplatePickerOpen = ref(false)
-const isStatusSheetOpen = ref(false)
 const isCanvasGuideOpen = ref(false)
 const pendingTemplateId = ref<string | null>(null)
 const templatePickerOpenedAtMs = ref<number | null>(null)
@@ -1096,7 +659,6 @@ const onInspectorOpenChange = (v: boolean) => {
   if (v) {
     isPaletteOpen.value = false
     isTemplatePickerOpen.value = false
-    isStatusSheetOpen.value = false
   }
 }
 
@@ -1112,7 +674,6 @@ watch(isPaletteOpen, (v) => {
   if (v) {
     inspectorNodeId.value = null
     isTemplatePickerOpen.value = false
-    isStatusSheetOpen.value = false
   }
   else {
     paletteSourceNode.value = null
@@ -1123,19 +684,9 @@ watch(isTemplatePickerOpen, (v) => {
   if (v) {
     inspectorNodeId.value = null
     isPaletteOpen.value = false
-    isStatusSheetOpen.value = false
   }
   if (!v)
     pendingTemplateId.value = null
-})
-
-watch(isStatusSheetOpen, (v) => {
-  if (v) {
-    inspectorNodeId.value = null
-    isPaletteOpen.value = false
-    isTemplatePickerOpen.value = false
-    loadGraphPreview()
-  }
 })
 
 watch(isCanvasGuideOpen, (v) => {
@@ -1143,7 +694,6 @@ watch(isCanvasGuideOpen, (v) => {
     inspectorNodeId.value = null
     isPaletteOpen.value = false
     isTemplatePickerOpen.value = false
-    isStatusSheetOpen.value = false
   }
 })
 

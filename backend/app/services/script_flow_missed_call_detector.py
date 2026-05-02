@@ -191,6 +191,47 @@ async def detect_missed_calls(
     return saved
 
 
+async def _find_best_tactic_match(
+    db: AsyncSession,
+    *,
+    tenant_id: UUID,
+    agent_id: UUID,
+    message: str,
+    openai_api_key: str,
+    threshold: float = 0.55,
+) -> dict[str, Any] | None:
+    """Quick single-query pgvector lookup for a message. Returns best match above threshold."""
+    from app.services.directory.service import create_embedding
+    from sqlalchemy import text as sa_text
+
+    try:
+        emb = await create_embedding(message[:1000], openai_api_key=openai_api_key)
+        if not emb:
+            return None
+        emb_str = "[" + ",".join(str(x) for x in emb) + "]"
+        row = (await db.execute(
+            sa_text(
+                "SELECT flow_id, node_id, title, "
+                "1 - (embedding <=> CAST(:emb AS vector)) AS score "
+                "FROM script_flow_node_index "
+                "WHERE tenant_id = :tid AND agent_id = :aid AND is_searchable = true "
+                "ORDER BY embedding <=> CAST(:emb AS vector) "
+                "LIMIT 1"
+            ),
+            {"emb": emb_str, "tid": str(tenant_id), "aid": str(agent_id)},
+        )).first()
+        if row and float(row.score) >= threshold:
+            return {
+                "flow_id": str(row.flow_id),
+                "node_id": row.node_id,
+                "title": row.title,
+                "score": round(float(row.score), 3),
+            }
+    except Exception as exc:  # noqa: BLE001
+        log.warning("missed_call.match_lookup_failed", error=str(exc))
+    return None
+
+
 async def get_missed_calls_summary(
     db: AsyncSession,
     *,
@@ -200,6 +241,8 @@ async def get_missed_calls_summary(
     examples_per_class: int = 5,
 ) -> dict[str, Any]:
     since = datetime.now(timezone.utc) - timedelta(days=period_days)
+
+    api_key = await get_decrypted_api_key(db, tenant_id, "openai")
 
     counts_q = (
         select(
@@ -230,18 +273,28 @@ async def get_missed_calls_summary(
             .limit(examples_per_class)
         )
         examples = (await db.execute(ex_q)).scalars().all()
-        classes.append(
-            {
-                "classification": cls,
-                "count": int(c),
-                "examples": [
-                    {
-                        "user_message": e.user_message,
-                        "confidence": round(e.confidence, 2) if e.confidence is not None else None,
-                        "created_at": e.created_at.isoformat(),
-                    }
-                    for e in examples
-                ],
-            }
-        )
+
+        enriched = []
+        for e in examples:
+            best_match = None
+            if api_key:
+                best_match = await _find_best_tactic_match(
+                    db,
+                    tenant_id=tenant_id,
+                    agent_id=agent_id,
+                    message=e.user_message,
+                    openai_api_key=api_key,
+                )
+            enriched.append({
+                "user_message": e.user_message,
+                "confidence": round(e.confidence, 2) if e.confidence is not None else None,
+                "created_at": e.created_at.isoformat(),
+                "best_match": best_match,
+            })
+
+        classes.append({
+            "classification": cls,
+            "count": int(c),
+            "examples": enriched,
+        })
     return {"period_days": period_days, "classes": classes}

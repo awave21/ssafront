@@ -115,9 +115,6 @@ export const useLayoutState = () => {
 
   // Script-flow page actions (canvas editor → TopBar header buttons)
   const scriptFlowActionsVisible = useState<boolean>('script-flow-actions-visible', () => false)
-  const scriptFlowSandboxOpen = useState<boolean>('script-flow-sandbox-open', () => false)
-  const scriptFlowCoverageOpen = useState<boolean>('script-flow-coverage-open', () => false)
-
   /** Редактор сценария: компактная полоса статуса и действий в шапке агента */
   const scriptFlowToolbarPayload = useState<ScriptFlowToolbarPayload | null>(
     'script-flow-toolbar-payload',
@@ -182,8 +179,6 @@ export const useLayoutState = () => {
     resetFunctionsTopbarState,
     isEditorFullscreen,
     scriptFlowActionsVisible,
-    scriptFlowSandboxOpen,
-    scriptFlowCoverageOpen,
     scriptFlowToolbarPayload,
     knowledgeGraphRebuildAction,
     knowledgeGraphRefreshAction,

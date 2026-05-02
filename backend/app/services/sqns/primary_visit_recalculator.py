@@ -29,10 +29,10 @@ class PrimaryVisitRecalculator:
             return 0
 
         now = datetime.now(timezone.utc)
-        primary_visit_ids: set[UUID] = set()
 
         for id_chunk in _chunked(normalized_ids, _CHUNK_SIZE):
-            ranked_subquery = (
+            # --- is_primary_visit: первый визит клиента у агента ---
+            ranked_global = (
                 select(
                     SqnsVisit.id.label("visit_id"),
                     func.row_number()
@@ -50,30 +50,64 @@ class PrimaryVisitRecalculator:
                 )
                 .subquery()
             )
-            primary_ids_stmt = select(ranked_subquery.c.visit_id).where(ranked_subquery.c.visit_rank == 1)
-            rows = (await self.db.execute(primary_ids_stmt)).scalars().all()
-            primary_visit_ids.update(rows)
+            primary_global_ids: set[UUID] = set(
+                (await self.db.execute(
+                    select(ranked_global.c.visit_id).where(ranked_global.c.visit_rank == 1)
+                )).scalars().all()
+            )
 
-            reset_stmt = (
+            # --- is_primary_per_resource: первый визит клиента у конкретного сотрудника ---
+            ranked_per_resource = (
+                select(
+                    SqnsVisit.id.label("visit_id"),
+                    func.row_number()
+                    .over(
+                        partition_by=(SqnsVisit.client_external_id, SqnsVisit.resource_external_id),
+                        order_by=(SqnsVisit.visit_datetime.asc(), SqnsVisit.external_id.asc()),
+                    )
+                    .label("visit_rank"),
+                )
+                .where(
+                    SqnsVisit.agent_id == self.agent_id,
+                    SqnsVisit.client_external_id.in_(id_chunk),
+                    SqnsVisit.deleted.is_(False),
+                    SqnsVisit.visit_datetime.is_not(None),
+                    SqnsVisit.resource_external_id.is_not(None),
+                )
+                .subquery()
+            )
+            primary_per_resource_ids: set[UUID] = set(
+                (await self.db.execute(
+                    select(ranked_per_resource.c.visit_id).where(ranked_per_resource.c.visit_rank == 1)
+                )).scalars().all()
+            )
+
+            # Сброс обоих флагов
+            await self.db.execute(
                 update(SqnsVisit)
                 .where(
                     SqnsVisit.agent_id == self.agent_id,
                     SqnsVisit.client_external_id.in_(id_chunk),
                 )
-                .values(is_primary_visit=False, updated_at=now)
+                .values(is_primary_visit=False, is_primary_per_resource=False, updated_at=now)
             )
-            await self.db.execute(reset_stmt)
 
-        if primary_visit_ids:
-            for id_chunk in _chunked(list(primary_visit_ids), _CHUNK_SIZE):
-                mark_primary_stmt = (
-                    update(SqnsVisit)
-                    .where(
-                        SqnsVisit.agent_id == self.agent_id,
-                        SqnsVisit.id.in_(id_chunk),
+            # Проставляем is_primary_visit
+            if primary_global_ids:
+                for id_chunk_inner in _chunked(list(primary_global_ids), _CHUNK_SIZE):
+                    await self.db.execute(
+                        update(SqnsVisit)
+                        .where(SqnsVisit.agent_id == self.agent_id, SqnsVisit.id.in_(id_chunk_inner))
+                        .values(is_primary_visit=True, updated_at=now)
                     )
-                    .values(is_primary_visit=True, updated_at=now)
-                )
-                await self.db.execute(mark_primary_stmt)
+
+            # Проставляем is_primary_per_resource
+            if primary_per_resource_ids:
+                for id_chunk_inner in _chunked(list(primary_per_resource_ids), _CHUNK_SIZE):
+                    await self.db.execute(
+                        update(SqnsVisit)
+                        .where(SqnsVisit.agent_id == self.agent_id, SqnsVisit.id.in_(id_chunk_inner))
+                        .values(is_primary_per_resource=True, updated_at=now)
+                    )
 
         return len(normalized_ids)

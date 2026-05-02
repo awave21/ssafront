@@ -31,27 +31,6 @@
           @request-immediate-persist="() => void flushPersistAwait()"
           @template-applied="onScriptFlowTemplateApplied"
         />
-        <div
-          v-if="sandboxOpen"
-          class="absolute bottom-4 left-4 z-20"
-        >
-          <ScriptFlowSearchSandbox
-            :agent-id="agentId"
-            :flow-id="String(route.params.flowId)"
-            :flow-name="flow?.name ?? null"
-            @close="sandboxOpen = false"
-          />
-        </div>
-        <div
-          v-if="coverageOpen"
-          class="absolute right-4 top-4 z-20"
-        >
-          <ScriptFlowCoverageMatrix
-            :agent-id="agentId"
-            :service-labels="serviceLabelMap"
-            @close="coverageOpen = false"
-          />
-        </div>
       </div>
     </div>
 
@@ -168,8 +147,6 @@ import { useEventListener, useIntervalFn } from '@vueuse/core'
 import AgentPageShell from '~/components/agents/AgentPageShell.vue'
 import ScriptFlowEditor from '~/components/agents/scripts/ScriptFlowEditor.vue'
 import TacticLibraryView from '~/components/agents/scripts/TacticLibraryView.vue'
-import ScriptFlowSearchSandbox from '~/components/agents/scripts/ScriptFlowSearchSandbox.vue'
-import ScriptFlowCoverageMatrix from '~/components/agents/scripts/ScriptFlowCoverageMatrix.vue'
 import { Button } from '~/components/ui/button'
 import {
   Dialog,
@@ -231,8 +208,6 @@ const {
   layoutBreadcrumbSegments,
   breadcrumbBackPath,
   scriptFlowActionsVisible,
-  scriptFlowSandboxOpen: sandboxOpen,
-  scriptFlowCoverageOpen: coverageOpen,
   scriptFlowToolbarPayload,
 } = useLayoutState()
 
@@ -983,8 +958,6 @@ watchEffect(() => {
 onMounted(() => {
   scriptFlowActionsVisible.value = true
   breadcrumbBackPath.value = null
-  sandboxOpen.value = false
-  coverageOpen.value = false
   loadFlow()
 })
 
@@ -994,8 +967,6 @@ onUnmounted(() => {
   scriptFlowActionsVisible.value = false
   breadcrumbBackPath.value = null
   layoutBreadcrumbSegments.value = null
-  sandboxOpen.value = false
-  coverageOpen.value = false
 })
 
 watch(

@@ -23,6 +23,7 @@
             :key="column.id"
             class-name="relative py-4"
             :style="columnCellStyle(column.id)"
+            :title="column.title"
           >
             <div
               class="flex items-center gap-1"
@@ -203,6 +204,7 @@ type ColumnDef = {
   id: ColumnId
   label: string
   sortBy?: CommoditiesTableSortBy
+  title?: string
 }
 
 const STORAGE_KEY = 'analytics-commodities-table-columns-v1'
@@ -219,8 +221,8 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'repeat_arrived_total', label: 'Повт. дошедшие' },
   { id: 'conversion', label: 'Конверсия %' },
   { id: 'revenue_total', label: 'Выручка', sortBy: 'revenue_total' },
-  { id: 'payments_total', label: 'Платежи' },
-  { id: 'avg_check', label: 'Средний чек', sortBy: 'avg_check' },
+  { id: 'payments_total', label: 'Транзакции', title: 'Число строк оплат по этому товару (один визит с несколькими товарами = несколько строк)' },
+  { id: 'avg_check', label: 'Ср. чек (дошедший)', sortBy: 'avg_check', title: 'Выручка по товару / число дошедших пациентов' },
   { id: 'share_bookings', label: 'Доля записей %' },
 ]
 

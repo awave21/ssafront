@@ -506,11 +506,16 @@ def _to_utc_datetime(dt: datetime | None) -> datetime | None:
     return dt.astimezone(ZoneInfo("UTC"))
 
 
-def _classify_visit_type(*, visit: SqnsVisit) -> tuple[bool, bool]:
-    """Первичный/повторный только по флагу is_primary_visit из SQNS (без эвристик по периоду и raw_data)."""
-    if visit.is_primary_visit is True:
+def _classify_visit_type(*, visit: SqnsVisit, per_resource: bool = False) -> tuple[bool, bool]:
+    """Первичный/повторный по флагу из БД.
+
+    per_resource=True — первый визит клиента к конкретному сотруднику (is_primary_per_resource).
+    per_resource=False — первый визит клиента к агенту вообще (is_primary_visit).
+    """
+    flag = visit.is_primary_per_resource if per_resource else visit.is_primary_visit
+    if flag is True:
         return True, False
-    if visit.is_primary_visit is False:
+    if flag is False:
         return False, True
     return False, False
 
@@ -657,31 +662,43 @@ class AgentAnalyticsService:
         repeat_arrived = sum(1 for item in view.visit_contexts if item.is_arrived and item.is_repeat)
         bookings_from_primary = primary_visits
 
-        # Calculate revenue breakdown
-        primary_revenue = Decimal("0")
-        repeat_revenue = Decimal("0")
-
-        # Map visits to their types
-        visit_type_map: dict[int, str] = {}  # external_id -> type
+        # Map visits in the period to their types
+        visit_type_map: dict[int, str] = {}  # external_id -> "primary" | "repeat"
         for item in view.visit_contexts:
             if item.is_primary:
                 visit_type_map[int(item.visit.external_id)] = "primary"
             elif item.is_repeat:
                 visit_type_map[int(item.visit.external_id)] = "repeat"
 
-        # Extract service mapping to split payments correctly
-        visit_service_map: dict[int, int] = defaultdict(int)
-        for item in view.visit_contexts:
-            service_refs = _extract_visit_service_refs(item.visit)
-            visit_service_map[int(item.visit.external_id)] = len(service_refs)
+        # Payments can reference visits outside the visit window (e.g. paid in March for a
+        # February visit). Load those visits so their revenue is still attributed correctly.
+        unmapped_visit_ids = {
+            _parse_intish(p.visit_external_id)
+            for p in view.payments
+            if p.amount is not None and _parse_intish(p.visit_external_id) not in visit_type_map
+        } - {None}
+        if unmapped_visit_ids:
+            ext_visits_stmt = select(SqnsVisit).where(
+                SqnsVisit.agent_id == self.agent.id,
+                SqnsVisit.external_id.in_(unmapped_visit_ids),
+            )
+            ext_visits = (await self.db.execute(ext_visits_stmt)).scalars().all()
+            for v in ext_visits:
+                is_p, is_r = _classify_visit_type(visit=v, per_resource=resource_external_id is not None)
+                if is_p:
+                    visit_type_map[int(v.external_id)] = "primary"
+                elif is_r:
+                    visit_type_map[int(v.external_id)] = "repeat"
 
+        # Calculate revenue breakdown
+        primary_revenue = Decimal("0")
+        repeat_revenue = Decimal("0")
         for payment in view.payments:
             if payment.amount is None:
                 continue
             v_id = _parse_intish(payment.visit_external_id)
             if v_id is not None and v_id in visit_type_map:
-                v_type = visit_type_map[v_id]
-                if v_type == "primary":
+                if visit_type_map[v_id] == "primary":
                     primary_revenue += payment.amount
                 else:
                     repeat_revenue += payment.amount
@@ -689,7 +706,8 @@ class AgentAnalyticsService:
         payment_amounts = [item.amount for item in view.payments if item.amount is not None]
         payments_total = len(payment_amounts)
         revenue_total = sum(payment_amounts, start=Decimal("0"))
-        avg_check = revenue_total / payments_total if payments_total else Decimal("0")
+        # avg_check = revenue per arrived patient — consistent with primary_avg_check / repeat_avg_check
+        avg_check = revenue_total / arrived_total if arrived_total else Decimal("0")
         conversion = (arrived_total / visits_total * 100) if visits_total else 0.0
         primary_conversion = (primary_arrived / primary_visits * 100) if primary_visits else 0.0
         repeat_conversion = (repeat_arrived / repeat_total * 100) if repeat_total else 0.0
@@ -1081,11 +1099,10 @@ class AgentAnalyticsService:
 
         rows = list(metrics_by_service.values())
         for row in rows:
-            if row.payments_total > 0:
-                avg_check = row.revenue_total / Decimal(row.payments_total)
-            else:
-                avg_check = Decimal("0")
-            row.avg_check = _round_money(avg_check)
+            # avg_check = revenue per arrived patient — consistent with overview primary/repeat avg
+            row.avg_check = _round_money(
+                row.revenue_total / Decimal(row.arrived_total) if row.arrived_total else Decimal("0")
+            )
 
         reverse = sort_order == "desc"
         rows.sort(
@@ -1121,9 +1138,10 @@ class AgentAnalyticsService:
 
         totals_revenue = sum((item.revenue_total for item in rows), start=Decimal("0"))
         totals_payments = sum(item.payments_total for item in rows)
+        totals_arrived = sum(item.arrived_total for item in rows)
         totals_avg_check = (
-            _round_money(totals_revenue / Decimal(totals_payments))
-            if totals_payments
+            _round_money(totals_revenue / Decimal(totals_arrived))
+            if totals_arrived
             else 0.0
         )
 
@@ -1279,11 +1297,9 @@ class AgentAnalyticsService:
 
         acc_rows = list(metrics_by_commodity.values())
         for row in acc_rows:
-            if row.payments_total > 0:
-                avg_check = row.revenue_total / Decimal(row.payments_total)
-            else:
-                avg_check = Decimal("0")
-            row.avg_check = _round_money(avg_check)
+            row.avg_check = _round_money(
+                row.revenue_total / Decimal(row.arrived_total) if row.arrived_total else Decimal("0")
+            )
 
         reverse = sort_order == "desc"
         acc_rows.sort(
@@ -1319,8 +1335,9 @@ class AgentAnalyticsService:
 
         totals_revenue = sum((r.revenue_total for r in acc_rows), start=Decimal("0"))
         totals_payments = sum(r.payments_total for r in acc_rows)
+        totals_arrived = sum(r.arrived_total for r in acc_rows)
         totals_avg_check = (
-            _round_money(totals_revenue / Decimal(totals_payments)) if totals_payments else 0.0
+            _round_money(totals_revenue / Decimal(totals_arrived)) if totals_arrived else 0.0
         )
 
         totals = AnalyticsCommoditiesTableTotals(
@@ -1435,8 +1452,6 @@ class AgentAnalyticsService:
             client = dataset.clients_by_external_id.get(client_id) if client_id is not None else None
             tags = _extract_client_tags(client)
             visit_channel = _extract_visit_channel(visit)
-            is_primary, is_repeat = _classify_visit_type(visit=visit)
-
             if normalized_channel and visit_channel != normalized_channel:
                 continue
             if normalized_tags and not tags.intersection(normalized_tags):
@@ -1445,6 +1460,10 @@ class AgentAnalyticsService:
                 rid = visit.resource_external_id
                 if rid is None or int(rid) != resource_external_id:
                     continue
+
+            is_primary, is_repeat = _classify_visit_type(
+                visit=visit, per_resource=resource_external_id is not None
+            )
 
             context = VisitContext(
                 visit=visit,

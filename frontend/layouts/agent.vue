@@ -28,8 +28,6 @@ const {
   functionsCanSave,
   functionsCreateAction,
   scriptFlowActionsVisible,
-  scriptFlowSandboxOpen,
-  scriptFlowCoverageOpen,
   scriptFlowToolbarPayload,
     knowledgeGraphRebuildAction,
     knowledgeGraphRefreshAction,

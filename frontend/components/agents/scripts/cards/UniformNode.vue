@@ -18,10 +18,12 @@
     }"
   >
     <!-- Цветная вертикальная полоса слева — тип ноды -->
-    <span
-      class="pointer-events-none absolute left-0 top-0 h-full w-[3px] rounded-l-xl"
-      :style="{ backgroundColor: accent }"
-    />
+    <div class="pointer-events-none absolute inset-0 overflow-hidden rounded-xl">
+      <span
+        class="absolute left-0 top-0 h-full w-[3px]"
+        :style="{ backgroundColor: accent }"
+      />
+    </div>
 
     <FlowN8nConnector
       v-if="!isStandalone"

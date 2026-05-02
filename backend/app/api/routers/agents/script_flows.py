@@ -454,6 +454,7 @@ async def get_script_flow_missed_calls(
 async def run_missed_call_detection(
     agent_id: UUID,
     period_hours: int = 24,
+    max_runs: int = 60,
     db: AsyncSession = Depends(get_db),
     user: AuthContext = Depends(require_scope("agents:write")),
 ) -> dict:
@@ -466,11 +467,13 @@ async def run_missed_call_detection(
     )
 
     hours = max(1, min(int(period_hours or 24), 168))
+    runs = max(10, min(int(max_runs or 60), 500))
     saved = await detect_missed_calls(
         db,
         tenant_id=user.tenant_id,
         agent_id=agent_id,
         period_hours=hours,
+        max_runs=runs,
     )
     summary = await get_missed_calls_summary(
         db,

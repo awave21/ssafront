@@ -374,6 +374,7 @@ class SqnsVisit(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     attendance: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     is_primary_visit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, index=True)
+    is_primary_per_resource: Mapped[bool | None] = mapped_column(Boolean, nullable=True, index=True)
     online: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     total_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     total_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
