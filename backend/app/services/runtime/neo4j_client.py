@@ -23,3 +23,13 @@ def get_neo4j_driver() -> Any | None:
     except Exception:
         return None
 
+
+def close_neo4j_driver() -> None:
+    driver = get_neo4j_driver()
+    if driver is None:
+        return
+    try:
+        driver.close()
+    except Exception:
+        pass
+    get_neo4j_driver.cache_clear()

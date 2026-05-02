@@ -12,13 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.agent import Agent
 from app.db.models.channel import AgentChannel, Channel
-from app.db.session import get_db
+from app.db.session import get_db, async_session_factory
 from app.api.routers.webhooks_inbound_agent import process_webhook_inbound_agent_message
 from app.api.routers.webhooks_phone import router as phone_webhooks_router
 from app.api.routers.webhooks_utils import mask_headers, sanitize_agent_reply_text
 from app.services.dialog_state import is_dialog_active, is_manager_paused, set_dialog_status
 from app.services.agent_user_state import is_agent_user_disabled
 from app.services.telegram import send_telegram_chat_action, send_telegram_message, TelegramWebhookError
+from app.services.message_debounce import debounce_and_run
 
 logger = structlog.get_logger()
 webhook_logger = structlog.get_logger("webhooks")
@@ -281,99 +282,125 @@ async def telegram_webhook(
         should_run_agent = dialog_active and not manager_paused and not agent.is_disabled and not user_disabled
 
         if should_run_agent and bot_token and input_text:
-            stop_typing = asyncio.Event()
+            _bot_token = bot_token
+            _chat_id = chat_id
+            _agent_id_str = str(agent_id)
+            _session_id = session_id
+            _channel_id = channel.id
+            _tenant_id = agent.tenant_id
 
-            async def keep_typing() -> None:
-                while not stop_typing.is_set():
-                    await send_telegram_chat_action(bot_token=bot_token, chat_id=chat_id, action="typing")
+            async def _run_agent_after_debounce(aggregated_text: str, _message_ids: list[str] | None = None) -> None:
+                async with async_session_factory() as _db:
+                    stmt = (
+                        select(Channel, Agent)
+                        .join(AgentChannel, AgentChannel.channel_id == Channel.id)
+                        .join(Agent, Agent.id == AgentChannel.agent_id)
+                        .where(Channel.id == _channel_id)
+                    )
+                    row = (await _db.execute(stmt)).first()
+                    if row is None:
+                        return
+                    _channel, _agent = row
+
+                    stop_typing = asyncio.Event()
+
+                    async def keep_typing() -> None:
+                        while not stop_typing.is_set():
+                            await send_telegram_chat_action(
+                                bot_token=_bot_token, chat_id=_chat_id, action="typing"
+                            )
+                            try:
+                                await asyncio.wait_for(stop_typing.wait(), timeout=4.0)
+                            except asyncio.TimeoutError:
+                                continue
+
+                    typing_task = asyncio.create_task(keep_typing())
                     try:
-                        await asyncio.wait_for(stop_typing.wait(), timeout=4.0)
-                    except asyncio.TimeoutError:
-                        continue
-
-            typing_task = asyncio.create_task(keep_typing())
-            try:
-                reply = await _process_telegram_message(
-                    db, agent, channel, chat_id, input_text, user_info, run_agent=True
-                )
-            finally:
-                stop_typing.set()
-                typing_task.cancel()
-                try:
-                    await typing_task
-                except asyncio.CancelledError:
-                    pass
-
-            if reply and bot_token:
-                reply_text = sanitize_agent_reply_text(reply)
-                if reply_text:
-                    sent = False
-                    try:
-                        await send_telegram_message(
-                            bot_token=bot_token,
-                            chat_id=chat_id,
-                            text=reply_text,
-                            parse_mode="Markdown",
+                        reply = await _process_telegram_message(
+                            _db, _agent, _channel, _chat_id, aggregated_text, user_info, run_agent=True
                         )
-                        sent = True
-                    except TelegramWebhookError:
+                    finally:
+                        stop_typing.set()
+                        typing_task.cancel()
+                        try:
+                            await typing_task
+                        except asyncio.CancelledError:
+                            pass
+
+                if reply and _bot_token:
+                    reply_text = sanitize_agent_reply_text(reply)
+                    if reply_text:
+                        sent = False
                         try:
                             await send_telegram_message(
-                                bot_token=bot_token,
-                                chat_id=chat_id,
+                                bot_token=_bot_token,
+                                chat_id=_chat_id,
                                 text=reply_text,
+                                parse_mode="Markdown",
                             )
                             sent = True
-                        except TelegramWebhookError as exc:
-                            logger.warning(
-                                "telegram_send_reply_failed",
-                                chat_id=chat_id,
-                                agent_id=str(agent_id),
-                                error=str(exc),
+                        except TelegramWebhookError:
+                            try:
+                                await send_telegram_message(
+                                    bot_token=_bot_token,
+                                    chat_id=_chat_id,
+                                    text=reply_text,
+                                )
+                                sent = True
+                            except TelegramWebhookError as exc:
+                                logger.warning(
+                                    "telegram_send_reply_failed",
+                                    chat_id=_chat_id,
+                                    agent_id=_agent_id_str,
+                                    error=str(exc),
+                                )
+                                webhook_logger.warning(
+                                    "telegram_send_reply_failed",
+                                    chat_id=_chat_id,
+                                    agent_id=_agent_id_str,
+                                    session_id=_session_id,
+                                    error=str(exc),
+                                )
+                        if sent:
+                            webhook_logger.info(
+                                "telegram_reply_sent",
+                                chat_id=_chat_id,
+                                agent_id=_agent_id_str,
+                                session_id=_session_id,
+                                reply_len=len(reply_text),
                             )
-                            webhook_logger.warning(
-                                "telegram_send_reply_failed",
-                                chat_id=chat_id,
-                                agent_id=str(agent_id),
-                                session_id=session_id,
-                                error=str(exc),
-                            )
-                    if sent:
-                        webhook_logger.info(
-                            "telegram_reply_sent",
-                            chat_id=chat_id,
-                            agent_id=str(agent_id),
-                            session_id=session_id,
-                            reply_len=len(reply_text),
+                    else:
+                        logger.warning(
+                            "telegram_agent_reply_empty_after_sanitize",
+                            chat_id=_chat_id,
+                            agent_id=_agent_id_str,
+                            session_id=_session_id,
+                            raw_reply_len=len(reply) if isinstance(reply, str) else None,
                         )
-                else:
+                        webhook_logger.warning(
+                            "telegram_agent_reply_empty_after_sanitize",
+                            chat_id=_chat_id,
+                            agent_id=_agent_id_str,
+                            session_id=_session_id,
+                            raw_reply_len=len(reply) if isinstance(reply, str) else None,
+                        )
+                elif _bot_token:
                     logger.warning(
-                        "telegram_agent_reply_empty_after_sanitize",
-                        chat_id=chat_id,
-                        agent_id=str(agent_id),
-                        session_id=session_id,
-                        raw_reply_len=len(reply) if isinstance(reply, str) else None,
+                        "telegram_agent_reply_empty",
+                        chat_id=_chat_id,
+                        agent_id=_agent_id_str,
+                        session_id=_session_id,
                     )
                     webhook_logger.warning(
-                        "telegram_agent_reply_empty_after_sanitize",
-                        chat_id=chat_id,
-                        agent_id=str(agent_id),
-                        session_id=session_id,
-                        raw_reply_len=len(reply) if isinstance(reply, str) else None,
+                        "telegram_agent_reply_empty",
+                        chat_id=_chat_id,
+                        agent_id=_agent_id_str,
+                        session_id=_session_id,
                     )
-            elif bot_token:
-                logger.warning(
-                    "telegram_agent_reply_empty",
-                    chat_id=chat_id,
-                    agent_id=str(agent_id),
-                    session_id=session_id,
-                )
-                webhook_logger.warning(
-                    "telegram_agent_reply_empty",
-                    chat_id=chat_id,
-                    agent_id=str(agent_id),
-                    session_id=session_id,
-                )
+
+            # Показываем typing сразу, пока ждём debounce
+            await send_telegram_chat_action(bot_token=bot_token, chat_id=chat_id, action="typing")
+            await debounce_and_run(session_id, input_text, _run_agent_after_debounce)
         else:
             # Агент не запускается: политика чата / канал / пауза.
             # Важно: раньше при отсутствии bot_token попадали в ветку с reason=dialog_inactive — это вводило в заблуждение.

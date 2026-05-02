@@ -50,6 +50,7 @@ from app.db.models.direct_question_followup_job import DirectQuestionFollowupJob
 from app.db.models.knowledge_file import KnowledgeFile
 from app.db.models.knowledge_file_chunk import KnowledgeFileChunk
 from app.db.models.knowledge_index_job import KnowledgeIndexJob
+from app.db.models.unified_graph_rebuild_job import UnifiedGraphRebuildJob
 from app.db.models.user_table import UserTable, UserTableAttribute, UserTableRecord
 from app.db.models.script_flow import ScriptFlow
 from app.db.models.script_flow_graph_diagnostic import ScriptFlowGraphDiagnostic
@@ -57,11 +58,13 @@ from app.db.models.script_flow_graph_community import ScriptFlowGraphCommunity
 from app.db.models.script_flow_graph_node import ScriptFlowGraphNode
 from app.db.models.script_flow_graph_relation import ScriptFlowGraphRelation
 from app.db.models.script_flow_edge_index import ScriptFlowEdgeIndex
+from app.db.models.script_flow_coverage_gap_cluster import ScriptFlowCoverageGapCluster
+from app.db.models.script_flow_missed_tactic_call import ScriptFlowMissedTacticCall
 from app.db.models.script_flow_node_index import ScriptFlowNodeIndex
+from app.db.models.script_flow_tactic_search import ScriptFlowTacticSearch
 from app.db.models.script_flow_version import ScriptFlowVersion
 from app.db.models.script_node import ScriptNode
 from app.db.models.scenario_delayed_message import ScenarioDelayedMessage
-from app.db.models.session_script_context import SessionScriptContext
 from app.db.models.agent_kg_entity import AgentKgEntity
 from app.db.models.agent_unified_graph_node import AgentUnifiedGraphNode
 from app.db.models.agent_unified_graph_relation import AgentUnifiedGraphRelation
@@ -120,6 +123,7 @@ __all__ = [
     "KnowledgeFile",
     "KnowledgeFileChunk",
     "KnowledgeIndexJob",
+    "UnifiedGraphRebuildJob",
     "UserTable",
     "UserTableAttribute",
     "UserTableRecord",
@@ -129,11 +133,13 @@ __all__ = [
     "ScriptFlowGraphNode",
     "ScriptFlowGraphRelation",
     "ScriptFlowEdgeIndex",
+    "ScriptFlowCoverageGapCluster",
+    "ScriptFlowMissedTacticCall",
     "ScriptFlowNodeIndex",
+    "ScriptFlowTacticSearch",
     "ScriptFlowVersion",
     "ScriptNode",
     "ScenarioDelayedMessage",
-    "SessionScriptContext",
     "AgentKgEntity",
     "AgentUnifiedGraphNode",
     "AgentUnifiedGraphRelation",

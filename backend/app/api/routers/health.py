@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.db.session import get_db
+from app.services.runtime.neo4j_client import get_neo4j_driver
 
 router = APIRouter()
 
@@ -63,4 +64,51 @@ async def db_health(db: AsyncSession = Depends(get_db)) -> dict:
             "database": {
                 "error": str(e)
             }
+        }
+
+
+@router.get("/health/neo4j")
+async def neo4j_health() -> dict:
+    """Проверка доступности Neo4j драйвера/соединения."""
+    settings = get_settings()
+    if not settings.neo4j_enabled:
+        return {
+            "status": "disabled",
+            "neo4j": {
+                "enabled": False,
+            },
+        }
+
+    driver = get_neo4j_driver()
+    if driver is None:
+        return {
+            "status": "error",
+            "neo4j": {
+                "enabled": True,
+                "available": False,
+                "error": "driver_not_initialized",
+            },
+        }
+
+    try:
+        database = settings.neo4j_database or None
+        with driver.session(database=database) as session:
+            session.run("RETURN 1 AS ok").single()
+        return {
+            "status": "ok",
+            "neo4j": {
+                "enabled": True,
+                "available": True,
+                "database": database or "default",
+            },
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "neo4j": {
+                "enabled": True,
+                "available": False,
+                "database": settings.neo4j_database or "default",
+                "error": str(exc),
+            },
         }

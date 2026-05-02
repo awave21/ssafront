@@ -91,16 +91,9 @@
           {{ formattedTime }}
         </span>
         
-        <!-- Agent Status Badge (per-dialog) -->
+        <!-- Agent Status Badge: only show when paused -->
         <span
-          v-if="isDialogAgentActive"
-          class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-green-100 text-green-700 flex items-center gap-0.5"
-        >
-          <span class="w-1.5 h-1.5 bg-green-500 rounded-full" />
-          Агент
-        </span>
-        <span
-          v-else
+          v-if="!isDialogAgentActive"
           class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-100 text-amber-700 flex items-center gap-0.5"
         >
           <PauseCircle class="w-3 h-3" />
@@ -112,7 +105,7 @@
     <!-- Context Menu Trigger (mobile long press fallback) -->
     <button
       @click.stop="showContextMenu"
-      class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-slate-200 transition-opacity lg:block hidden"
+      class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-slate-200 transition-opacity"
     >
       <MoreVertical class="w-4 h-4 text-slate-500" />
     </button>
@@ -296,7 +289,12 @@ const formattedTime = computed(() => {
   } else if (diffDays < 7) {
     return date.toLocaleDateString('ru-RU', { weekday: 'short' })
   } else {
-    return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+    const isOlderThanYear = diffDays >= 365
+    return date.toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'short',
+      ...(isOlderThanYear ? { year: 'numeric' } : {})
+    })
   }
 })
 

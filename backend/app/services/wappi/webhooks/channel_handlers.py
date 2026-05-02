@@ -71,6 +71,7 @@ def _build_telegram_context(
     platform_user_id = from_id or chat_key
     wh_type = str(raw_msg.get("wh_type") or "").strip().lower()
     linked_account_message = wh_type == "outgoing_message_phone" or is_from_linked_account(raw_msg)
+    msg_id = str(raw_msg.get("id") or "").strip() or None
     return InboundMessageContext(
         session_id=f"telegram_phone:{chat_key}",
         input_text=input_text,
@@ -79,6 +80,7 @@ def _build_telegram_context(
         linked_account_message=linked_account_message,
         raw_msg=raw_msg,
         send_payload={"chat_key": chat_key},
+        wappi_message_id=msg_id,
     )
 
 
@@ -97,6 +99,7 @@ def _build_whatsapp_context(
     platform_user_id = from_id or chat_key
     wh_type = str(raw_msg.get("wh_type") or "").strip().lower()
     linked_account_message = wh_type == "outgoing_message_phone" or is_from_linked_account(raw_msg)
+    msg_id = str(raw_msg.get("id") or "").strip() or None
     return InboundMessageContext(
         session_id=f"whatsapp:{chat_key}",
         input_text=input_text,
@@ -105,6 +108,7 @@ def _build_whatsapp_context(
         linked_account_message=linked_account_message,
         raw_msg=raw_msg,
         send_payload={"chat_key": chat_key},
+        wappi_message_id=msg_id,
     )
 
 
@@ -131,6 +135,7 @@ def _build_max_context(
     platform_user_id = from_raw or recipient or session_peer
     wh_type = str(raw_msg.get("wh_type") or "").strip().lower()
     linked_account_message = wh_type == "outgoing_message_phone" or is_from_linked_account(raw_msg)
+    msg_id = str(raw_msg.get("id") or "").strip() or None
     return InboundMessageContext(
         session_id=f"max:{session_peer}",
         input_text=input_text,
@@ -139,6 +144,7 @@ def _build_max_context(
         linked_account_message=linked_account_message,
         raw_msg=raw_msg,
         send_payload={"recipient": recipient, "chat_peer": chat_peer},
+        wappi_message_id=msg_id,
     )
 
 

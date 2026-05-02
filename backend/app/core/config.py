@@ -206,9 +206,9 @@ class Settings(BaseSettings):
         validation_alias="MICROSOFT_GRAPHRAG_WEBHOOK_TIMEOUT_SECONDS",
     )
     microsoft_graphrag_auto_dispatch_corpus: bool = Field(
-        default=False,
+        default=True,
         validation_alias="MICROSOFT_GRAPHRAG_AUTO_DISPATCH_CORPUS",
-        description="После синхронизации SQNS / индекса сценария автоматически отправлять корпус в GraphRAG.",
+        description="После синхронизации SQNS, обновления БЗ и индекса сценария автоматически отправлять корпус в GraphRAG.",
     )
     microsoft_graphrag_subprocess_timeout_seconds: float = Field(
         default=7200.0,
@@ -226,18 +226,43 @@ class Settings(BaseSettings):
         validation_alias="MICROSOFT_GRAPHRAG_PROMPT_LANGUAGE",
         description="Аргумент --language для graphrag prompt-tune; пусто/off — не вызывать.",
     )
+    microsoft_graphrag_runtime_method: str = Field(
+        default="local",
+        validation_alias="MICROSOFT_GRAPHRAG_RUNTIME_METHOD",
+        description=(
+            "Режим поиска для рантайм-тула query_microsoft_graphrag: "
+            "substring (старая логика — Cypher CONTAINS по Neo4j + fuzzy preview), "
+            "либо graphrag query --method basic|local|global|drift. "
+            "При ошибке/таймауте CLI происходит фолбэк на substring."
+        ),
+    )
+    microsoft_graphrag_runtime_query_timeout_seconds: float = Field(
+        default=60.0,
+        ge=5.0,
+        validation_alias="MICROSOFT_GRAPHRAG_RUNTIME_QUERY_TIMEOUT_SECONDS",
+        description="Таймаут одного graphrag query в рантайме (секунды).",
+    )
 
     runtime_tool_calls_limit: int = Field(
-        default=5,
+        default=10,
         ge=1,
         validation_alias="RUNTIME_TOOL_CALLS_LIMIT",
         description="Максимум успешных tool-вызовов в одном запуске агента.",
     )
     runtime_request_limit: int = Field(
-        default=6,
+        default=11,
         ge=1,
         validation_alias="RUNTIME_REQUEST_LIMIT",
         description="Максимум LLM-запросов в одном запуске агента (защита от циклов).",
+    )
+    runtime_total_tokens_limit: int | None = Field(
+        default=None,
+        ge=1,
+        validation_alias="RUNTIME_TOTAL_TOKENS_LIMIT",
+        description=(
+            "Жёсткий потолок токенов на один запуск агента (prompt + completion). "
+            "None — без лимита. Рекомендуется 30000–100000 в зависимости от модели."
+        ),
     )
     runtime_strip_tool_messages_from_history: bool = Field(
         default=False,
@@ -498,14 +523,6 @@ class Settings(BaseSettings):
         ge=1,
         le=50,
         validation_alias="SCRIPT_FLOW_INDEX_BATCH_SIZE",
-    )
-    runtime_script_flow_retrieval_engine: Literal["auto", "retriever"] = Field(
-        default="retriever",
-        validation_alias="RUNTIME_SCRIPT_FLOW_RETRIEVAL_ENGINE",
-        description=(
-            "Выбор primary-движка для search_script_flows: "
-            "auto (сейчас эквивалентно retriever), retriever (принудительно)."
-        ),
     )
     runtime_script_flow_strict_entry_default: bool = Field(
         default=False,

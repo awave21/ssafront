@@ -76,6 +76,9 @@ export type Message = {
   tool_call_id?: string
   args?: Record<string, unknown>
   result?: unknown
+  // Edit / delete flags (set by real-time WS updates)
+  is_edited?: boolean
+  is_deleted?: boolean
 }
 
 // API request/response types

@@ -41,9 +41,13 @@ async def dispatch_microsoft_graphrag_corpus(
 
     if ws_root:
         logger.info("microsoft_graphrag_dispatch_mode", mode="local", agent_id=str(agent.id))
-        return await run_local_microsoft_graphrag_index(
+        ok, msg = await run_local_microsoft_graphrag_index(
             db=db, agent=agent, settings=cfg, active_sqns_only=active_sqns_only
         )
+        if ok:
+            agent.microsoft_graphrag_last_indexed_at = datetime.now(timezone.utc)
+            await db.commit()
+        return ok, msg
 
     if url:
         body, filename = await build_sqns_graphrag_corpus(db, agent.id, active_sqns_only=active_sqns_only)

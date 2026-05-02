@@ -37,9 +37,6 @@
               без связей
             </span>
           </div>
-          <p class="mt-0.5 text-[10px] text-muted-foreground truncate" :title="nodeId ?? ''">
-            Внутренний ID: {{ nodeId }}
-          </p>
         </div>
         <button
           type="button"
@@ -50,14 +47,7 @@
         </button>
       </div>
 
-      <div class="shrink-0 space-y-2.5 border-b border-border px-4 py-3">
-        <div class="rounded-xl border border-indigo-200/70 bg-indigo-50/60 px-3 py-2.5 shadow-sm dark:bg-indigo-950/10">
-          <p class="text-[11px] font-semibold text-foreground">Редактор шага разговора</p>
-          <p class="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-            Сначала дайте шагу понятное название, потом заполните смысл справа ниже: когда он нужен,
-            что здесь говорить или спрашивать, и куда разговор должен пойти дальше.
-          </p>
-        </div>
+      <div class="shrink-0 space-y-2 border-b border-border px-4 py-3">
         <div class="space-y-1">
           <label class="insp-label">Как называется этот шаг</label>
           <input

@@ -130,9 +130,15 @@ watch(() => agent.value?.name, (name) => {
 }, { immediate: true })
 
 onUnmounted(() => {
-  breadcrumbTitle.value = ''
-  breadcrumbAgentName.value = ''
-  hideTopBarActions.value = false
+  // Race-safe cleanup: only clear if our title is still the active one.
+  // When navigating between agent pages, the next page's AgentPageShell may
+  // mount BEFORE this one unmounts (Vue's in-out transition / Suspense order),
+  // which would otherwise wipe the new page's breadcrumb to empty.
+  if (breadcrumbTitle.value === props.title) {
+    breadcrumbTitle.value = ''
+    breadcrumbAgentName.value = ''
+    hideTopBarActions.value = false
+  }
 })
 
 const resolveAgentId = (value: string | string[] | undefined) =>

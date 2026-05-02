@@ -323,6 +323,22 @@ async def _get_flow_or_404(
     return flow
 
 
+async def _agent_has_indexed_flows(db: AsyncSession, *, agent_id: UUID, tenant_id: UUID) -> bool:
+    stmt = (
+        select(ScriptFlow.id)
+        .where(
+            ScriptFlow.agent_id == agent_id,
+            ScriptFlow.tenant_id == tenant_id,
+            ScriptFlow.flow_status == "published",
+            ScriptFlow.index_status == "indexed",
+            ScriptFlow.indexed_version.is_not(None),
+            ScriptFlow.indexed_version >= ScriptFlow.published_version,
+        )
+        .limit(1)
+    )
+    return (await db.scalar(stmt)) is not None
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 
@@ -364,6 +380,136 @@ async def create_script_flow(
     await db.commit()
     await db.refresh(flow)
     return ScriptFlowRead.model_validate(flow)
+
+
+@router.get("/script-flows/tactic-coverage/gap-clusters", response_model=dict)
+async def get_script_flow_gap_clusters(
+    agent_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Получить последний снэпшот кластеров пробелов покрытия."""
+    await get_agent_or_404(agent_id, db, user)
+    from app.services.script_flow_gap_clustering import get_latest_clusters
+
+    clusters = await get_latest_clusters(db, tenant_id=user.tenant_id, agent_id=agent_id)
+    return {"clusters": clusters}
+
+
+@router.post("/script-flows/tactic-coverage/gap-clusters/recompute", response_model=dict)
+async def recompute_script_flow_gap_clusters(
+    agent_id: UUID,
+    period_days: int = 7,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Перекластеризовать запросы со слабым/нулевым матчем и обновить снэпшот.
+
+    LLM-затратная операция: эмбеддит каждый уникальный запрос и делает по
+    одному вызову на кластер для генерации читаемого названия.
+    """
+    await get_agent_or_404(agent_id, db, user)
+    from app.services.script_flow_gap_clustering import (
+        get_latest_clusters,
+        recompute_gap_clusters,
+    )
+
+    period = max(1, min(int(period_days or 7), 90))
+    saved = await recompute_gap_clusters(
+        db,
+        tenant_id=user.tenant_id,
+        agent_id=agent_id,
+        period_days=period,
+    )
+    clusters = await get_latest_clusters(
+        db, tenant_id=user.tenant_id, agent_id=agent_id
+    )
+    return {"saved": saved, "clusters": clusters}
+
+
+@router.get("/script-flows/tactic-coverage/missed-calls", response_model=dict)
+async def get_script_flow_missed_calls(
+    agent_id: UUID,
+    period_days: int = 7,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Сводка по упущенным вызовам тула: запросы клиентов, классифицированные
+    как objection/trigger/closing/concern, для которых LLM не позвала
+    `search_expert_tactics`.
+    """
+    await get_agent_or_404(agent_id, db, user)
+    from app.services.script_flow_missed_call_detector import get_missed_calls_summary
+
+    period = max(1, min(int(period_days or 7), 30))
+    return await get_missed_calls_summary(
+        db,
+        tenant_id=user.tenant_id,
+        agent_id=agent_id,
+        period_days=period,
+    )
+
+
+@router.post("/script-flows/tactic-coverage/missed-calls/detect", response_model=dict)
+async def run_missed_call_detection(
+    agent_id: UUID,
+    period_hours: int = 24,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Запустить детектор упущенных вызовов: проходит по последним runs без
+    `search_expert_tactics` и классифицирует сообщения клиентов LLM."""
+    await get_agent_or_404(agent_id, db, user)
+    from app.services.script_flow_missed_call_detector import (
+        detect_missed_calls,
+        get_missed_calls_summary,
+    )
+
+    hours = max(1, min(int(period_hours or 24), 168))
+    saved = await detect_missed_calls(
+        db,
+        tenant_id=user.tenant_id,
+        agent_id=agent_id,
+        period_hours=hours,
+    )
+    summary = await get_missed_calls_summary(
+        db,
+        tenant_id=user.tenant_id,
+        agent_id=agent_id,
+        period_days=max(1, hours // 24 + 1),
+    )
+    return {"detected": saved, "summary": summary}
+
+
+@router.get("/script-flows/tactic-coverage", response_model=dict)
+async def get_script_flow_tactic_coverage(
+    agent_id: UUID,
+    period_days: int = 7,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Аналитика вызовов `search_expert_tactics`: покрытие, топ тактик, пробелы.
+
+    Возвращает:
+    - summary: распределение по релевантности (релевантных / слабых / мимо / без матча)
+    - top_tactics: какие тактики чаще всего попадают в LLM
+    - gap_queries: запросы с слабым/нерелевантным мэтчем — кандидаты на новые сценарии
+    - no_match_queries: запросы, где поиск ничего не вернул
+    """
+    await get_agent_or_404(agent_id, db, user)
+    from app.services.script_flow_coverage import (
+        build_coverage_report,
+        coverage_report_to_dict,
+    )
+
+    period = max(1, min(int(period_days or 7), 90))
+    report = await build_coverage_report(
+        db,
+        tenant_id=user.tenant_id,
+        agent_id=agent_id,
+        period_days=period,
+    )
+    return coverage_report_to_dict(report)
 
 
 @router.get("/script-flows/kg-coverage", response_model=dict)
@@ -1069,14 +1215,9 @@ async def test_search(
     if not query:
         raise _api_error("invalid_query", "query is required", status.HTTP_422_UNPROCESSABLE_ENTITY)
 
-    from app.services.runtime.script_flow_tool import (
-        agent_has_indexed_flows,
-    )
     from app.services.runtime.script_flow_retriever import ScriptFlowRetriever
 
-    settings = get_settings()
-    retrieval_engine = (settings.runtime_script_flow_retrieval_engine or "retriever").strip().lower()
-    if not await agent_has_indexed_flows(db, agent_id=agent_id, tenant_id=user.tenant_id):
+    if not await _agent_has_indexed_flows(db, agent_id=agent_id, tenant_id=user.tenant_id):
         return {
             "query": query,
             "status": "no_index",
@@ -1095,7 +1236,6 @@ async def test_search(
         "status": "ok",
         "matches": packet.matches,
         "retrieval_engine": "script_flow_retriever",
-        "requested_engine": retrieval_engine,
         "debug": packet.debug,
     }
 

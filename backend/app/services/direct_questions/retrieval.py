@@ -82,20 +82,21 @@ async def search_direct_question_candidates(
             "chosen_candidate_id": None,
         }
 
-    embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+    # Pass as TEXT literal so asyncpg doesn't try to encode it as a vector client-side.
+    embedding_str = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
     sql = text(
         """
         SELECT
             id,
             title,
-            1 - (embedding <=> CAST(:embedding AS vector)) AS relevance
+            1 - (embedding <=> CAST(CAST(:embedding AS text) AS vector)) AS relevance
         FROM direct_questions
         WHERE tenant_id = :tenant_id
           AND agent_id = :agent_id
           AND is_enabled = true
           AND embedding IS NOT NULL
           AND embedding_status = 'ready'
-        ORDER BY embedding <=> CAST(:embedding AS vector)
+        ORDER BY embedding <=> CAST(CAST(:embedding AS text) AS vector)
         LIMIT :limit
         """
     )

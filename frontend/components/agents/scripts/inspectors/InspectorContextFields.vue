@@ -1,11 +1,6 @@
 <template>
   <div class="space-y-3">
-    <div class="rounded-xl border border-border/80 bg-background/95 px-3 py-3 shadow-sm">
-      <p class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">1. Когда использовать этот шаг</p>
-      <p class="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-        Помогите ассистенту понять, в какой части разговора и с каким приоритетом этот шаг уместен.
-      </p>
-    </div>
+    <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Когда использовать</p>
     <div class="grid grid-cols-2 gap-2">
       <div class="space-y-1">
         <label class="insp-label">Этап разговора</label>
@@ -37,13 +32,6 @@
           :class="localIsEntryPoint ? 'translate-x-4' : 'translate-x-1'"
         />
       </button>
-    </div>
-
-    <div class="rounded-xl border border-dashed border-violet-300/70 bg-violet-50/50 px-3 py-3 shadow-sm dark:bg-violet-950/10">
-      <p class="text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">Опоры из данных и функций</p>
-      <p class="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-        Если в этом шаге нужны переменные или данные из функций, подключите их ниже.
-      </p>
     </div>
 
     <FunctionVariablePicker />

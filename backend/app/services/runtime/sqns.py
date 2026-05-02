@@ -16,7 +16,7 @@ from app.services.sqns import SQNSClientError
 from app.services.tool_executor import ToolExecutionError
 
 logger = structlog.get_logger("app.services.runtime")
-_MAX_VISIT_PAGES = 200
+_MAX_VISIT_PAGES = 10
 
 
 def _sqns_error_payload(
@@ -693,7 +693,7 @@ def build_sqns_legacy_tools(agent: Agent, user: AuthContext) -> list[PydanticToo
                                     "resource_id": resource.external_id,
                                     "name": resource.name,
                                     "specialization": resource.specialization,
-                                    "information": resource.information,
+                                    "information": (resource.information or "")[:200],
                                     "isActive": resource.is_active,
                                     "active": resource.active,
                                 }
@@ -796,7 +796,7 @@ def build_sqns_legacy_tools(agent: Agent, user: AuthContext) -> list[PydanticToo
                                 raise
 
                         elif method_name == "list_visits":
-                            from app.utils.phone import normalize_phone_number
+                            from app.utils.phone import normalize_phone_number_strict
 
                             phone = str(kwargs.get("phone") or "").strip()
                             if not phone:
@@ -807,7 +807,7 @@ def build_sqns_legacy_tools(agent: Agent, user: AuthContext) -> list[PydanticToo
                                     user_message="Произошла ошибка при поиске записей клиента.",
                                 )
                             try:
-                                normalized_phone = normalize_phone_number(phone)
+                                normalized_phone = normalize_phone_number_strict(phone)
                                 if tool_name == "sqns_client_visits":
                                     normalized_date_from, normalized_date_till, date_filter = _resolve_visits_period(
                                         date=str(kwargs.get("date") or "").strip() or None,
@@ -918,7 +918,20 @@ def build_sqns_legacy_tools(agent: Agent, user: AuthContext) -> list[PydanticToo
                                 )
 
                         if method_name == "find_client_by_phone":
-                            payload = await method(**kwargs)
+                            from app.utils.phone import normalize_phone_number_strict
+
+                            try:
+                                normalized_phone = normalize_phone_number_strict(
+                                    str(kwargs.get("phone") or "")
+                                )
+                            except ValueError as exc:
+                                return _sqns_error_payload(
+                                    message=str(exc),
+                                    status_code=422,
+                                    retryable=False,
+                                    user_message="Сначала нужен корректный номер телефона клиента.",
+                                )
+                            payload = await method(phone=normalized_phone)
                             return _strip_client_visit_field(payload)
 
                         return await method(**kwargs)
@@ -949,21 +962,16 @@ def build_sqns_legacy_tools(agent: Agent, user: AuthContext) -> list[PydanticToo
 async def prepare_sqns_tooling(
     agent: Agent,
     user: AuthContext,
-) -> tuple[list[Any], list[PydanticTool], str | None]:
+) -> tuple[list[Any], list[PydanticTool]]:
     """Собирает SQNS toolsets/tools.
-
-    Возвращает (sqns_toolsets, sqns_tools, sqns_bridge).
-    sqns_bridge — текст оркестровки для инжекции в системный промпт,
-    None если SQNS не активен для агента.
     """
     from app.schemas.agent import get_sqns_tools_definitions
-    from app.services.sqns.tool_texts import SQNS_PROMPT_BRIDGE
 
     sqns_toolsets: list[Any] = []
     sqns_tools: list[PydanticTool] = []
 
     if not (agent.sqns_enabled and agent.sqns_host and agent.sqns_credential_id):
-        return sqns_toolsets, sqns_tools, None
+        return sqns_toolsets, sqns_tools
 
     available_names = {
         str(item.get("name"))
@@ -999,4 +1007,4 @@ async def prepare_sqns_tooling(
     except Exception as exc:
         logger.error("sqns_tools_error", agent_id=str(agent.id), error=str(exc))
 
-    return sqns_toolsets, sqns_tools, SQNS_PROMPT_BRIDGE
+    return sqns_toolsets, sqns_tools

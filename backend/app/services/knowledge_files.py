@@ -36,7 +36,8 @@ async def search_indexed_knowledge_files(
     if not query_embedding:
         return []
 
-    embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+    # Pass as TEXT literal so asyncpg doesn't try to encode it as a vector client-side.
+    embedding_str = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
     sql = text(
         """
         SELECT
@@ -46,7 +47,7 @@ async def search_indexed_knowledge_files(
             kf.id AS file_id,
             kf.title,
             meta_tags,
-            1 - (kfc.embedding <=> CAST(:embedding AS vector)) AS relevance
+            1 - (kfc.embedding <=> CAST(CAST(:embedding AS text) AS vector)) AS relevance
         FROM knowledge_file_chunks kfc
         JOIN knowledge_files kf ON kf.id = kfc.file_id
         WHERE kf.tenant_id = :tenant_id
@@ -55,7 +56,7 @@ async def search_indexed_knowledge_files(
           AND kf.is_enabled = true
           AND kf.vector_status = 'indexed'
           AND kfc.embedding IS NOT NULL
-        ORDER BY kfc.embedding <=> CAST(:embedding AS vector)
+        ORDER BY kfc.embedding <=> CAST(CAST(:embedding AS text) AS vector)
         LIMIT :limit
         """
     )

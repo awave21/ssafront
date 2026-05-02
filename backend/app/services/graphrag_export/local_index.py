@@ -16,11 +16,29 @@ from app.core.config import Settings
 from app.db.models.agent import Agent
 from app.services.graphrag_export.graphrag_preview import agent_graphrag_workspace
 from app.services.graphrag_export.sqns_corpus import gather_sqns_graphrag_sections, write_graphrag_sections_to_workspace
+from app.services.runtime.microsoft_graphrag_neo4j_sync import sync_microsoft_graphrag_workspace_to_neo4j
 from app.services.tenant_llm_config import get_decrypted_api_key
 
 logger = structlog.get_logger(__name__)
 
 _PROMPT_TUNE_SKIP = frozenset({"", "off", "false", "none", "no"})
+
+_SEARCH_PROMPTS_RU_DIR = Path(__file__).parent / "search_prompts_ru"
+_SEARCH_PROMPT_FILES = (
+    "local_search_system_prompt.txt",
+    "global_search_map_system_prompt.txt",
+    "global_search_reduce_system_prompt.txt",
+    "global_search_knowledge_system_prompt.txt",
+    "drift_search_system_prompt.txt",
+    "drift_reduce_prompt.txt",
+    "basic_search_system_prompt.txt",
+)
+
+_EXTRACT_PROMPTS_DIR = Path(__file__).parent / "extract_prompts"
+# Индексные промпты, которые перекрываем нашей версией поверх дефолтных.
+_EXTRACT_PROMPT_FILES = ("extract_graph.txt",)
+# Версия шаблона; повышаем при содержательном изменении файла.
+_EXTRACT_PROMPT_VERSION = "v1"
 
 
 def _effective_prompt_tune_language(raw: str | None) -> str | None:
@@ -28,6 +46,75 @@ def _effective_prompt_tune_language(raw: str | None) -> str | None:
     if not s or s.lower() in _PROMPT_TUNE_SKIP:
         return None
     return s
+
+
+def _overlay_extract_prompts(ws: Path) -> int:
+    """Перезаписывает индексные промпты (extract_graph) нашей версией.
+
+    `graphrag prompt-tune` подстраивает шаблон под текст корпуса, но не
+    формулирует принцип «только конкретные именованные сущности». Наш
+    шаблон описывает критерии того, что считать сущностью, чтобы не
+    появлялись узлы для обобщённых существительных.
+
+    Версия шаблона хранится в маркере ``.graphrag_extract_prompt_version``:
+    после её повышения промпт перезаписывается при следующей пересборке.
+    """
+    target_dir = ws / "prompts"
+    if not target_dir.is_dir() or not _EXTRACT_PROMPTS_DIR.is_dir():
+        return 0
+    marker = ws / ".graphrag_extract_prompt_version"
+    current = marker.read_text(encoding="utf-8").strip() if marker.is_file() else ""
+    if current == _EXTRACT_PROMPT_VERSION:
+        # Уже на актуальной версии — не трогаем.
+        return 0
+    overwritten = 0
+    for name in _EXTRACT_PROMPT_FILES:
+        src = _EXTRACT_PROMPTS_DIR / name
+        if not src.is_file():
+            continue
+        dst = target_dir / name
+        try:
+            shutil.copyfile(src, dst)
+            overwritten += 1
+        except OSError as exc:  # noqa: BLE001
+            logger.warning("graphrag_extract_prompt_overlay_failed", file=name, error=str(exc))
+    if overwritten:
+        marker.write_text(_EXTRACT_PROMPT_VERSION + "\n", encoding="utf-8")
+        logger.info(
+            "graphrag_extract_prompts_overlaid",
+            files=overwritten,
+            version=_EXTRACT_PROMPT_VERSION,
+            workspace=str(ws),
+        )
+    return overwritten
+
+
+def _overlay_russian_search_prompts(ws: Path) -> int:
+    """Перезаписывает search-промпты в ``<ws>/prompts`` русскими версиями.
+
+    `graphrag prompt-tune` адаптирует только индексные промпты — search-промпты
+    остаются на английском. Эта функция накатывает локализованные шаблоны
+    из ``search_prompts_ru/`` поверх дефолтных, сохраняя плейсхолдеры
+    (``{response_type}``, ``{context_data}``, ``{report_data}``, ``{max_length}``,
+    ``{global_query}``, ``{followups}``).
+    """
+    target_dir = ws / "prompts"
+    if not target_dir.is_dir() or not _SEARCH_PROMPTS_RU_DIR.is_dir():
+        return 0
+    overwritten = 0
+    for name in _SEARCH_PROMPT_FILES:
+        src = _SEARCH_PROMPTS_RU_DIR / name
+        if not src.is_file():
+            continue
+        dst = target_dir / name
+        try:
+            shutil.copyfile(src, dst)
+            overwritten += 1
+        except OSError as exc:  # noqa: BLE001
+            logger.warning("graphrag_search_prompt_overlay_failed", file=name, error=str(exc))
+    if overwritten:
+        logger.info("graphrag_search_prompts_localized", files=overwritten, workspace=str(ws))
+    return overwritten
 
 
 def _graphrag_argv_prefix(settings: Settings) -> list[str] | None:
@@ -102,11 +189,27 @@ async def run_local_microsoft_graphrag_index(
 
     settings_yaml = ws / "settings.yaml"
     if not settings_yaml.is_file():
-        init_args = [*prefix, "init", "--root", ".", "--force"]
+        # GraphRAG 3.x may prompt for model/embedding interactively when omitted,
+        # which hangs background workers and ends with "Aborted".
+        init_args = [
+            *prefix,
+            "init",
+            "--root",
+            ".",
+            "--force",
+            "--model",
+            "gpt-4o-mini",
+            "--embedding",
+            "text-embedding-3-small",
+        ]
         code, out, err = await _run_graphrag_subprocess(ws, init_args, env, timeout_sec=min(timeout_sec, 600))
         if code != 0:
             logger.warning("graphrag_init_failed", code=code, stderr=err[:2000])
             return False, f"graphrag init завершился с кодом {code}: {err or out}"[:2000]
+
+    # Идемпотентно перекладываем русские search-промпты поверх дефолтных
+    # английских, которые установил `graphrag init`.
+    _overlay_russian_search_prompts(ws)
 
     tune_lang = _effective_prompt_tune_language(settings.microsoft_graphrag_prompt_tune_language)
     if tune_lang:
@@ -142,6 +245,10 @@ async def run_local_microsoft_graphrag_index(
                     marker.write_text(tune_lang + "\n", encoding="utf-8")
                     logger.info("graphrag_prompt_tune_ok", language=tune_lang, workspace=str(ws))
 
+    # Перекрываем индексные промпты ПОСЛЕ prompt-tune, чтобы наш шаблон
+    # с критериями именованных сущностей пережил автогенерацию.
+    _overlay_extract_prompts(ws)
+
     index_args = [*prefix, "index", "--root", "."]
     try:
         code, out, err = await _run_graphrag_subprocess(ws, index_args, env, timeout_sec=timeout_sec)
@@ -151,6 +258,14 @@ async def run_local_microsoft_graphrag_index(
     if code != 0:
         logger.warning("graphrag_index_failed", code=code, stderr=err[:2000])
         return False, f"graphrag index завершился с кодом {code}: {err or out}"[:4000]
+
+    neo4j_ok, neo4j_msg = await sync_microsoft_graphrag_workspace_to_neo4j(
+        settings=settings,
+        agent=agent,
+        tenant_id=agent.tenant_id,
+    )
+    if not neo4j_ok:
+        return False, f"graphrag index выполнен, но sync в Neo4j не удался: {neo4j_msg}"[:4000]
 
     logger.info("graphrag_index_ok", agent_id=str(agent.id), workspace=str(ws))
     return True, "ok"

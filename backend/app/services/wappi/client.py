@@ -163,9 +163,13 @@ _AUTH_2FA_PATHS: dict[WappiPlatform, str] = {
     WappiPlatform.MAX: "/maxapi/sync/auth/2fa",
 }
 _TAPI_SYNC_MESSAGE_SEND_PATH = "/tapi/sync/message/send"
+_TAPI_SYNC_MESSAGE_DELETE_PATH = "/tapi/sync/message/delete"
+_TAPI_SYNC_MESSAGE_EDIT_PATH = "/tapi/sync/message/edit"
 _TAPI_ASYNC_MESSAGE_SEND_PATH = "/tapi/async/message/send"
 _API_ASYNC_MESSAGE_SEND_PATH = "/api/async/message/send"
 _MAXAPI_SYNC_MESSAGE_SEND_PATH = "/maxapi/sync/message/send"
+_MAXAPI_SYNC_MESSAGE_DELETE_PATH = "/maxapi/sync/message/delete"
+_MAXAPI_SYNC_MESSAGE_EDIT_PATH = "/maxapi/sync/message/edit"
 _MAXAPI_ASYNC_MESSAGE_SEND_PATH = "/maxapi/async/message/send"
 _BALANCE_ADD_DAYS_PATH = "/payments/balance/add_days"
 _AVAILABLE_TARIFF_IDS = {1, 2, 3, 4}
@@ -640,6 +644,131 @@ class WappiClient:
         detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else None
         if status and status.lower() not in {"done", "ok", "success"}:
             raise WappiClientError(detail or f"Send message returned status '{status}'")
+        return WappiSyncMessageSendResult(status=status or "done", detail=detail, raw=payload)
+
+    async def delete_telegram_message(
+        self,
+        *,
+        profile_id: str,
+        message_id: str,
+    ) -> WappiSyncMessageSendResult:
+        """Удалить ранее отправленное Telegram-сообщение."""
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+        normalized_message_id = (message_id or "").strip()
+        if not normalized_message_id:
+            raise WappiClientError("message_id is required")
+
+        payload = await self._request_json(
+            method="POST",
+            path=_TAPI_SYNC_MESSAGE_DELETE_PATH,
+            params={"profile_id": normalized_profile_id},
+            json={"message_id": normalized_message_id},
+        )
+        status = str(payload.get("status") or "done").strip()
+        detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else None
+        if status and status.lower() not in {"done", "ok", "success"}:
+            raise WappiClientError(detail or f"Delete message returned status '{status}'")
+        return WappiSyncMessageSendResult(status=status or "done", detail=detail, raw=payload)
+
+    async def edit_telegram_message(
+        self,
+        *,
+        profile_id: str,
+        message_id: str,
+        body: str,
+    ) -> WappiSyncMessageSendResult:
+        """Отредактировать ранее отправленное Telegram-сообщение."""
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+        normalized_message_id = (message_id or "").strip()
+        if not normalized_message_id:
+            raise WappiClientError("message_id is required")
+        text = (body or "").strip()
+        if not text:
+            raise WappiClientError("body is required")
+
+        payload = await self._request_json(
+            method="POST",
+            path=_TAPI_SYNC_MESSAGE_EDIT_PATH,
+            params={"profile_id": normalized_profile_id},
+            json={"body": text, "message_id": normalized_message_id},
+        )
+        status = str(payload.get("status") or "done").strip()
+        detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else None
+        if status and status.lower() not in {"done", "ok", "success"}:
+            raise WappiClientError(detail or f"Edit message returned status '{status}'")
+        return WappiSyncMessageSendResult(status=status or "done", detail=detail, raw=payload)
+
+    async def delete_max_message(
+        self,
+        *,
+        profile_id: str,
+        message_id: str,
+    ) -> WappiSyncMessageSendResult:
+        """Удалить ранее отправленное MAX-сообщение."""
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+        normalized_message_id = (message_id or "").strip()
+        if not normalized_message_id:
+            raise WappiClientError("message_id is required")
+
+        payload = await self._request_json(
+            method="POST",
+            path=_MAXAPI_SYNC_MESSAGE_DELETE_PATH,
+            params={"profile_id": normalized_profile_id},
+            json={"message_id": normalized_message_id},
+        )
+        status = str(payload.get("status") or "done").strip()
+        detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else None
+        if status and status.lower() not in {"done", "ok", "success"}:
+            raise WappiClientError(detail or f"Delete message returned status '{status}'")
+        return WappiSyncMessageSendResult(status=status or "done", detail=detail, raw=payload)
+
+    async def edit_max_message(
+        self,
+        *,
+        profile_id: str,
+        bot_id: str,
+        message_id: str,
+        body: str,
+        url: str | None = None,
+        manager: dict[str, Any] | None = None,
+    ) -> WappiSyncMessageSendResult:
+        """Отредактировать ранее отправленное MAX-сообщение."""
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            raise WappiClientError("profile_id is required")
+        normalized_bot_id = (bot_id or "").strip()
+        if not normalized_bot_id:
+            raise WappiClientError("bot_id is required")
+        normalized_message_id = (message_id or "").strip()
+        if not normalized_message_id:
+            raise WappiClientError("message_id is required")
+        text = (body or "").strip()
+        if not text:
+            raise WappiClientError("body is required")
+
+        send_json: dict[str, Any] = {"body": text, "message_id": normalized_message_id}
+        normalized_url = (url or "").strip()
+        if normalized_url:
+            send_json["url"] = normalized_url
+        if manager:
+            send_json["manager"] = manager
+
+        payload = await self._request_json(
+            method="POST",
+            path=_MAXAPI_SYNC_MESSAGE_EDIT_PATH,
+            params={"profile_id": normalized_profile_id, "bot_id": normalized_bot_id},
+            json=send_json,
+        )
+        status = str(payload.get("status") or "done").strip()
+        detail = str(payload.get("detail")).strip() if payload.get("detail") is not None else None
+        if status and status.lower() not in {"done", "ok", "success"}:
+            raise WappiClientError(detail or f"Edit message returned status '{status}'")
         return WappiSyncMessageSendResult(status=status or "done", detail=detail, raw=payload)
 
     async def send_max_sync_message(

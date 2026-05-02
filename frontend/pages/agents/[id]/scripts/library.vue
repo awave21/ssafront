@@ -1,35 +1,46 @@
 <template>
   <AgentPageShell title="Библиотека знаний эксперта" :hide-actions="true" :contained="true">
-    <div class="flex min-h-0 flex-1 flex-col gap-3">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <NuxtLink
-          :to="`/agents/${agentId}/scripts`"
-          class="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted"
-        >
-          ← К потокам
-        </NuxtLink>
-        <p class="text-xs text-muted-foreground">
-          Общие сущности переиспользуются между потоками и попадают в граф знаний (LightRAG).
-        </p>
+    <div class="flex min-h-0 flex-1 flex-col gap-4">
+      <!-- Header: actions + summary -->
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <ScriptsNav :agent-id="agentId" active="library" />
+        <div class="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+          <div class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+            <span class="font-medium text-slate-900">Всего:</span>
+            <span>{{ totalEntities }}</span>
+          </div>
+          <div class="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-700">
+            <span class="font-medium">Используется:</span>
+            <span>{{ usedEntities }}</span>
+          </div>
+        </div>
       </div>
 
+      <p class="text-xs text-slate-500">
+        Общие сущности переиспользуются между потоками и попадают в граф знаний (LightRAG).
+      </p>
+
+      <!-- Type chips -->
       <div class="flex flex-wrap gap-2">
         <button
           v-for="t in KG_ENTITY_TYPES"
           :key="t.value"
           type="button"
-          class="rounded-md border px-3 py-1.5 text-xs"
+          class="inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-xs font-semibold transition-colors"
           :class="activeType === t.value
-            ? 'border-primary bg-primary/10 text-primary'
-            : 'border-border hover:bg-muted'"
+            ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'"
           @click="activeType = t.value"
         >
           {{ t.label }}
-          <span class="ml-1 text-[10px] text-muted-foreground">{{ countByType[t.value] ?? 0 }}</span>
+          <span
+            class="rounded-full px-1.5 text-[10px] font-medium"
+            :class="activeType === t.value ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'"
+          >{{ countByType[t.value] ?? 0 }}</span>
         </button>
       </div>
 
-      <p class="text-xs text-muted-foreground">{{ activeHelper }}</p>
+      <p class="text-xs text-slate-500">{{ activeHelper }}</p>
 
       <div
         v-if="activeType === 'motive'"
@@ -249,6 +260,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AgentPageShell from '~/components/agents/AgentPageShell.vue'
+import ScriptsNav from '~/components/agents/scripts/ScriptsNav.vue'
 import { useAgentKgEntities } from '~/composables/useAgentKgEntities'
 import {
   BANT_T_CATEGORIES,
@@ -259,7 +271,10 @@ import {
 } from '~/types/kgEntities'
 import { getReadableErrorMessage } from '~/utils/api-errors'
 
-definePageMeta({ middleware: 'auth' })
+definePageMeta({
+  layout: 'agent' as any,
+  middleware: 'auth',
+})
 
 const route = useRoute()
 const agentId = route.params.id as string
@@ -294,6 +309,11 @@ const countByType = computed<Record<string, number>>(() => {
   for (const e of entities.value) acc[e.entity_type] = (acc[e.entity_type] || 0) + 1
   return acc
 })
+
+const totalEntities = computed(() => entities.value.length)
+const usedEntities = computed(
+  () => entities.value.filter((e) => (e.usage_count ?? 0) > 0).length,
+)
 
 const activeLabel = computed(
   () => KG_ENTITY_TYPES.find((t) => t.value === activeType.value)?.label ?? '',

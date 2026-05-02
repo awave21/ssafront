@@ -3,6 +3,7 @@ import { useDialogs } from './useDialogs'
 import { useMessages } from './useMessages'
 import { getStoredAccessToken } from '~/composables/authSessionManager'
 import { normalizeDialogUserInfo, resolveDialogPlatform } from '~/utils/dialogIdentity'
+import { INTERNAL_ROLES } from './useMessages'
 import type {
   WsConnectionState,
   WsOutgoingMessage,
@@ -114,11 +115,10 @@ export const useAgentWebSocket = (
             break
           }
 
-          // Skip internal/tool messages — they should not appear in chat or sidebar
+          // Skip internal/tool messages — normalizeMessage in addIncomingMessage handles this too,
+          // but we skip early here to avoid a sidebar upsert for internal roles
           const msgRole = typeof msgData.role === 'string' ? msgData.role.toLowerCase() : ''
-          const internalRoles = ['tool', 'function', 'tool_result', 'function_result', 'tool_call', 'function_call', 'tool_use']
-          if (internalRoles.includes(msgRole)) break
-          // Also skip when content is a raw object (not string)
+          if (INTERNAL_ROLES.has(msgRole)) break
           if (typeof msgData.content === 'object' && msgData.content !== null) break
 
           const isActiveDialog = dialogId === activeDialogId.value
@@ -174,17 +174,32 @@ export const useAgentWebSocket = (
           const rawDialogId = eventData.session_id ?? eventData.dialog_id
           const dialogId = resolveDialogId(rawDialogId) ?? (rawDialogId ? String(rawDialogId) : null)
           const messageId = typeof eventData.id === 'string' ? eventData.id : ''
+          if (!dialogId || !messageId) break
+
+          const updates: Record<string, unknown> = {}
+
+          // Delivery status update
           const status = typeof eventData.status === 'string' ? eventData.status.toLowerCase() : ''
-          if (!dialogId || !messageId || !status) {
-            break
-          }
-
           const allowedStatuses = new Set(['sending', 'sent', 'delivered', 'read', 'failed', 'streaming', 'done'])
-          if (!allowedStatuses.has(status)) {
-            break
+          if (status && allowedStatuses.has(status)) {
+            updates.status = status
           }
 
-          messagesStore.updateMessage(dialogId, messageId, { status: status as any })
+          // Message edited by client (Wappi webhook → backend → broadcast)
+          if (eventData.edit === true && typeof eventData.new_text === 'string') {
+            updates.content = eventData.new_text
+            updates.is_edited = true
+          }
+
+          // Message deleted by client
+          if (eventData.deleted === true) {
+            updates.content = '[сообщение удалено]'
+            updates.is_deleted = true
+          }
+
+          if (Object.keys(updates).length > 0) {
+            messagesStore.updateMessage(dialogId, messageId, updates as any)
+          }
           break
         }
 

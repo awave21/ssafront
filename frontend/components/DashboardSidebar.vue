@@ -291,7 +291,6 @@ const menuItems = [
 
 const agentMenuItems = [
   { id: 'prompt', name: 'Системный промпт', icon: Sparkles, path: (id: string) => `/agents/${id}/prompt` },
-  { id: 'prompt-training', name: 'Обучение промпта', icon: GraduationCap, path: (id: string) => `/agents/${id}/prompt-training` },
   { id: 'channels', name: 'Каналы', icon: Radio, path: (id: string) => `/agents/${id}/channels` },
   { id: 'connections', name: 'Интеграции', icon: Link, path: (id: string) => `/agents/${id}/connections` },
   { id: 'knowledge', name: 'База знаний', icon: Database, path: (id: string) => `/agents/${id}/knowledge` },

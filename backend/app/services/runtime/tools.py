@@ -393,7 +393,8 @@ def build_direct_answer_tool(
             DirectQuestion.agent_id == agent_id,
             DirectQuestion.is_enabled.is_(True),
         )
-        question = (await db.execute(stmt)).scalar_one_or_none()
+        async with async_session_factory() as _db:
+            question = (await _db.execute(stmt)).scalar_one_or_none()
         if question is None:
             return {
                 "status": "not_found",
@@ -453,16 +454,17 @@ def build_direct_questions_search_tool(
 ) -> PydanticTool:
     async def _search_direct_questions(query: str, limit: int | None = None) -> dict[str, Any]:
         normalized_limit = int(limit) if isinstance(limit, int) else int(default_limit)
-        result = await search_direct_question_candidates(
-            db,
-            tenant_id=tenant_id,
-            agent_id=agent_id,
-            query=query,
-            openai_api_key=openai_api_key,
-            limit=max(1, min(normalized_limit, 20)),
-            min_match_percent=min_match_percent,
-            rerank=rerank,
-        )
+        async with async_session_factory() as _db:
+            result = await search_direct_question_candidates(
+                _db,
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                query=query,
+                openai_api_key=openai_api_key,
+                limit=max(1, min(normalized_limit, 20)),
+                min_match_percent=min_match_percent,
+                rerank=rerank,
+            )
         if analytics_sink is not None:
             analytics_sink.append(
                 {
@@ -517,34 +519,35 @@ async def build_knowledge_search_tool(
 
     async def _search_knowledge_files(query: str, limit: int = 5) -> dict[str, Any]:
         normalized_limit = max(1, min(int(limit or 5), 10))
-        rows = await search_indexed_knowledge_files(
-            db,
-            tenant_id=tenant_id,
-            agent_id=agent_id,
-            query=query,
-            openai_api_key=openai_api_key,
-            limit=normalized_limit,
-        )
-        results: list[dict[str, Any]] = []
-        for row in rows:
-            content = str(row.get("content") or "")
-            excerpt = content[:900]
-            if len(content) > 900:
-                excerpt += "..."
-            chunk_id = row.get("id")
-            results.append(
-                {
-                    "chunk_id": chunk_id,
-                    "file_id": row.get("file_id"),
-                    "chunk_index": row.get("chunk_index"),
-                    "id": chunk_id,
-                    "title": row.get("title"),
-                    "meta_tags": row.get("meta_tags") or [],
-                    "relevance": row.get("relevance"),
-                    "excerpt": excerpt,
-                }
+        async with async_session_factory() as _db:
+            rows = await search_indexed_knowledge_files(
+                _db,
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                query=query,
+                openai_api_key=openai_api_key,
+                limit=normalized_limit,
             )
-        return {"status": "ok", "results": results}
+            results: list[dict[str, Any]] = []
+            for row in rows:
+                content = str(row.get("content") or "")
+                excerpt = content[:900]
+                if len(content) > 900:
+                    excerpt += "..."
+                chunk_id = row.get("id")
+                results.append(
+                    {
+                        "chunk_id": chunk_id,
+                        "file_id": row.get("file_id"),
+                        "chunk_index": row.get("chunk_index"),
+                        "id": chunk_id,
+                        "title": row.get("title"),
+                        "meta_tags": row.get("meta_tags") or [],
+                        "relevance": row.get("relevance"),
+                        "excerpt": excerpt,
+                    }
+                )
+            return {"status": "ok", "results": results}
 
     _search_knowledge_files.__name__ = "search_knowledge_files"
     tool_description = (description or "").strip() or DEFAULT_KNOWLEDGE_SEARCH_TOOL_DESCRIPTION
@@ -618,5 +621,167 @@ async def build_directory_runtime_tools(
             )
         )
     return out
+
+
+# ── Expert tactics tool (pgvector script flow search) ────────────────────────
+
+_EXPERT_TACTICS_DESCRIPTION = (
+    "Поиск экспертных тактик и формулировок для текущей ситуации в диалоге. "
+    "Используй когда нужно понять как именно отвечать клиенту: "
+    "что сказать, какой вопрос задать, как преподнести ценность услуги. "
+    "Возвращает экспертные сценарии с конкретными фразами и следующими шагами."
+)
+
+
+def _format_script_match(match: dict[str, Any]) -> str:
+    """Format a single script flow match into LLM-readable markdown block."""
+    block: list[str] = []
+    title = (match.get("title") or "").strip()
+    stage = (match.get("stage") or "").strip()
+    node_type = (match.get("node_type") or "").strip()
+
+    header = f"### {title}" if title else "### (без названия)"
+    if stage:
+        header += f"  · этап: {stage}"
+    if node_type and node_type not in ("expertise",):
+        header += f"  [{node_type}]"
+    block.append(header)
+
+    content = (match.get("content_text") or "").strip()
+    if content:
+        block.append(content)
+
+    metadata = match.get("metadata") or {}
+    preferred = [p for p in (metadata.get("preferred_phrases") or []) if p]
+    forbidden = [p for p in (metadata.get("forbidden_phrases") or []) if p]
+    followup = (metadata.get("required_followup_question") or "").strip()
+    comm_style = (metadata.get("communication_style") or "").strip()
+
+    if preferred:
+        block.append("**Рекомендуемые фразы:** " + " | ".join(f'"{p}"' for p in preferred[:4]))
+    if forbidden:
+        block.append("**Избегать:** " + ", ".join(f'"{p}"' for p in forbidden[:3]))
+    if followup:
+        block.append(f"**Обязательный вопрос:** {followup}")
+    if comm_style:
+        block.append(f"**Стиль:** {comm_style}")
+
+    neighbors = match.get("neighbors") or []
+    next_steps = [
+        n for n in neighbors
+        if n.get("source_node_id") == match.get("node_id")
+           and (n.get("target_title") or "").strip()
+    ]
+    if next_steps:
+        block.append("**Следующие шаги:**")
+        for s in next_steps[:4]:
+            branch = (s.get("branch_label") or "").strip()
+            nxt_title = (s.get("target_title") or "").strip()
+            prefix = f"[{branch}] " if branch else ""
+            block.append(f"→ {prefix}{nxt_title}")
+
+    return "\n".join(block)
+
+
+async def _log_tactic_search(
+    *,
+    tenant_id: UUID,
+    agent_id: UUID,
+    query: str,
+    service_id: str | None,
+    matches: list[dict[str, Any]],
+    search_mode: str | None,
+) -> None:
+    """Persist a record of a search_expert_tactics call for coverage analytics.
+
+    Failure here must not affect the runtime — caught and logged.
+    """
+    from datetime import datetime, timezone
+    from app.db.session import async_session_factory
+    from app.db.models.script_flow_tactic_search import ScriptFlowTacticSearch
+
+    try:
+        top = matches[0] if matches else None
+        results_summary = [
+            {
+                "node_id": m.get("node_id"),
+                "title": m.get("title"),
+                "score": float(m.get("score") or 0.0),
+                "node_type": m.get("node_type"),
+                "stage": m.get("stage"),
+            }
+            for m in matches[:5]
+        ]
+        async with async_session_factory() as db:
+            row = ScriptFlowTacticSearch(
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                query=query[:4000],
+                service_id=service_id,
+                top_node_id=(top.get("node_id") if top else None),
+                top_title=(top.get("title") if top else None),
+                top_score=(float(top.get("score") or 0.0) if top else None),
+                hit_count=len(matches),
+                results=results_summary,
+                search_mode=search_mode,
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(row)
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("script_flow_tactic_search_log_failed", error=str(exc))
+
+
+def build_expert_tactics_tool(
+    *,
+    agent_id: UUID,
+    tenant_id: UUID,
+    openai_api_key: str | None,
+) -> PydanticTool:
+    from app.db.session import async_session_factory
+
+    async def search_expert_tactics(query: str, service_id: str = "") -> str:
+        """Найти экспертную тактику для текущей ситуации в диалоге."""
+        from app.services.runtime.script_flow_retriever import ScriptFlowRetriever
+
+        q = (query or "").strip()
+        if not q:
+            return "Не указан запрос."
+
+        sid = (service_id or "").strip() or None
+
+        async with async_session_factory() as db:
+            retriever = ScriptFlowRetriever(
+                db,
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                openai_api_key=openai_api_key,
+            )
+            packet = await retriever.build_context_packet(
+                query=q,
+                service_id=sid,
+            )
+
+        await _log_tactic_search(
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            query=q,
+            service_id=sid,
+            matches=packet.matches,
+            search_mode=str(packet.debug.get("search_mode") or "") or None,
+        )
+
+        if not packet.matches:
+            return "Подходящих экспертных тактик не найдено."
+
+        parts = [_format_script_match(m) for m in packet.matches[:5]]
+        return "\n\n---\n\n".join(parts)
+
+    return PydanticTool(
+        search_expert_tactics,
+        name="search_expert_tactics",
+        description=_EXPERT_TACTICS_DESCRIPTION,
+        takes_ctx=False,
+    )
 
 

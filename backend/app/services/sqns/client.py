@@ -10,7 +10,7 @@ from urllib.parse import urljoin
 import httpx
 import structlog
 
-from app.utils.phone import normalize_phone_number
+from app.utils.phone import normalize_phone_number_strict
 
 logger = structlog.get_logger(__name__)
 
@@ -761,7 +761,7 @@ class SQNSClient:
         return payments
 
     async def find_client_by_phone(self, phone: str) -> dict[str, Any]:
-        normalized = normalize_phone_number(phone)
+        normalized = normalize_phone_number_strict(phone)
         return await self._request("GET", f"/api/v2/client/phone/{normalized}")
 
     async def get_visit(self, visit_id: int) -> dict[str, Any]:

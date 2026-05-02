@@ -13,6 +13,7 @@ from app.db.models.knowledge_index_job import KnowledgeIndexJob
 from app.db.models.knowledge_file_chunk import KnowledgeFileChunk
 from app.db.session import async_session_factory
 from app.services.directory.service import create_embedding
+from app.services.graphrag_export.corpus_dispatch import maybe_auto_dispatch_graphrag_corpus
 from app.services.knowledge_chunking import (
     DEFAULT_CHUNK_OVERLAP_CHARS,
     DEFAULT_CHUNK_SIZE_CHARS,
@@ -331,3 +332,4 @@ async def _process_index_job(job_id: UUID) -> None:
         job.error = None
         job.finished_at = datetime.utcnow()
         await db.commit()
+        await maybe_auto_dispatch_graphrag_corpus(job.agent_id, job.tenant_id)

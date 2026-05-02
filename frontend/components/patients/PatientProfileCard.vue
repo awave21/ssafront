@@ -27,14 +27,18 @@
         </Badge>
       </div>
 
-      <div class="space-y-3 border-t border-slate-100 pt-4">
-        <div v-for="row in contacts" :key="row.label" class="flex min-w-0 gap-3">
-          <component :is="row.icon" class="mt-0.5 h-[18px] w-[18px] shrink-0 text-slate-400" />
-          <div class="min-w-0 flex-1">
-            <div class="text-[10px] font-black uppercase tracking-widest text-slate-400">
+      <div class="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+        <div
+          v-for="row in contacts"
+          :key="row.label"
+          class="flex min-w-0 items-center gap-1.5 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
+        >
+          <component :is="row.icon" class="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <div class="min-w-0">
+            <div class="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-0.5">
               {{ row.label }}
             </div>
-            <div class="break-words text-sm font-medium text-slate-700">{{ row.value }}</div>
+            <div class="break-words text-xs font-semibold text-slate-700 leading-snug">{{ row.value }}</div>
           </div>
         </div>
       </div>

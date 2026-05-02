@@ -8,7 +8,11 @@
       <span v-if="flow.flow_status === 'published'" class="shrink-0 text-[11px] text-muted-foreground">
         v{{ flow.published_version }}
       </span>
-      <span v-if="dirtyLabel" class="max-w-[14rem] shrink-0 truncate text-[11px] text-amber-700 dark:text-amber-400">
+      <span
+        v-if="dirtyLabel"
+        class="max-w-[10rem] shrink-0 truncate text-[11px] text-amber-700 dark:text-amber-400"
+        :title="dirtyLabelFull"
+      >
         {{ dirtyLabel }}
       </span>
     </div>
@@ -160,7 +164,7 @@ const toolUsageDisplay = computed(() => {
   }
 })
 
-const dirtyLabel = computed(() => {
+const dirtyLabelFull = computed(() => {
   if (props.flow?.flow_status !== 'published') return ''
   const meta = props.flow?.flow_metadata as Record<string, unknown> | undefined
   const snap = meta?.published_flow_definition
@@ -174,6 +178,10 @@ const dirtyLabel = computed(() => {
     return ''
   }
 })
+
+const dirtyLabel = computed(() =>
+  dirtyLabelFull.value ? 'Черновик ≠ опубл.' : '',
+)
 
 const dirtyRepublish = computed(
   () => Boolean(dirtyLabel.value && props.flow?.flow_status === 'published'),

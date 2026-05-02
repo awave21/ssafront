@@ -20,6 +20,7 @@ from app.api.routers import api_router
 from app.core.config import get_settings
 from app.core.limiter import limiter
 from app.core.logging import bind_trace_id, configure_logging
+from app.services.runtime.neo4j_client import close_neo4j_driver
 
 logger = structlog.get_logger()
 
@@ -53,12 +54,39 @@ def _build_error_payload(
     return payload
 
 
+async def _tactic_application_scorer_loop() -> None:
+    """Background loop: score `search_expert_tactics` calls for whether the
+    LLM applied the recommended phrases. Cheap (no LLM calls)."""
+    import asyncio
+    from app.db.session import async_session_factory
+    from app.services.script_flow_application_scorer import score_recent_runs
+
+    while True:
+        try:
+            async with async_session_factory() as db:
+                await score_recent_runs(db, lookback_minutes=30, limit=100)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("tactic_application_scorer_loop_error", error=str(exc))
+        await asyncio.sleep(30)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+
     logger.info("app_starting")
     configure_logging()
     logger.info("app_started_successfully")
-    yield
+    scorer_task = asyncio.create_task(_tactic_application_scorer_loop())
+    try:
+        yield
+    finally:
+        scorer_task.cancel()
+        try:
+            await scorer_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        close_neo4j_driver()
 
 
 def create_app() -> FastAPI:

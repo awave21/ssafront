@@ -64,7 +64,12 @@ def _cell_str(row: Any, col: str | None) -> str:
     return s
 
 
-def load_graphrag_preview_from_workspace(ws: Path) -> dict[str, Any]:
+def load_graphrag_preview_from_workspace(
+    ws: Path,
+    *,
+    max_nodes: int | None = _MAX_NODES,
+    max_edges: int | None = _MAX_EDGES,
+) -> dict[str, Any]:
     """
     Возвращает словарь в формате, ожидаемом UI графа знаний:
     ``nodes`` (id/label/type/description), ``relations``, счётчики и мета.
@@ -137,8 +142,8 @@ def load_graphrag_preview_from_workspace(ws: Path) -> dict[str, Any]:
         desc_c = _pick_col(cols, ("description", "text", "desc"))
 
         node_total = len(df)
-        view = df.head(_MAX_NODES)
-        if node_total > _MAX_NODES:
+        view = df if max_nodes is None else df.head(max_nodes)
+        if max_nodes is not None and node_total > max_nodes:
             truncated = True
 
         for _, row in view.iterrows():
@@ -178,8 +183,8 @@ def load_graphrag_preview_from_workspace(ws: Path) -> dict[str, Any]:
             t_c = _pick_col(cols, ("target", "object", "target_id", "tgt_id"))
             lbl_c = _pick_col(cols, ("label", "type", "relationship", "description"))
             edge_total = len(rdf)
-            rv = rdf.head(_MAX_EDGES)
-            if edge_total > _MAX_EDGES:
+            rv = rdf if max_edges is None else rdf.head(max_edges)
+            if max_edges is not None and edge_total > max_edges:
                 truncated = True
             idx = 0
             for _, row in rv.iterrows():

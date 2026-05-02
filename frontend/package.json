@@ -31,6 +31,7 @@
     "dagre": "^0.8.5",
     "diff": "^8.0.3",
     "event-source-polyfill": "^1.0.31",
+    "force-graph": "^1.51.4",
     "lucide-vue-next": "^0.294.0",
     "markdown-it": "^14.1.0",
     "nuxt": "^4.4.2",

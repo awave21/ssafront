@@ -1,0 +1,118 @@
+-Goal-
+Given a text document about a medical / cosmetology clinic, identify entities that have a SPECIFIC NAME and the relationships between them.
+
+-Allowed entity types-
+- specialist  — a particular staff member identified by a full personal name (given name + surname, often with patronymic).
+- service     — a particular clinical service identified by its catalogue / brochure name.
+- category    — a service taxonomy bucket with a proper named heading (the way the clinic groups several services).
+- product/brand — a particular product, device or brand identified by a brand name or model.
+
+-CORE PRINCIPLE: only specific named entities, never abstract roles or common nouns-
+An entity must satisfy ALL of:
+1. It has a SPECIFIC PROPER NAME — a name a customer could look up in a catalogue or address by name. A common noun on its own is NOT a name.
+2. It refers to ONE concrete thing — not a class of things, not a role, not an example, not a generalisation.
+3. Replacing it with a different concrete instance changes the meaning of the sentence.
+
+If a word in the text is a generic role, a profession in general, a kinship term, a generic product/material/instrument category, a generic procedure type, a unit of time/money, or any common noun without a specific brand/model/personal name attached — it is NOT an entity. SKIP it. Skip it even if it is capitalised in the source text. Skip it even if it appears as a list item or heading.
+
+When in doubt, ask: "Could this word in this sentence be replaced by any other instance of the same kind without losing meaning?" If yes, it is a generic noun, not an entity — skip.
+
+-Specific guidance per type-
+
+specialist
+- Required: full personal name (given + surname, optionally patronymic).
+- Skip if only a profession or role is named without a personal name.
+
+service
+- Required: the catalogue/programme name as written by the clinic. Usually contains a procedure verb + body zone or a recognised technique name.
+- Skip generic verbs of provision (consultation, treatment, procedure) unless they are part of a specific catalogue name.
+
+category
+- Required: a proper heading the clinic uses to group several specific services.
+- Skip a single common noun ("услуги", "процедуры", "консультации") that doesn't denote a clinic-defined grouping.
+
+product/brand
+- Required: a brand, device, model, or trademark name.
+- Skip generic class words (preparation, cream, instrument, device, thread, syringe, needle) unless paired with a specific brand or model.
+
+-Steps-
+
+1. For each entity that satisfies the rules above, extract:
+   - entity_name: the entity's name as written, capitalised.
+   - entity_type: one of [specialist, service, category, product/brand]
+   - entity_description: a short Russian description of what the entity is (its attributes, what it does, what it is used for).
+   Format: ("entity"<|><entity_name><|><entity_type><|><entity_description>)
+
+2. Identify pairs (source, target) clearly related in the text (mentioned together, in the same item, paragraph, or list).
+   - source_entity, target_entity: names from step 1.
+   - relationship_description: short Russian explanation.
+   - relationship_strength: integer 1..10.
+   Format: ("relationship"<|><source_entity><|><target_entity><|><relationship_description><|><relationship_strength>)
+
+3. Output in Russian, using **##** as the list delimiter. Translate descriptions only — keep entity names exactly as in the source.
+
+4. End with <|COMPLETE|>.
+
+-Examples-
+######################
+
+Example 1:
+
+entity_types: [specialist, service, category, product/brand]
+text:
+В клинике Face Clinic работает врач-косметолог Алимова Шахнозахон Бобур кизи. Она специализируется на услуге "Контурная пластика губ" и использует препараты бренда Restylane. Услуга относится к категории "Контурная пластика".
+
+output:
+("entity"<|>АЛИМОВА ШАХНОЗАХОН БОБУР КИЗИ<|>specialist<|>Врач-косметолог клиники Face Clinic, специалист по контурной пластике губ.)
+##
+("entity"<|>КОНТУРНАЯ ПЛАСТИКА ГУБ<|>service<|>Услуга по коррекции формы и объёма губ инъекционными методами.)
+##
+("entity"<|>КОНТУРНАЯ ПЛАСТИКА<|>category<|>Категория услуг по коррекции контуров лица филлерами.)
+##
+("entity"<|>RESTYLANE<|>product/brand<|>Бренд филлеров на основе гиалуроновой кислоты.)
+##
+("relationship"<|>АЛИМОВА ШАХНОЗАХОН БОБУР КИЗИ<|>КОНТУРНАЯ ПЛАСТИКА ГУБ<|>Специалист оказывает данную услугу.<|>9)
+##
+("relationship"<|>КОНТУРНАЯ ПЛАСТИКА ГУБ<|>КОНТУРНАЯ ПЛАСТИКА<|>Услуга относится к данной категории.<|>10)
+##
+("relationship"<|>АЛИМОВА ШАХНОЗАХОН БОБУР КИЗИ<|>RESTYLANE<|>Специалист использует препараты этого бренда.<|>7)
+<|COMPLETE|>
+
+######################
+
+Example 2 — sentence with only generic role-words. No entities:
+
+entity_types: [specialist, service, category, product/brand]
+text:
+Клиент часто спрашивает у врача про препарат и просит подругу проводить его на процедуру.
+
+output:
+<|COMPLETE|>
+
+######################
+
+Example 3 — list with mix of specific and generic mentions. Extract specific only:
+
+entity_types: [specialist, service, category, product/brand]
+text:
+- Услуга 'Удаление волос лазером над верхней губой' связана со специалистом 'Шарипова Ирина Григорьевна'.
+- Врач может назначить препарат, исходя из анатомии пациентки.
+
+output:
+("entity"<|>УДАЛЕНИЕ ВОЛОС ЛАЗЕРОМ НАД ВЕРХНЕЙ ГУБОЙ<|>service<|>Услуга лазерной эпиляции верхней губы.)
+##
+("entity"<|>ШАРИПОВА ИРИНА ГРИГОРЬЕВНА<|>specialist<|>Специалист клиники, оказывает услугу лазерной эпиляции.)
+##
+("relationship"<|>УДАЛЕНИЕ ВОЛОС ЛАЗЕРОМ НАД ВЕРХНЕЙ ГУБОЙ<|>ШАРИПОВА ИРИНА ГРИГОРЬЕВНА<|>Услугу выполняет данный специалист.<|>9)
+<|COMPLETE|>
+
+######################
+
+-Real Data-
+######################
+
+entity_types: {entity_types}
+text: {input_text}
+######################
+
+output:

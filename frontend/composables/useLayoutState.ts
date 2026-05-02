@@ -15,6 +15,10 @@ export type ScriptFlowToolbarPayload = {
     top_node_refs?: ScriptFlowToolUsageNode[]
     by_node_id?: Record<string, ScriptFlowToolUsageNode>
   } | null
+  saving: boolean
+  hasUnsavedChanges: boolean
+  saveError: string | null
+  lastSavedAt: number | null
   onPublish: () => void
   onUnpublish: () => void
   onReadiness: () => void

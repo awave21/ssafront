@@ -11,18 +11,8 @@
       <button type="button" class="ml-2 underline" @click="goBack">Назад</button>
     </div>
     <div v-else-if="!flow" class="px-4 text-sm text-muted-foreground">Загрузка…</div>
-    <div v-else class="flex min-h-0 flex-1 flex-col gap-2 px-4 pb-4 pt-3">
-
-      <div
-        v-if="saveError || saving || hasUnsavedChanges || lastSavedAt"
-        class="flex shrink-0 items-center justify-end text-xs text-muted-foreground"
-      >
-        <span v-if="saveError" class="text-destructive">{{ saveError }}</span>
-        <span v-else-if="saving">Сохранение черновика…</span>
-        <span v-else-if="hasUnsavedChanges">Есть несохранённые изменения…</span>
-        <span v-else class="text-muted-foreground">Черновик сохранён (Ctrl+S)</span>
-      </div>
-      <div class="relative min-h-0 flex-1 rounded-lg border border-border overflow-hidden bg-background">
+    <div v-else class="flex min-h-0 flex-1">
+      <div class="relative min-h-0 flex-1 overflow-hidden bg-background">
         <ScriptFlowEditor
           ref="scriptFlowEditorRef"
           :revision="editorRevision"
@@ -978,6 +968,10 @@ watchEffect(() => {
     retrying: retrying.value,
     riskSummary: coverageRiskSummary.value,
     toolUsage: toolUsageSnapshot.value,
+    saving: saving.value,
+    hasUnsavedChanges: hasUnsavedChanges.value,
+    saveError: saveError.value,
+    lastSavedAt: lastSavedAt.value,
     onPublish: onPublishClick,
     onUnpublish: onUnpublishClick,
     onReadiness: onReadinessClick,

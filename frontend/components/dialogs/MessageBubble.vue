@@ -1,5 +1,5 @@
 <template>
-  <!-- Tool Call / Tool Result — compact inline card, full width -->
+  <!-- Tool Call / Tool Result — compact inline card, full width, collapsible -->
   <div v-if="isToolMessage" class="flex justify-start w-full">
     <div class="w-full max-w-[85%] sm:max-w-[70%] lg:max-w-[60%]">
       <div
@@ -8,12 +8,13 @@
           ? 'border-amber-200 bg-amber-50'
           : 'border-emerald-200 bg-emerald-50'"
       >
-        <!-- Header -->
-        <div
-          class="flex items-center gap-2 px-3 py-1.5 border-b"
+        <!-- Header (clickable to toggle) -->
+        <button
+          class="w-full flex items-center gap-2 px-3 py-1.5 border-b text-left"
           :class="message.type === 'tool_call'
-            ? 'border-amber-200 bg-amber-100/60'
-            : 'border-emerald-200 bg-emerald-100/60'"
+            ? 'border-amber-200 bg-amber-100/60 hover:bg-amber-100'
+            : 'border-emerald-200 bg-emerald-100/60 hover:bg-emerald-100'"
+          @click="isToolExpanded = !isToolExpanded"
         >
           <Wrench v-if="message.type === 'tool_call'" class="w-3 h-3 text-amber-600 shrink-0" />
           <CheckSquare v-else class="w-3 h-3 text-emerald-600 shrink-0" />
@@ -32,10 +33,14 @@
           >
             {{ message.tool_name }}
           </span>
-          <span class="ml-auto text-[10px] text-slate-400">{{ formattedTime }}</span>
-        </div>
+          <span class="ml-auto text-[10px] text-slate-400" :title="fullDateTime">{{ formattedTime }}</span>
+          <ChevronDown
+            class="w-3 h-3 text-slate-400 transition-transform flex-shrink-0"
+            :class="{ 'rotate-180': isToolExpanded }"
+          />
+        </button>
         <!-- Args / Result body -->
-        <div class="px-3 py-2 space-y-1.5">
+        <div v-if="isToolExpanded" class="px-3 py-2 space-y-1.5">
           <template v-if="message.type === 'tool_call' && message.args">
             <div class="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Аргументы</div>
             <pre class="whitespace-pre-wrap break-all text-slate-700 leading-relaxed">{{ formatJson(message.args) }}</pre>
@@ -84,7 +89,8 @@
           <div
             class="text-sm whitespace-pre-wrap break-words prose prose-sm max-w-none"
             :class="[
-              isOutgoing ? 'prose-invert' : ''
+              isOutgoing ? 'prose-invert' : '',
+              message.is_deleted ? 'italic opacity-60' : ''
             ]"
             v-html="renderedContent"
           />
@@ -159,8 +165,12 @@
           isOutgoing ? 'justify-end' : 'justify-start'
         ]"
       >
+        <!-- Edit / delete labels -->
+        <span v-if="message.is_deleted" class="text-[10px] text-slate-400 italic">удалено</span>
+        <span v-else-if="message.is_edited" class="text-[10px] text-slate-400 italic">изменено</span>
+
         <!-- Time -->
-        <span class="text-[10px] text-slate-400">
+        <span class="text-[10px] text-slate-400" :title="fullDateTime">
           {{ formattedTime }}
         </span>
 
@@ -178,7 +188,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Play, Pause, Wrench, CheckSquare } from 'lucide-vue-next'
+import { Play, Pause, Wrench, CheckSquare, ChevronDown } from 'lucide-vue-next'
 import type { Message } from '../../types/dialogs'
 import MessageDeliveryStatus from './MessageDeliveryStatus.vue'
 import { createSafeMarkdownRenderer } from '~/utils/safe-markdown'
@@ -197,6 +207,9 @@ const md = createSafeMarkdownRenderer({
   linkify: true,
   breaks: true
 })
+
+// Tool card collapse state (collapsed by default)
+const isToolExpanded = ref(false)
 
 // Audio playback
 const isPlaying = ref(false)
@@ -222,6 +235,12 @@ const senderDisplayLabel = computed(() => {
     return 'Менеджер'
   }
   if (isAgent.value) return 'Агент'
+  const ui = props.message.user_info
+  if (ui) {
+    const fullName = [ui.first_name, ui.last_name].filter(Boolean).join(' ')
+    if (fullName) return fullName
+    if (ui.username) return `@${ui.username}`
+  }
   if (props.message.sender_kind === 'contact') return 'Клиент'
   return 'Пользователь'
 })
@@ -264,6 +283,18 @@ const formatResultContent = computed(() => {
 const formattedTime = computed(() => {
   const date = new Date(props.message.created_at)
   return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+})
+
+const fullDateTime = computed(() => {
+  const date = new Date(props.message.created_at)
+  return date.toLocaleString('ru-RU', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
 })
 
 const formattedDuration = computed(() => {

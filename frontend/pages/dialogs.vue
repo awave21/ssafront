@@ -86,22 +86,31 @@ const { agents, isLoading: isLoadingAgents, fetchAgents } = useAgents()
 // Dialogs
 const { fetchDialogs, createDialog } = useDialogs()
 
-// Selected state
-const selectedAgentId = ref<string | null>(route.query.agentId as string || null)
-const selectedDialogId = ref<string | null>(route.query.dialogId as string || null)
+// URL is the source of truth for selected IDs
+const selectedAgentId = computed<string | null>(() =>
+  typeof route.query.agentId === 'string' ? route.query.agentId : null
+)
+const selectedDialogId = computed<string | null>(() =>
+  typeof route.query.dialogId === 'string' ? route.query.dialogId : null
+)
 
-// Mobile view state (show chat if dialog is preselected)
+// Mobile view state
 const showMobileList = ref(!selectedDialogId.value)
 const joinedDialogId = ref<string | null>(null)
 
-// WebSocket connection (replaces SSE)
-const { 
+// Keep mobile state in sync with URL
+watch(selectedDialogId, (dialogId) => {
+  if (dialogId) showMobileList.value = false
+})
+
+// WebSocket connection
+const {
   connectionState,
   isConnected,
   sendMessage: wsSendMessage,
   joinDialog,
   leaveDialog
-} = useAgentWebSocket(computed(() => selectedAgentId.value))
+} = useAgentWebSocket(selectedAgentId)
 
 // Computed
 const selectedAgent = computed<Agent | undefined>(() => {
@@ -109,29 +118,16 @@ const selectedAgent = computed<Agent | undefined>(() => {
   return agents.value.find(a => a.id === selectedAgentId.value)
 })
 
-// Handlers
+// Handlers — navigate only through router, computed refs update automatically
 const handleSelectAgent = async (agentId: string) => {
-  selectedAgentId.value = agentId
-  selectedDialogId.value = null
   router.push({ query: { ...route.query, agentId, dialogId: undefined } })
   await fetchDialogs(agentId)
 }
 
 const handleSelectDialog = (dialogId: string) => {
-  selectedDialogId.value = dialogId
   showMobileList.value = false
   router.push({ query: { ...route.query, dialogId } })
 }
-
-// Keep selected IDs in sync with URL query changes
-watch(() => route.query.agentId, (agentId) => {
-  selectedAgentId.value = typeof agentId === 'string' ? agentId : null
-})
-
-watch(() => route.query.dialogId, (dialogId) => {
-  selectedDialogId.value = typeof dialogId === 'string' ? dialogId : null
-  if (selectedDialogId.value) showMobileList.value = false
-})
 
 // Sync WebSocket dialog subscription with current state
 watch([isConnected, selectedDialogId], ([connected, dialogId]) => {

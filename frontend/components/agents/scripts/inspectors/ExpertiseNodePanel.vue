@@ -1,60 +1,24 @@
 <template>
   <div class="script-flow-node-panel">
-    <div class="rounded-xl border border-indigo-200/70 bg-indigo-50/60 px-4 py-3 shadow-sm dark:bg-indigo-950/10">
-      <p class="text-[11px] font-semibold text-foreground">Основной смысловой шаг разговора</p>
-      <p class="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-        Здесь эксперт описывает саму тактику: в какой ситуации этот шаг нужен, что стоит донести клиенту,
-        каких формулировок избегать и каким вопросом мягко вести разговор дальше.
-        Мотив можно оформить в <a :href="libraryHref" target="_blank" class="font-medium text-indigo-600 underline">библиотеке</a> и привязать ниже.
-      </p>
-    </div>
-    <div class="flex rounded-xl border border-border/80 bg-background/95 p-1.5 gap-1.5 shadow-sm">
-      <button
-        type="button"
-        class="flex-1 rounded-lg px-3.5 py-2.5 text-[11px] font-semibold transition-colors"
-        :class="axisTab === 'context' ? 'bg-background shadow-sm' : 'text-muted-foreground'"
-        @click="setAxisTab('context')"
-      >
-        Когда применять
-      </button>
-      <button
-        type="button"
-        class="flex-1 rounded-lg px-3.5 py-2.5 text-[11px] font-semibold transition-colors"
-        :class="axisTab === 'content' ? 'bg-background shadow-sm' : 'text-muted-foreground'"
-        @click="setAxisTab('content')"
-      >
-        Что сказать
-      </button>
-    </div>
-    <div v-show="axisTab === 'context'" class="space-y-4">
+    <div class="space-y-4">
       <InspectorContextFields />
-      <div class="rounded-xl border border-border/80 bg-background/95 px-4 py-4 shadow-sm space-y-3">
-        <div>
-          <p class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Контекст клиента</p>
-          <p class="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-            Опишите, в каком запросе, настроении или ситуации этот смысловой шаг особенно полезен.
-          </p>
-        </div>
-        <div class="space-y-1">
-          <label class="insp-label">Ситуация клиента</label>
-          <textarea
-            v-model="localSituation"
-            class="insp-input"
-            placeholder="В каком состоянии, запросе или контексте клиента этот шаг особенно уместен"
-            @input="flushNode"
-            @focus="focusField('situation')"
-          />
-        </div>
+      <div class="rounded-xl border border-border/80 bg-background/95 px-4 py-3 shadow-sm space-y-1">
+        <label class="insp-label">Ситуация клиента</label>
+        <textarea
+          v-model="localSituation"
+          class="insp-input"
+          placeholder="В каком состоянии, запросе или контексте клиента этот шаг особенно уместен"
+          @input="flushNode"
+          @focus="focusField('situation')"
+        />
       </div>
     </div>
-    <div v-show="axisTab === 'content'" class="space-y-4">
-      <div class="rounded-xl border border-border/80 bg-background/95 px-4 py-4 shadow-sm space-y-3">
-        <div>
-          <p class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">2. Что говорить на этом шаге</p>
-          <p class="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-            Соберите суть, удачные формулировки и ограничения, чтобы шаг был легко понятен любому эксперту.
-          </p>
-        </div>
+
+    <hr class="border-border/60 my-1" />
+
+    <div class="space-y-4">
+      <div class="rounded-xl border border-border/80 bg-background/95 px-4 py-3 shadow-sm space-y-3">
+        <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Что говорить</p>
         <div class="space-y-1">
           <label class="insp-label">Что важно понять про клиента</label>
           <textarea
@@ -114,8 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject } from 'vue'
-import { useRoute } from 'vue-router'
+import { inject } from 'vue'
 import { SCRIPT_FLOW_INSPECTOR_KEY } from '~/composables/useScriptFlowInspectorModel'
 import InspectorContextFields from './InspectorContextFields.vue'
 import InspectorKgLinks from './InspectorKgLinks.vue'
@@ -130,17 +93,9 @@ const {
   localGoodQuestion,
   lastFocusedField,
   flushNode,
-  axisTab,
 } = m
-
-const setAxisTab = (t: 'context' | 'content') => {
-  axisTab.value = t
-}
 
 const focusField = (k: string) => {
   lastFocusedField.value = k
 }
-
-const route = useRoute()
-const libraryHref = computed(() => `/agents/${route.params.id}/scripts/library`)
 </script>

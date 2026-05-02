@@ -16,9 +16,6 @@ from app.db.models.run import Run
 from app.db.session import get_db
 from app.schemas.agent import AgentCreate, AgentRead, AgentUpdate
 from app.services.runtime.default_agent_prompt import build_default_agent_system_prompt
-from app.services.runtime.diagnose_tool import DIAGNOSE_PROMPT_BRIDGE
-from app.services.runtime.script_flow_tool import SCRIPT_FLOWS_PROMPT_BRIDGE
-from app.services.sqns.tool_texts import SQNS_PROMPT_BRIDGE
 from app.schemas.auth import AuthContext
 from app.services.audit import write_audit
 
@@ -138,7 +135,7 @@ class DefaultSystemPromptResponse(BaseModel):
 
     system_prompt: str
     note: str = (
-        "Шаблон по умолчанию: диагностика мотива, экспертные потоки, запись через SQNS "
+        "Шаблон по умолчанию: единый поиск через Microsoft GraphRAG, затем запись через SQNS "
         "(раздел SQNS можно удалить, если интеграция не используется)."
     )
 
@@ -310,35 +307,6 @@ async def get_runtime_bridges(
     agent = await get_agent_or_404(agent_id, db, user)
     mode = getattr(agent, "runtime_bridges_mode", "auto") or "auto"
 
-    bridges = [
-        RuntimeBridgeItem(
-            key="diagnose",
-            title="Диагностика мотива клиента",
-            description=(
-                "Инструкция когда вызывать diagnose_client_motive и как интерпретировать результат. "
-                "Активна если у агента есть Мотивы/Возражения в Knowledge Graph."
-            ),
-            prompt_text=DIAGNOSE_PROMPT_BRIDGE,
-        ),
-        RuntimeBridgeItem(
-            key="script_flows",
-            title="Экспертные сценарии (потоки)",
-            description=(
-                "Инструкция когда вызывать search_script_flows и как применять результат "
-                "(communication_style, preferred_phrases, required_followup_question). "
-                "Активна если у агента есть проиндексированные потоки."
-            ),
-            prompt_text=SCRIPT_FLOWS_PROMPT_BRIDGE,
-        ),
-        RuntimeBridgeItem(
-            key="sqns",
-            title="Запись клиентов (SQNS)",
-            description=(
-                "Пошаговая оркестровка записи, переноса и отмены визитов через SQNS-инструменты. "
-                "Активна если у агента включён SQNS."
-            ),
-            prompt_text=SQNS_PROMPT_BRIDGE,
-        ),
-    ]
+    bridges: list[RuntimeBridgeItem] = []
 
     return RuntimeBridgesResponse(mode=mode, bridges=bridges)

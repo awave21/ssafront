@@ -1,8 +1,5 @@
 <template>
-  <span
-    class="inline-flex items-center justify-center flex-shrink-0"
-    :class="containerClass"
-  >
+  <span class="inline-flex items-center justify-center flex-shrink-0">
     <!-- IN_PROGRESS: Spinner -->
     <Loader2 v-if="status === 'IN_PROGRESS'" class="w-3.5 h-3.5 animate-spin text-indigo-600" />
     
@@ -36,19 +33,6 @@ const props = defineProps<{
   status: DialogStatus
   count?: number
 }>()
-
-const containerClass = computed(() => {
-  switch (props.status) {
-    case 'IN_PROGRESS':
-    case 'ERROR':
-      return ''
-    case 'UNREAD':
-    case 'NEW':
-      return ''
-    default:
-      return ''
-  }
-})
 
 const displayCount = computed(() => {
   if (!props.count) return '0'

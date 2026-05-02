@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.sqns_service import SqnsResource, SqnsService, SqnsServiceCategory
 from app.services.sqns.client import SQNSClient
-from app.utils.phone import normalize_phone_number
+from app.utils.phone import normalize_phone_number, normalize_phone_number_strict
 from app.services.sqns.sync import SQNSSyncService
 from app.schemas.sqns_service import BookingOptionsInput
 from app.services.sqns.tool_texts import get_sqns_tool_description
@@ -544,9 +544,12 @@ def create_sqns_mcp_server(
         category: str | None = None,
     ) -> dict[str, Any]:
         """
-        🎯 ГЛАВНЫЙ ИНСТРУМЕНТ для поиска услуг и специалистов.
-        Используй СНАЧАЛА этот инструмент, чтобы найти нужную услугу/специалиста
-        и получить готовые ID для вызова sqns_list_slots.
+        🎯 ОПЕРАЦИОННЫЙ ИНСТРУМЕНТ записи для сопоставления уже понятной услуги
+        и/или специалиста с данными SQNS и получения ID для вызова sqns_list_slots.
+
+        Если смысл запроса ещё не ясен, сначала уточни услугу, направление или
+        специалиста через переписку или knowledge-инструменты агента. Не используй
+        этот инструмент как единственный способ смыслового подбора.
         
         Этот инструмент автоматически:
         - Ищет услуги/специалистов по названию (нечеткий поиск)
@@ -745,8 +748,16 @@ def create_sqns_mcp_server(
             Данные клиента (ФИО/контакты), либо пустой результат, если клиента нет.
         """
         try:
-            payload = await client.find_client_by_phone(phone)
+            normalized_phone = normalize_phone_number_strict(phone)
+            payload = await client.find_client_by_phone(normalized_phone)
             return _strip_client_visit_field(payload)
+        except ValueError as exc:
+            return _sqns_error_payload(
+                message=str(exc),
+                status_code=422,
+                retryable=False,
+                user_message="Сначала нужен корректный номер телефона клиента.",
+            )
         except Exception as exc:
             logger.error("sqns_find_client_error", phone=phone, error=str(exc))
             raise
@@ -1055,7 +1066,7 @@ def create_sqns_mcp_server(
             Компактные визиты клиента: phone, date_filter, count, visits.
         """
         try:
-            normalized_phone = normalize_phone_number(phone)
+            normalized_phone = normalize_phone_number_strict(phone)
             normalized_date_from, normalized_date_till, date_filter = _resolve_visits_period(
                 date=date.strip() or None,
                 date_from=date_from.strip() or None,

@@ -31,6 +31,28 @@ services:
     mem_limit: "${REDIS_MEM_LIMIT:-320m}"
     mem_reservation: "${REDIS_MEM_RESERVATION:-160m}"
 
+  neo4j:
+    restart: unless-stopped
+    image: neo4j:5.22
+    environment:
+      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:-change-me-neo4j}
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP_INITIAL:-512m}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP_MAX:-1024m}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE_SIZE:-512m}
+      NEO4J_server_config_strict__validation_enabled: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -a bolt://localhost:7687 -u ${NEO4J_USERNAME:-neo4j} -p ${NEO4J_PASSWORD:-change-me-neo4j} 'RETURN 1;' >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    cpus: "${NEO4J_CPUS:-0.75}"
+    mem_limit: "${NEO4J_MEM_LIMIT:-1536m}"
+    mem_reservation: "${NEO4J_MEM_RESERVATION:-768m}"
+
   api:
     build:
       context: ../backend
@@ -39,6 +61,11 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
       REDIS_URL: ${REDIS_URL}
+      NEO4J_ENABLED: ${NEO4J_ENABLED:-false}
+      NEO4J_URI: ${NEO4J_URI:-bolt://neo4j:7687}
+      NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-change-me-neo4j}
+      NEO4J_DATABASE: ${NEO4J_DATABASE:-neo4j}
       PYTHONPATH: /app
       # Локальный Microsoft GraphRAG: каталог на хосте ./data/graphrag → /data/graphrag в контейнере
       MICROSOFT_GRAPHRAG_WORKSPACE_ROOT: ${MICROSOFT_GRAPHRAG_WORKSPACE_ROOT:-/data/graphrag}
@@ -46,6 +73,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      neo4j:
         condition: service_healthy
     volumes:
       - ./logs:/logs
@@ -223,6 +252,8 @@ services:
 
 volumes:
   postgres_data:
+  neo4j_data:
+  neo4j_logs:
   pgadmin_data:
   caddy_data:
   caddy_config:

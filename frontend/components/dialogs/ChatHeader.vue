@@ -38,41 +38,54 @@
       <h2 class="text-sm font-semibold text-slate-900 truncate">
         {{ dialogTitle }}
       </h2>
-      
-      <!-- Идентификатор контакта + канал -->
-      <p
-        v-if="secondaryIdentity"
-        class="text-xs truncate"
-        :class="[isTelegram ? 'text-blue-600' : 'text-slate-600']"
-      >
-        {{ secondaryIdentity }}
-      </p>
-      <p
-        v-if="integrationChannelLabel"
-        class="text-xs text-slate-500 truncate"
-      >
-        {{ integrationChannelLabel }}
-      </p>
-      
-      <!-- Agent name & Status -->
-      <div class="flex items-center gap-1.5 mt-0.5">
+
+      <!-- Meta row: identity · channel · agent status -->
+      <div class="flex items-center gap-1.5 flex-wrap mt-0.5">
+        <span
+          v-if="secondaryIdentity"
+          class="text-xs truncate"
+          :class="[isTelegram ? 'text-blue-600' : 'text-slate-600']"
+        >{{ secondaryIdentity }}</span>
+
+        <span v-if="secondaryIdentity && integrationChannelLabel" class="text-slate-300 text-xs">·</span>
+
+        <span v-if="integrationChannelLabel" class="text-xs text-slate-500 truncate">
+          {{ integrationChannelLabel }}
+        </span>
+
+        <span class="text-slate-300 text-xs">·</span>
+
         <template v-if="isStreaming && isEnabled">
           <Loader2 class="w-3 h-3 text-indigo-600 animate-spin" />
           <span class="text-xs text-indigo-600 font-medium">В работе...</span>
         </template>
         <template v-else-if="!isEnabled">
-          <span class="w-2 h-2 bg-slate-400 rounded-full" />
+          <span class="w-1.5 h-1.5 bg-slate-400 rounded-full flex-shrink-0" />
           <span class="text-xs text-slate-500">{{ agent.name }} · Выкл.</span>
         </template>
         <template v-else>
-          <span class="w-2 h-2 bg-green-500 rounded-full" />
+          <span class="w-1.5 h-1.5 bg-green-500 rounded-full flex-shrink-0" />
           <span class="text-xs text-slate-500">{{ agent.name }}</span>
         </template>
       </div>
     </div>
 
+    <!-- Clear History Button -->
+    <button
+      @click="confirmClearHistory"
+      :disabled="isClearing"
+      class="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+      title="Очистить историю диалога"
+    >
+      <Loader2 v-if="isClearing" class="w-4 h-4 animate-spin" />
+      <Trash2 v-else class="w-4 h-4" />
+    </button>
+
     <!-- Toggle Switch -->
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2 flex-shrink-0">
+      <span class="text-xs text-slate-500 hidden sm:block">
+        {{ isEnabled ? 'Агент' : 'Пауза' }}
+      </span>
       <button
         @click="toggleEnabled"
         class="relative w-11 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
@@ -81,7 +94,7 @@
         ]"
         role="switch"
         :aria-checked="isEnabled"
-        :title="isEnabled ? 'Выключить агента' : 'Включить агента'"
+        :title="isEnabled ? 'Выключить агента для этого диалога' : 'Включить агента для этого диалога'"
       >
         <span
           class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform"
@@ -91,13 +104,42 @@
         />
       </button>
     </div>
+
+    <!-- Confirm Clear History Modal -->
+    <div
+      v-if="showConfirm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      @click.self="showConfirm = false"
+    >
+      <div class="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
+        <h3 class="text-base font-semibold text-slate-900 mb-2">Очистить историю?</h3>
+        <p class="text-sm text-slate-500 mb-5">
+          Все сообщения этого диалога будут удалены. Агент забудет контекст переписки. Действие необратимо.
+        </p>
+        <div class="flex gap-3 justify-end">
+          <button
+            @click="showConfirm = false"
+            class="px-4 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
+          >
+            Отмена
+          </button>
+          <button
+            @click="doClearHistory"
+            class="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors"
+          >
+            Очистить
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { ArrowLeft, Loader2 } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { ArrowLeft, Loader2, Trash2 } from 'lucide-vue-next'
 import { useDialogs } from '../../composables/useDialogs'
+import { useMessages } from '../../composables/useMessages'
 import type { Agent } from '../../composables/useAgents'
 import type { Dialog } from '../../types/dialogs'
 import {
@@ -117,8 +159,23 @@ defineEmits<{
   (e: 'back'): void
 }>()
 
-// Per-dialog agent status
 const { toggleDialogAgentStatus } = useDialogs()
+const { clearHistory } = useMessages()
+
+const showConfirm = ref(false)
+const isClearing = ref(false)
+
+const confirmClearHistory = () => {
+  showConfirm.value = true
+}
+
+const doClearHistory = async () => {
+  if (!props.dialog?.id) return
+  showConfirm.value = false
+  isClearing.value = true
+  await clearHistory(props.agent.id, props.dialog.id)
+  isClearing.value = false
+}
 
 // Computed — agent is active unless explicitly paused for this dialog
 const isEnabled = computed(() => (props.dialog?.agent_status ?? 'active') === 'active')

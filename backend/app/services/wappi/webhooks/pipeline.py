@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 from uuid import UUID, uuid4
@@ -16,6 +17,7 @@ from app.schemas.auth import AuthContext
 from app.services.function_rules_runtime import run_rules_for_phase
 from app.services.agent_user_state import is_agent_user_disabled
 from app.services.dialog_state import is_dialog_active, is_manager_paused
+from app.services.message_debounce import debounce_and_run
 from app.services.wappi import WappiClientError
 from app.services.wappi.binding import ChannelProfileConfigError
 from app.services.wappi.webhooks.message_normalizer import (
@@ -25,6 +27,9 @@ from app.services.wappi.webhooks.message_normalizer import (
     extract_provider_message_id,
     extract_provider_task_id,
     extract_provider_uuid,
+    extract_text_body,
+    is_deleted_message,
+    is_edited_message,
     is_private_chat,
     is_text_message,
     likely_api_automated_send,
@@ -32,7 +37,10 @@ from app.services.wappi.webhooks.message_normalizer import (
     phone_operator_user_info,
 )
 from app.services.wappi.webhooks.outgoing_status import (
+    find_inbound_message_by_provider_id,
     link_or_append_wappi_operator_message,
+    mark_inbound_message_deleted,
+    update_inbound_message_content,
     update_wappi_phone_outgoing_status,
 )
 
@@ -110,6 +118,7 @@ class InboundMessageContext:
     linked_account_message: bool
     raw_msg: dict[str, Any]
     send_payload: dict[str, Any]
+    wappi_message_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -218,7 +227,69 @@ async def _handle_linked_account_message(
         )
 
 
-async def _handle_inbound_message(
+async def _handle_edited_message(
+    db: AsyncSession,
+    *,
+    agent_id: UUID,
+    context: InboundMessageContext,
+) -> None:
+    """Обновить текст сообщения в истории диалога."""
+    if not context.wappi_message_id:
+        return
+    session_message = await find_inbound_message_by_provider_id(
+        db, agent_id=agent_id, session_id=context.session_id,
+        provider_message_id=context.wappi_message_id,
+    )
+    if session_message is None:
+        logger.info(
+            "wappi_edited_message_not_found",
+            session_id=context.session_id,
+            provider_message_id=context.wappi_message_id,
+        )
+        return
+    await update_inbound_message_content(
+        db, agent_id=agent_id, session_id=context.session_id,
+        session_message=session_message, new_text=context.input_text,
+    )
+    logger.info(
+        "wappi_inbound_message_edited",
+        session_id=context.session_id,
+        provider_message_id=context.wappi_message_id,
+    )
+
+
+async def _handle_deleted_message(
+    db: AsyncSession,
+    *,
+    agent_id: UUID,
+    context: InboundMessageContext,
+) -> None:
+    """Пометить сообщение как удалённое в истории диалога."""
+    if not context.wappi_message_id:
+        return
+    session_message = await find_inbound_message_by_provider_id(
+        db, agent_id=agent_id, session_id=context.session_id,
+        provider_message_id=context.wappi_message_id,
+    )
+    if session_message is None:
+        logger.info(
+            "wappi_deleted_message_not_found",
+            session_id=context.session_id,
+            provider_message_id=context.wappi_message_id,
+        )
+        return
+    await mark_inbound_message_deleted(
+        db, agent_id=agent_id, session_id=context.session_id,
+        session_message=session_message,
+    )
+    logger.info(
+        "wappi_inbound_message_deleted",
+        session_id=context.session_id,
+        provider_message_id=context.wappi_message_id,
+    )
+
+
+async def _execute_inbound_message(
     db: AsyncSession,
     *,
     channel: Channel,
@@ -226,7 +297,9 @@ async def _handle_inbound_message(
     agent: Agent,
     context: InboundMessageContext,
     strategy: WappiChannelStrategy,
+    message_ids: list[str] | None = None,
 ) -> None:
+    """Запустить агента и отправить ответ. Вызывается после debounce."""
     dialog_active = await is_dialog_active(db, agent_id, context.session_id)
     manager_paused = False
     if dialog_active:
@@ -256,6 +329,7 @@ async def _handle_inbound_message(
             user_info=context.user_info,
             run_agent=True,
             log_source=strategy.run_log_source,
+            provider_message_ids=message_ids or [],
         )
         if reply:
             reply_text = sanitize_agent_reply_text(reply)
@@ -314,6 +388,57 @@ async def _handle_inbound_message(
         )
 
 
+async def _handle_inbound_message(
+    db: AsyncSession,
+    *,
+    channel: Channel,
+    agent_id: UUID,
+    agent: Agent,
+    context: InboundMessageContext,
+    strategy: WappiChannelStrategy,
+) -> None:
+    """Принять сообщение, применить debounce и запустить агента."""
+    _channel_id = channel.id
+    _agent_id = agent_id
+    _context = context
+    _strategy = strategy
+
+    async def _run_after_debounce(aggregated_text: str, message_ids: list[str]) -> None:
+        from app.db.session import async_session_factory  # локальный импорт во избежание circular
+
+        aggregated_context = InboundMessageContext(
+            session_id=_context.session_id,
+            input_text=aggregated_text,
+            user_info=_context.user_info,
+            platform_user_id=_context.platform_user_id,
+            linked_account_message=_context.linked_account_message,
+            raw_msg=_context.raw_msg,
+            send_payload=_context.send_payload,
+            wappi_message_id=_context.wappi_message_id,
+        )
+        async with async_session_factory() as _db:
+            _channel = await _db.get(Channel, _channel_id)
+            _agent = await _db.get(Agent, _agent_id)
+            if _channel is None or _agent is None:
+                return
+            await _execute_inbound_message(
+                _db,
+                channel=_channel,
+                agent_id=_agent_id,
+                agent=_agent,
+                context=aggregated_context,
+                strategy=_strategy,
+                message_ids=message_ids,
+            )
+
+    await debounce_and_run(
+        context.session_id,
+        context.input_text,
+        _run_after_debounce,
+        message_id=context.wappi_message_id,
+    )
+
+
 async def process_wappi_channel_messages(
     db: AsyncSession,
     *,
@@ -344,6 +469,13 @@ async def process_wappi_channel_messages(
             continue
 
         if not strategy.is_text_event(wh_type):
+            logger.info(
+                "wappi_unhandled_wh_type",
+                wh_type=wh_type,
+                channel_type=strategy.channel_type,
+                channel_id=str(channel.id),
+                agent_id=str(agent_id),
+            )
             continue
         if not strategy.is_platform_supported(raw_msg):
             continue
@@ -352,6 +484,40 @@ async def process_wappi_channel_messages(
         if not is_private_chat(raw_msg, channel_type=strategy.channel_type):
             continue
         if not is_text_message(raw_msg):
+            continue
+        if is_deleted_message(raw_msg) or is_edited_message(raw_msg):
+            msg_id = str(raw_msg.get("id") or "").strip() or None
+            session_peer = str(
+                raw_msg.get("chatId") or raw_msg.get("chat_id") or
+                raw_msg.get("to") or raw_msg.get("from") or ""
+            ).strip() or None
+            action = "deleted" if is_deleted_message(raw_msg) else "edited"
+            logger.info(
+                "wappi_message_edit_delete_received",
+                action=action,
+                channel_type=strategy.channel_type,
+                channel_id=str(channel.id),
+                agent_id=str(agent_id),
+                msg_id=msg_id,
+                session_peer=session_peer,
+                wh_type=wh_type,
+                body_present=bool(extract_text_body(raw_msg)),
+                raw_keys=list(raw_msg.keys()),
+            )
+            edit_or_delete_context = strategy.build_inbound_context(raw_msg, channel, agent_id)
+            if edit_or_delete_context is not None and not edit_or_delete_context.linked_account_message:
+                if is_deleted_message(raw_msg):
+                    await _handle_deleted_message(db, agent_id=agent_id, context=edit_or_delete_context)
+                else:
+                    await _handle_edited_message(db, agent_id=agent_id, context=edit_or_delete_context)
+            elif edit_or_delete_context is None:
+                logger.warning(
+                    "wappi_message_edit_delete_context_failed",
+                    action=action,
+                    channel_type=strategy.channel_type,
+                    msg_id=msg_id,
+                    reason="build_inbound_context_returned_none",
+                )
             continue
 
         context = strategy.build_inbound_context(raw_msg, channel, agent_id)

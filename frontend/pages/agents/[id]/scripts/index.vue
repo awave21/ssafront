@@ -3,25 +3,12 @@
     <div class="max-w-full space-y-6">
       <!-- Header: actions + search -->
       <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div class="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            class="inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-indigo-600 px-5 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
-            :disabled="creating"
-            @click="handleCreate()"
-          >
-            <Plus class="h-4 w-4" />
-            {{ creating ? 'Создаём…' : 'Создать поток' }}
-          </button>
-          <NuxtLink
-            :to="`/agents/${agentId}/scripts/library`"
-            class="inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
-            title="Общая библиотека сущностей (Motive / Argument / Proof / Objection / Constraint / Outcome)"
-          >
-            <Library class="h-4 w-4" />
-            Библиотека
-          </NuxtLink>
-        </div>
+        <ScriptsNav
+          :agent-id="agentId"
+          active="flows"
+          :creating="creating"
+          @create="handleCreate()"
+        />
 
         <div v-if="flows.length > 0" class="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
           <div class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
@@ -166,12 +153,11 @@
             >
               <button
                 type="button"
-                class="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
-                title="Открыть канвас"
-                @click="openFlow(flow.id)"
+                class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                title="Переименовать поток"
+                @click="openRename(flow)"
               >
                 <Pencil class="h-3.5 w-3.5" />
-                Открыть
               </button>
               <button
                 v-if="!isFlowIndexing(flow) && publishingId !== flow.id"
@@ -206,6 +192,14 @@
         </div>
       </div>
     </div>
+
+    <ScriptFlowRenameDialog
+      :open="renameOpen"
+      :flow="renameTarget"
+      :is-submitting="renaming"
+      @update:open="renameOpen = $event"
+      @submit="handleRenameSubmit"
+    />
   </AgentPageShell>
 </template>
 
@@ -226,6 +220,8 @@ import {
 } from 'lucide-vue-next'
 import { useIntervalFn } from '@vueuse/core'
 import AgentPageShell from '~/components/agents/AgentPageShell.vue'
+import ScriptFlowRenameDialog from '~/components/agents/scripts/ScriptFlowRenameDialog.vue'
+import ScriptsNav from '~/components/agents/scripts/ScriptsNav.vue'
 import { useAgentWebSocket } from '~/composables/useAgentWebSocket'
 import { useScriptFlows } from '~/composables/useScriptFlows'
 import { useToast } from '~/composables/useToast'
@@ -244,6 +240,7 @@ const {
   error,
   fetchFlows,
   createFlow,
+  updateFlow,
   deleteFlow,
   publishFlow,
 } = useScriptFlows(agentId)
@@ -392,6 +389,31 @@ const handleCreate = async () => {
     toastError(err instanceof Error ? err.message : 'Не удалось создать поток')
   } finally {
     creating.value = false
+  }
+}
+
+const renameOpen = ref(false)
+const renameTarget = ref<ScriptFlow | null>(null)
+const renaming = ref(false)
+
+const openRename = (flow: ScriptFlow) => {
+  renameTarget.value = flow
+  renameOpen.value = true
+}
+
+const handleRenameSubmit = async (payload: { name: string }) => {
+  if (!renameTarget.value) return
+  renaming.value = true
+  try {
+    await updateFlow(renameTarget.value.id, { name: payload.name })
+    await fetchFlows()
+    toastSuccess('Поток переименован')
+    renameOpen.value = false
+    renameTarget.value = null
+  } catch (err: unknown) {
+    toastError(err instanceof Error ? err.message : 'Не удалось переименовать поток')
+  } finally {
+    renaming.value = false
   }
 }
 

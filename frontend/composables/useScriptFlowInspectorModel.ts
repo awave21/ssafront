@@ -1,7 +1,5 @@
-import { computed, nextTick, ref, watch, type InjectionKey, type Ref } from 'vue'
+import { computed, inject, nextTick, ref, watch, type InjectionKey, type Ref } from 'vue'
 import { nanoid } from 'nanoid'
-import { useVueFlow } from '@vue-flow/core'
-import { AGENT_SCRIPT_FLOW_VUE_FLOW_ID } from '~/constants/agentScriptFlow'
 import type { FlowBranch, ScriptNodeData, NodeType, ConversationStage } from '~/types/scriptFlow'
 import { CONVERSATION_STAGES } from '~/types/scriptFlow'
 import {
@@ -10,11 +8,27 @@ import {
 } from '~/utils/scriptFlowNodeRole'
 
 /**
+ * Адаптер вокруг канваса (CustomFlow или Vue Flow). ScriptFlowEditor provide'ит
+ * этот объект — inspector использует его вместо прямого useVueFlow.
+ */
+export interface FlowCanvasAdapter {
+  findNode: (id: string) => { id: string; data?: ScriptNodeData } | null
+  updateNodeData: (id: string, data: Partial<ScriptNodeData>) => void
+  edges: Ref<{ id: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }[]>
+}
+
+export const SCRIPT_FLOW_CANVAS_ADAPTER_KEY: InjectionKey<FlowCanvasAdapter> = Symbol('scriptFlowCanvasAdapter')
+
+/**
  * Состояние формы редактирования узла потока (инспектор справа).
- * Синхронизируется с Vue Flow через updateNodeData.
+ * Синхронизируется с канвасом через updateNodeData.
  */
 export function useScriptFlowInspectorModel(nodeId: Ref<string | null>) {
-  const { findNode, updateNodeData, edges, getNodes } = useVueFlow(AGENT_SCRIPT_FLOW_VUE_FLOW_ID)
+  const adapter = inject(SCRIPT_FLOW_CANVAS_ADAPTER_KEY)
+  if (!adapter) {
+    throw new Error('[useScriptFlowInspectorModel] Канвас-адаптер не найден. ScriptFlowEditor должен provide(SCRIPT_FLOW_CANVAS_ADAPTER_KEY).')
+  }
+  const { findNode, updateNodeData, edges } = adapter
 
   const localTitle = ref('')
   const localNodeType = ref<NodeType>('expertise')

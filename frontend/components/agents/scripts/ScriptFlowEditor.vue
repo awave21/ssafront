@@ -1,214 +1,128 @@
 <template>
   <div class="flex h-full min-h-0 w-full flex-row overflow-hidden bg-background">
     <div
+      ref="canvasWrapperRef"
       class="relative min-h-0 min-w-0 flex-1"
       @drop="onDrop"
       @dragover="onDragOver"
     >
-      <VueFlow
-        :id="AGENT_SCRIPT_FLOW_VUE_FLOW_ID"
+      <CustomFlow
+        v-if="viewMode === 'schema'"
+        ref="customFlowRef"
         v-model:nodes="nodes"
         v-model:edges="edges"
         :default-viewport="defaultViewport"
-        :snap-to-grid="true"
-        :snap-grid="[16, 16]"
-        :connect-on-click="false"
-        :default-edge-options="defaultEdgeOptions"
-        :connection-line-type="ConnectionLineType.Bezier"
-        :connection-line-style="{ stroke: '#6366f1', strokeWidth: 2, strokeDasharray: '6 3' }"
-        class="script-flow-canvas h-full w-full bg-slate-50/70"
-        :node-types="nodeTypes"
-        @connect="onConnect"
+        :default-edge-stroke="'rgba(99, 102, 241, 0.55)'"
+        class="script-flow-canvas h-full w-full"
+        :class="{ 'is-dragging': isDraggingNode }"
         @node-click="onNodeClick"
+        @node-double-click="onNodeDblClick"
         @edge-click="onEdgeClick"
         @pane-click="onPaneClick"
+        @node-drag-start="onNodeDragStart"
+        @node-drag-stop="onNodeDragStop"
+        @drop="onCustomFlowDrop"
+        @connect="onConnect"
       >
-        <Background v-if="viewMode === 'schema'" :gap="24" pattern-color="#cbd5e1" :size="1" />
-
-        <Panel
-          v-if="viewMode === 'schema'"
-          position="top-left"
-          class="pointer-events-none !m-4 max-w-sm"
-        >
-          <div class="rounded-2xl border border-border/70 bg-background/92 px-4 py-3 shadow-xl backdrop-blur-md">
-            <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Карта разговора</p>
-            <p class="mt-1 text-sm font-semibold text-foreground">Собирайте сценарий как цепочку понятных шагов</p>
-            <p class="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-              Перетаскивайте карточки на холст, соединяйте их плавными линиями и редактируйте текст справа.
-            </p>
-          </div>
-        </Panel>
-
-        <!-- Мини-карта и зум (+ / − / весь граф / замок) — в один ряд -->
-        <Panel
-          v-if="viewMode === 'schema'"
-          position="bottom-left"
-          class="script-flow-map-controls pointer-events-none !m-4 flex flex-row items-end gap-3"
-        >
-          <div class="pointer-events-auto shrink-0 overflow-hidden rounded-lg border border-border bg-card/90 shadow-lg">
-            <MiniMap
-              class="!static !m-0"
-              style="width: 160px; height: 120px;"
-              :mask-color="'rgba(0,0,0,0.12)'"
-              pannable
-              zoomable
-            />
-          </div>
-          <div class="script-flow-zoom-controls pointer-events-auto flex shrink-0 flex-row overflow-hidden rounded-lg border border-border bg-card shadow-md">
-            <ControlButton
-              class="!rounded-none !border-b-0"
-              title="Увеличить"
-              :disabled="zoomMaxReached"
-              @click="zoomIn()"
-            >
-              <ZoomIn class="h-3.5 w-3.5" aria-hidden="true" />
-            </ControlButton>
-            <ControlButton
-              class="!rounded-none !border-b-0"
-              title="Уменьшить"
-              :disabled="zoomMinReached"
-              @click="zoomOut()"
-            >
-              <ZoomOut class="h-3.5 w-3.5" aria-hidden="true" />
-            </ControlButton>
-            <ControlButton class="!rounded-none !border-b-0" title="Весь граф на экране" @click="resetView">
-              <Maximize2 class="h-3.5 w-3.5" aria-hidden="true" />
-            </ControlButton>
-            <ControlButton
-              class="!rounded-none !border-b-0"
-              :title="interactionLocked ? 'Разблокировать узлы и связи' : 'Заблокировать перетаскивание'"
-              @click="toggleViewportInteraction"
-            >
-              <Lock v-if="interactionLocked" class="h-3.5 w-3.5" aria-hidden="true" />
-              <Unlock v-else class="h-3.5 w-3.5" aria-hidden="true" />
-            </ControlButton>
-          </div>
-        </Panel>
-
-        <Panel position="top-right" class="m-4 !top-1/2 -translate-y-1/2 flex flex-col gap-2 pointer-events-auto !z-[60]">
-          <div class="flex flex-col gap-1 rounded-xl border border-border bg-card/95 p-1.5 shadow-xl backdrop-blur-md">
-            <button
-              v-if="viewMode === 'schema'"
-              type="button"
-              class="flex size-10 items-center justify-center rounded-lg transition-colors hover:bg-muted"
-              :class="isPaletteOpen ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'text-muted-foreground'"
-              title="Добавить шаг разговора"
-              @click="isPaletteOpen = !isPaletteOpen"
-            >
-              <Plus class="size-5" />
-            </button>
-            <button
-              v-if="viewMode === 'schema'"
-              type="button"
-              class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted"
-              title="Поиск узла (Ctrl+K)"
-              @click="nodeSearchOpen = true"
-            >
-              <Search class="size-5" />
-            </button>
-            <button
-              v-if="viewMode === 'schema'"
-              type="button"
-              class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted"
-              title="Режим списка: шаги как playbook"
-              @click="emit('update:viewMode', 'list')"
-            >
-              <FileText class="size-5" />
-            </button>
-            <button
-              v-if="viewMode === 'list'"
-              type="button"
-              class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted"
-              title="Режим карты: ветки разговора на холсте"
-              @click="emit('update:viewMode', 'schema')"
-            >
-              <Network class="size-5" />
-            </button>
-
-            <DropdownMenu v-if="viewMode === 'schema'" :modal="false">
-              <DropdownMenuTrigger as-child>
-                <button
-                  type="button"
-                  class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted"
-                  title="Дополнительные действия сценария"
-                >
-                  <MoreHorizontal class="size-5" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" class="w-72 p-1.5">
-                <DropdownMenuItem
-                  class="cursor-pointer flex items-start gap-3 rounded-md px-3 py-2.5"
-                  @click="openTemplatePickerFromMenu"
-                >
-                  <Sparkles class="mt-0.5 size-4 shrink-0" />
-                  <div class="space-y-0.5">
-                    <div class="text-sm font-medium">Шаблоны сценария</div>
-                    <div class="text-[11px] leading-snug text-muted-foreground">
-                      Заменить текущую схему готовым шаблоном.
-                    </div>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  class="cursor-pointer flex items-start gap-3 rounded-md px-3 py-2.5"
-                  @click="scriptFlowCoverageOpen = true"
-                >
-                  <LayoutGrid class="mt-0.5 size-4 shrink-0" />
-                  <div class="space-y-0.5">
-                    <div class="text-sm font-medium">Покрытие сценария</div>
-                    <div class="text-[11px] leading-snug text-muted-foreground">
-                      Проверить, где сценарий закрывает услуги и возражения.
-                    </div>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  class="cursor-pointer flex items-start gap-3 rounded-md px-3 py-2.5"
-                  @click="scriptFlowSandboxOpen = true"
-                >
-                  <FlaskConical class="mt-0.5 size-4 shrink-0" />
-                  <div class="space-y-0.5">
-                    <div class="text-sm font-medium">Debug-поиск сценария</div>
-                    <div class="text-[11px] leading-snug text-muted-foreground">
-                      Посмотреть, какой сценарий ассистент найдет по фразе клиента.
-                    </div>
-                  </div>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <div class="h-px w-full bg-border" />
-
-            <button
-              type="button"
-              class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted"
-              title="Обучение ассистента и статистика"
-              @click="isStatusSheetOpen = true"
-            >
-              <Activity class="size-5" />
-            </button>
-
-            <button
-              type="button"
-              class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted"
-              title="Как собрать понятный сценарий"
-              @click="isCanvasGuideOpen = true"
-            >
-              <HelpCircle class="size-5" />
-            </button>
-          </div>
-        </Panel>
-
-        <template v-if="viewMode === 'list'">
-          <Panel position="top-left" class="h-full w-full !m-0 pointer-events-none">
-            <div class="flex h-full min-h-0 w-full flex-col pointer-events-auto overflow-hidden bg-background">
-              <div class="border-b border-border bg-background/95 px-4 py-3 text-[11px] leading-relaxed text-muted-foreground">
-                Здесь удобнее собирать сценарий как набор смысловых шагов: когда включаться в разговор,
-                что отвечать клиенту и как вести его дальше.
-              </div>
-              <TacticLibraryView :flow-definition="flowDefinition" />
-            </div>
-          </Panel>
+        <!-- Custom node rendering — все типы рендерятся через ExpertNode (он сам разруливает по data.node_type). -->
+        <template #node-default="nodeProps">
+          <ExpertNode
+            :id="nodeProps.id"
+            :data="nodeProps.data"
+            :selected="nodeProps.selected"
+          />
         </template>
-      </VueFlow>
+      </CustomFlow>
+
+      <!-- Empty-state поверх канваса. -->
+      <div
+        v-if="viewMode === 'schema' && nodes.length === 0"
+        class="pointer-events-none absolute left-4 top-4 z-[5] max-w-sm"
+      >
+        <div class="rounded-2xl border border-border/70 bg-background/92 px-4 py-3 shadow-xl backdrop-blur-md">
+          <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Карта разговора</p>
+          <p class="mt-1 text-sm font-semibold text-foreground">Собирайте сценарий как цепочку понятных шагов</p>
+          <p class="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            Нажмите <strong>+</strong> справа чтобы добавить первый шаг, или перетащите его на холст.
+          </p>
+        </div>
+      </div>
+
+      <!-- Зум-контролы (+/−/fitView/lock). -->
+      <div
+        v-if="viewMode === 'schema'"
+        class="pointer-events-none absolute bottom-4 left-4 z-[10] flex flex-row items-end gap-3"
+      >
+        <div class="script-flow-zoom-controls pointer-events-auto flex flex-row overflow-hidden rounded-lg border border-border bg-card shadow-md">
+          <button class="flex h-9 w-9 items-center justify-center text-muted-foreground transition-colors hover:bg-muted disabled:opacity-40" type="button" title="Увеличить" :disabled="zoomMaxReached" @click="zoomIn()">
+            <ZoomIn class="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+          <button class="flex h-9 w-9 items-center justify-center text-muted-foreground transition-colors hover:bg-muted disabled:opacity-40" type="button" title="Уменьшить" :disabled="zoomMinReached" @click="zoomOut()">
+            <ZoomOut class="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+          <button class="flex h-9 w-9 items-center justify-center text-muted-foreground transition-colors hover:bg-muted" type="button" title="Весь граф на экране" @click="resetView">
+            <Maximize2 class="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+          <button class="flex h-9 w-9 items-center justify-center text-muted-foreground transition-colors hover:bg-muted" type="button" :title="interactionLocked ? 'Разблокировать' : 'Заблокировать'" @click="toggleViewportInteraction">
+            <Lock v-if="interactionLocked" class="h-3.5 w-3.5" aria-hidden="true" />
+            <Unlock v-else class="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Toolbar справа. -->
+      <div class="pointer-events-auto absolute right-4 top-1/2 z-[60] flex -translate-y-1/2 flex-col gap-2">
+        <div class="canvas-toolbar flex flex-col gap-1 rounded-xl border border-border bg-card/95 p-1.5 shadow-xl backdrop-blur-md">
+          <button v-if="viewMode === 'schema'" type="button" class="flex size-10 items-center justify-center rounded-lg transition-colors hover:bg-muted" :class="isPaletteOpen ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'text-muted-foreground'" title="Добавить шаг разговора" @click="isPaletteOpen = !isPaletteOpen">
+            <Plus class="size-5" />
+          </button>
+          <button v-if="viewMode === 'schema'" type="button" class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted" title="Поиск узла (Ctrl+K)" @click="nodeSearchOpen = true">
+            <Search class="size-5" />
+          </button>
+          <button v-if="viewMode === 'schema'" type="button" class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted" title="Режим списка: шаги как playbook" @click="emit('update:viewMode', 'list')">
+            <FileText class="size-5" />
+          </button>
+          <button v-if="viewMode === 'list'" type="button" class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted" title="Режим карты: ветки разговора на холсте" @click="emit('update:viewMode', 'schema')">
+            <Network class="size-5" />
+          </button>
+          <DropdownMenu v-if="viewMode === 'schema'" :modal="false">
+            <DropdownMenuTrigger as-child>
+              <button type="button" class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted" title="Дополнительные действия">
+                <MoreHorizontal class="size-5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-72 p-1.5">
+              <DropdownMenuItem class="cursor-pointer flex items-start gap-3 rounded-md px-3 py-2.5" @click="openTemplatePickerFromMenu">
+                <Sparkles class="mt-0.5 size-4 shrink-0" />
+                <div class="space-y-0.5"><div class="text-sm font-medium">Шаблоны сценария</div><div class="text-[11px] leading-snug text-muted-foreground">Заменить текущую схему готовым шаблоном.</div></div>
+              </DropdownMenuItem>
+              <DropdownMenuItem class="cursor-pointer flex items-start gap-3 rounded-md px-3 py-2.5" @click="scriptFlowCoverageOpen = true">
+                <LayoutGrid class="mt-0.5 size-4 shrink-0" />
+                <div class="space-y-0.5"><div class="text-sm font-medium">Покрытие сценария</div><div class="text-[11px] leading-snug text-muted-foreground">Проверить, где сценарий закрывает услуги и возражения.</div></div>
+              </DropdownMenuItem>
+              <DropdownMenuItem class="cursor-pointer flex items-start gap-3 rounded-md px-3 py-2.5" @click="scriptFlowSandboxOpen = true">
+                <FlaskConical class="mt-0.5 size-4 shrink-0" />
+                <div class="space-y-0.5"><div class="text-sm font-medium">Debug-поиск сценария</div><div class="text-[11px] leading-snug text-muted-foreground">Посмотреть, какой сценарий ассистент найдет по фразе клиента.</div></div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <div class="h-px w-full bg-border" />
+          <button type="button" class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted" title="Обучение ассистента и статистика" @click="isStatusSheetOpen = true">
+            <Activity class="size-5" />
+          </button>
+          <button type="button" class="flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted" title="Как собрать понятный сценарий" @click="isCanvasGuideOpen = true">
+            <HelpCircle class="size-5" />
+          </button>
+        </div>
+      </div>
+
+      <!-- List-view fallback (когда viewMode === 'list'). -->
+      <div v-if="viewMode === 'list'" class="absolute inset-0 z-[10] flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
+        <div class="border-b border-border bg-background/95 px-4 py-3 text-[11px] leading-relaxed text-muted-foreground">
+          Здесь удобнее собирать сценарий как набор смысловых шагов: когда включаться в разговор, что отвечать клиенту и как вести его дальше.
+        </div>
+        <TacticLibraryView :flow-definition="flowDefinition" />
+      </div>
 
       <!-- Edge delete popup (click on edge to delete it) -->
       <Transition
@@ -275,44 +189,7 @@
       </Teleport>
     </div>
 
-    <Sheet
-      :open="isInspectorOpen"
-      :modal="false"
-      @update:open="onInspectorOpenChange"
-    >
-      <SheetContent
-        side="right"
-        :hide-overlay="true"
-        class-name="w-full sm:max-w-[760px] md:max-w-[860px] lg:max-w-[980px] p-0 border-l border-border !bg-background shadow-2xl flex flex-col min-h-0 max-h-[100vh]"
-      >
-        <SheetTitle class="sr-only">
-          {{ inspectorTemplateLabel ? `Шаблон: ${inspectorTemplateLabel}` : 'Параметры узла' }}
-        </SheetTitle>
-        <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div
-            v-if="inspectorTemplateLabel"
-            class="shrink-0 border-b border-border bg-muted/30 px-4 py-2.5"
-          >
-            <p class="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              Шаблон сценария
-            </p>
-            <p class="text-sm font-semibold text-foreground">
-              {{ inspectorTemplateLabel }}
-            </p>
-          </div>
-          <ScriptFlowNodeInspector
-            class="min-h-0 flex-1"
-            :node-id="inspectorNodeId"
-            @clear="inspectorNodeId = null"
-            @open-node="focusCanvasNode"
-            @focus-node="focusCanvasNode"
-            @remove-connection="removeCanvasEdge"
-            @add-connection="addCanvasConnectionFromInspector"
-          />
-        </div>
-      </SheetContent>
-    </Sheet>
-
+    <!-- Палитра: открывается и из тулбара, и по клику + на source-хэндле ноды -->
     <Sheet
       :open="isPaletteOpen"
       :modal="false"
@@ -328,7 +205,7 @@
           <div class="border-b border-border px-4 py-4">
             <h4 class="text-xs font-bold uppercase tracking-widest text-muted-foreground">Добавить шаг разговора</h4>
             <p class="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-              Выберите нужный смысловой блок и перетащите его на карту разговора.
+              {{ paletteSourceNode ? 'Выберите тип следующего шага — он будет связан с текущим.' : 'Выберите нужный смысловой блок и перетащите его на карту разговора.' }}
             </p>
           </div>
           <div class="flex flex-col gap-2 border-b border-border p-3">
@@ -336,10 +213,11 @@
               v-for="row in scenarioPalette"
               :key="row.type"
               type="button"
-              draggable="true"
+              :draggable="!paletteSourceNode"
               :title="paletteDescription(row.type)"
               class="flex w-full cursor-grab flex-col items-start rounded-xl border border-border/80 bg-background px-4 py-3.5 text-left transition-colors hover:border-primary/30 hover:bg-muted/40 active:cursor-grabbing"
               @dragstart="onPaletteDragStart($event, row.type, false)"
+              @click="paletteSourceNode ? addNodeFromPalette(row.type, false) : undefined"
             >
               <div class="flex w-full items-center justify-between gap-3">
                 <span class="text-sm font-semibold leading-snug text-foreground">{{ row.label }}</span>
@@ -362,10 +240,11 @@
               v-for="row in catalogPalette"
               :key="row.type"
               type="button"
-              draggable="true"
+              :draggable="!paletteSourceNode"
               :title="paletteDescription(row.type)"
               class="flex w-full cursor-grab flex-col items-start rounded-xl border border-sky-200/80 bg-background px-4 py-3.5 text-left transition-colors hover:border-sky-400/40 hover:bg-sky-50/70 active:cursor-grabbing"
               @dragstart="onPaletteDragStart($event, row.type, true)"
+              @click="paletteSourceNode ? addNodeFromPalette(row.type, true) : undefined"
             >
               <div class="flex w-full items-center justify-between gap-3">
                 <span class="text-sm font-semibold leading-snug text-foreground">{{ row.label }}</span>
@@ -381,15 +260,50 @@
             <button
               type="button"
               class="w-full rounded-none px-4 py-4 text-sm font-bold text-foreground transition-colors hover:bg-muted"
-               title="Аккуратно разложить шаги на карте"
-               @click="runAutoLayout"
-             >
-               Расставить шаги
-             </button>
+              title="Аккуратно разложить шаги на карте"
+              @click="runAutoLayout"
+            >
+              Расставить шаги
+            </button>
           </div>
         </div>
       </SheetContent>
     </Sheet>
+
+    <Sheet
+      :open="isInspectorOpen"
+      :modal="false"
+      @update:open="onInspectorOpenChange"
+    >
+      <SheetContent
+        side="right"
+        :hide-overlay="true"
+        class-name="w-full sm:max-w-[480px] md:max-w-[560px] p-0 border-l border-border !bg-background shadow-2xl flex flex-col min-h-0 max-h-[100vh]"
+      >
+        <SheetTitle class="sr-only">
+          {{ inspectorTemplateLabel ? `Шаблон: ${inspectorTemplateLabel}` : 'Параметры узла' }}
+        </SheetTitle>
+        <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div
+            v-if="inspectorTemplateLabel"
+            class="shrink-0 border-b border-border bg-muted/30 px-4 py-2.5"
+          >
+            <p class="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Шаблон сценария</p>
+            <p class="text-sm font-semibold text-foreground">{{ inspectorTemplateLabel }}</p>
+          </div>
+          <ScriptFlowNodeInspector
+            class="min-h-0 flex-1"
+            :node-id="inspectorNodeId"
+            @clear="inspectorNodeId = null"
+            @open-node="focusCanvasNode"
+            @focus-node="focusCanvasNode"
+            @remove-connection="removeCanvasEdge"
+            @add-connection="addCanvasConnectionFromInspector"
+          />
+        </div>
+      </SheetContent>
+    </Sheet>
+
 
     <Sheet
       :open="isTemplatePickerOpen"
@@ -803,18 +717,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, markRaw, nextTick, provide, computed, toRaw } from 'vue'
+import { ref, shallowRef, watch, markRaw, nextTick, provide, computed, toRaw, type Ref } from 'vue'
 import { onKeyStroke, useDebounceFn, useEventListener } from '@vueuse/core'
 import dagre from 'dagre'
 import { nanoid } from 'nanoid'
-import {
-  VueFlow, useVueFlow, ConnectionLineType,
-  type Node, type Edge as FlowEdge, type XYPosition,
-  type Connection, type EdgeMouseEvent, Panel,
-} from '@vue-flow/core'
-import { Background } from '@vue-flow/background'
-import { ControlButton } from '@vue-flow/controls'
-import { MiniMap } from '@vue-flow/minimap'
+// ── Кастомный DOM-канвас (замена Vue Flow) ─────────────────────────────────
+// Ради устранения cold-start лагов и контроля над reactivity hot-path.
+// API максимально совместим с useVueFlow через template ref + shim ниже.
+import CustomFlow from './canvas/CustomFlow.vue'
+import type { NodePosition as XYPosition, EdgeMeta as FlowEdge, NodeMeta } from './canvas/composables/useFlowCanvas'
+
+/** Тип ноды — расширяет NodeMeta из CustomFlow. */
+type Node = NodeMeta & { position: XYPosition; type?: string }
+type Connection = { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }
+type EdgeMouseEvent = { edge: FlowEdge; event: MouseEvent | TouchEvent }
+/** Шим — старый код на VueFlow ConnectionLineType — теперь это string-перечисление. */
+const ConnectionLineType = { Bezier: 'bezier', SmoothStep: 'smoothstep', Straight: 'straight' } as const
 import {
   Maximize2,
   ZoomIn,
@@ -864,6 +782,7 @@ import {
   DialogTitle,
 } from '~/components/ui/dialog'
 import { useScriptFlows } from '~/composables/useScriptFlows'
+import { SCRIPT_FLOW_CANVAS_ADAPTER_KEY } from '~/composables/useScriptFlowInspectorModel'
 import { getReadableErrorMessage } from '~/utils/api-errors'
 import type { ScriptFlowGraphPreview } from '~/types/scriptFlow'
 
@@ -882,6 +801,7 @@ const catalogPalette = computed(() => {
 
 const paletteDescription = (nodeType: string) =>
   NODE_TYPES.find((t) => t.value === nodeType)?.description ?? ''
+
 
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/controls/dist/style.css'
@@ -1100,6 +1020,9 @@ const loadGraphPreview = async () => {
 
 import { coverageRiskBadgeLabel } from '~/utils/scriptFlowCoverageRisk'
 
+// ── Canvas wrapper ref (for addNodeAtCenter) ─────────────────────────────────
+const canvasWrapperRef = ref<HTMLDivElement | null>(null)
+
 // ── Палитра и экшн-бар ──────────────────────────────────────────────────────
 const isPaletteOpen = ref(false)
 const isTemplatePickerOpen = ref(false)
@@ -1134,6 +1057,35 @@ const onTemplatePickerOpenChange = (next: boolean) => {
     templatePickerOpenedAtMs.value = null
 }
 
+// ── Палитра: единая, открывается из тулбара и по клику + на source-хэндле ────
+const paletteSourceNode = ref<{ sourceNodeId: string; sourceHandleId: string } | null>(null)
+
+const openPaletteFromConnector = (nodeId: string, handleId: string) => {
+  paletteSourceNode.value = { sourceNodeId: nodeId, sourceHandleId: handleId }
+  inspectorNodeId.value = null
+  isPaletteOpen.value = true
+}
+
+const addNodeFromPalette = (type: string, catalogDrop = false) => {
+  const source = paletteSourceNode.value
+  if (source) {
+    const sourceNode = findNode(source.sourceNodeId)
+    const basePos = sourceNode
+      ? { x: sourceNode.position.x + 320, y: sourceNode.position.y }
+      : project({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+    isPaletteOpen.value = false
+    paletteSourceNode.value = null
+    const newId = createNodeAtPosition(type, basePos, catalogDrop)
+    addEdges([{ id: `e-${source.sourceNodeId}-${newId}`, source: source.sourceNodeId, target: newId, sourceHandle: source.sourceHandleId }])
+  }
+  else {
+    addNodeAtCenter(type, catalogDrop)
+    isPaletteOpen.value = false
+  }
+}
+
+provide('openPaletteFromConnector', openPaletteFromConnector)
+
 // ── Инспектор: открывается как боковой Sheet при выборе узла ─────────────────
 const inspectorNodeId = ref<string | null>(null)
 /** Подпись сверху инспектора после загрузки готового примера (очищается при смене узла). */
@@ -1161,6 +1113,9 @@ watch(isPaletteOpen, (v) => {
     inspectorNodeId.value = null
     isTemplatePickerOpen.value = false
     isStatusSheetOpen.value = false
+  }
+  else {
+    paletteSourceNode.value = null
   }
 })
 
@@ -1192,14 +1147,28 @@ watch(isCanvasGuideOpen, (v) => {
   }
 })
 
-watch(inspectorNodeId, (id) => {
-  if (!id)
+watch(inspectorNodeId, (id, prevId) => {
+  if (!id) {
     inspectorTemplateLabel.value = null
-  else
+  }
+  else {
     isTemplatePickerOpen.value = false
+    isPaletteOpen.value = false
+    paletteSourceNode.value = null
+  }
+  if (prevId && prevId !== id) {
+    const prev = findNode(prevId)
+    if (prev) removeSelectedNodes([prev])
+  }
+  if (id) {
+    const next = findNode(id)
+    if (next && !next.selected) addSelectedNodes([next])
+  }
 })
 
-provide('inspectorNodeId', inspectorNodeId)
+// Адаптер канваса для inspector регистрируется ниже, после declaration nodes/edges
+// (иначе TDZ на `edges`).
+
 provide('flowVarNames', computed(() => props.varNames ?? []))
 provide('flowAgentFunctions', computed(() => props.agentFunctions ?? []))
 provide('flowVariables', computed(() => props.flowVariables as Record<string, unknown> | undefined))
@@ -1209,21 +1178,61 @@ provide('flowEmployeeOptions', computed(() => props.employeeOptions ?? []))
 provide('flowKgEntityOptions', computed(() => props.kgEntityOptions ?? []))
 provide('flowRuntimeUsageByNode', computed(() => props.runtimeUsageByNode ?? {}))
 
-const {
-  project,
-  fitView,
-  addEdges,
-  findNode,
-  viewport,
-  zoomIn,
-  zoomOut,
-  minZoom,
-  maxZoom,
-  nodesDraggable,
-  nodesConnectable,
-  elementsSelectable,
-  setInteractive,
-} = useVueFlow(AGENT_SCRIPT_FLOW_VUE_FLOW_ID)
+// ── Template ref на CustomFlow + API-shim вместо useVueFlow ─────────────────
+// Старый код использовал useVueFlow(...) — деструктуризация даёт прямой доступ
+// к API. С CustomFlow тот же API экспонирован через defineExpose. Имеем шим:
+const customFlowRef = ref<InstanceType<typeof CustomFlow> | null>(null)
+
+/** project: screen → flow координаты. */
+const project = (screen: { x: number; y: number }): XYPosition =>
+  customFlowRef.value?.project?.(screen) ?? { x: 0, y: 0 }
+
+/** fitView: подогнать viewport под все ноды (или указанные). */
+const fitView = (opts?: { padding?: number; nodes?: { id: string }[]; duration?: number }) => {
+  customFlowRef.value?.fitView?.(opts ?? {})
+}
+
+/** addEdges: добавить рёбра. С CustomFlow — просто меняем edges.value. */
+const addEdges = (newEdges: FlowEdge[]) => {
+  edges.value = [...edges.value, ...newEdges]
+}
+
+/** findNode: найти ноду по id. */
+const findNode = (id: string): Node | null => {
+  return customFlowRef.value?.findNode?.(id) ?? null
+}
+
+/** viewport как computed для совместимости с {.x .y .zoom}.value. */
+const viewport = computed(() => customFlowRef.value?.viewport?.value ?? { x: 0, y: 0, zoom: 1 })
+
+const zoomIn = () => customFlowRef.value?.zoomIn?.()
+const zoomOut = () => customFlowRef.value?.zoomOut?.()
+const minZoom = computed(() => 0.2)
+const maxZoom = computed(() => 2)
+/** Стабы для interactivity-замка — в новом канвасе пока всегда interactive. */
+const nodesDraggable = ref(true)
+const nodesConnectable = ref(true)
+const elementsSelectable = ref(true)
+const setInteractive = (v: boolean) => {
+  nodesDraggable.value = v
+  nodesConnectable.value = v
+  elementsSelectable.value = v
+}
+const addSelectedNodes = (nodes: Array<{ id: string }>) =>
+  customFlowRef.value?.setSelectedNodes?.(nodes.map(n => n.id))
+const removeSelectedNodes = () => customFlowRef.value?.clearSelection?.()
+
+/** onNodesChange / onEdgesChange — стабы. CustomFlow эмитит события напрямую,
+ *  а structural-changes detect-аем через @update:nodes/@update:edges. */
+type ChangeListener = (...args: unknown[]) => void
+const _nodesChangeListeners: ChangeListener[] = []
+const _edgesChangeListeners: ChangeListener[] = []
+const onNodesChange = (cb: ChangeListener) => { _nodesChangeListeners.push(cb) }
+const onEdgesChange = (cb: ChangeListener) => { _edgesChangeListeners.push(cb) }
+/** Стаб для prewarm — больше не нужен, CustomFlow не имеет cold-start. */
+const onNodesInitialized = (_cb: () => void) => { /* no-op */ }
+const updateNodeInternals = (_id: string) => { /* no-op для совместимости */ }
+const getNodes = computed(() => nodes.value)
 
 const zoomMaxReached = computed(() => viewport.value.zoom >= maxZoom.value)
 const zoomMinReached = computed(() => viewport.value.zoom <= minZoom.value)
@@ -1239,33 +1248,8 @@ const toggleViewportInteraction = () => {
 
 const { success: toastSuccess } = useToast()
 
-const orphanNodeIds = computed((): Set<string> => {
-  const edgeList = edges.value as FlowEdge[]
-  const nodeList = nodes.value as Node[]
-  const incoming = new Set(edgeList.map(e => String(e.target)))
-  const outgoing = new Set(edgeList.map(e => String(e.source)))
-  const orphans = new Set<string>()
-  for (const n of nodeList) {
-    const nid = String(n.id)
-    const data = (n.data || {}) as { node_type?: string }
-    const nt = data.node_type
-    if (nt === 'trigger')
-      continue
-    if (!incoming.has(nid))
-      orphans.add(nid)
-  }
-  for (const n of nodeList) {
-    const nid = String(n.id)
-    const data = (n.data || {}) as { node_type?: string }
-    if (data.node_type === 'end' && !outgoing.has(nid))
-      orphans.add(nid)
-  }
-  return orphans
-})
-provide('flowOrphanNodeIds', orphanNodeIds)
-
 const defaultEdgeOptions = {
-  type: 'default',
+  type: 'smoothstep',
   animated: false,
   style: { stroke: 'rgba(99,102,241,0.5)', strokeWidth: 2 },
   labelStyle: { fill: 'hsl(var(--foreground))', fontWeight: 600, fontSize: 11 },
@@ -1333,7 +1317,7 @@ function parseFlowEdges(raw: unknown): FlowEdge[] {
     void _label
     const edgeId = typeof o.id === 'string' ? o.id : ''
     if (edgeId.startsWith(CONSTRAINT_EDGE_PREFIX)) continue
-    out.push({ ...rest, type: 'default' } as FlowEdge)
+    out.push({ ...rest, type: 'smoothstep' } as FlowEdge)
   }
   return out
 }
@@ -1357,25 +1341,60 @@ const defaultNodes = (): Node[] => [
 
 const nodes = ref<Node[]>([])
 const edges = ref<FlowEdge[]>([])
+
+// Адаптер канваса для inspector — после nodes/edges declaration чтобы избежать TDZ.
+provide(SCRIPT_FLOW_CANVAS_ADAPTER_KEY, {
+  findNode: (id: string) => nodes.value.find(n => n.id === id) ?? null,
+  updateNodeData: (id: string, dataPatch: Partial<Record<string, unknown>>) => {
+    const idx = nodes.value.findIndex(n => n.id === id)
+    if (idx < 0) return
+    const cur = nodes.value[idx]!
+    const newNode = { ...cur, data: { ...((cur as { data?: Record<string, unknown> }).data ?? {}), ...dataPatch } }
+    nodes.value = [...nodes.value.slice(0, idx), newNode as Node, ...nodes.value.slice(idx + 1)]
+  },
+  edges,
+})
 const selectedId = ref<string | null>(null)
 /** Не эмитить flow_definition на родителя пока подтягиваем граф из props (избегаем лишнего PATCH). */
 const syncingFromParent = ref(false)
 
+const orphanNodeIds = shallowRef<Set<string>>(new Set())
+const _recomputeOrphans = () => {
+  const edgeList = edges.value as FlowEdge[]
+  const nodeList = nodes.value as Node[]
+  const incoming = new Set(edgeList.map(e => String(e.target)))
+  const outgoing = new Set(edgeList.map(e => String(e.source)))
+  const orphans = new Set<string>()
+  for (const n of nodeList) {
+    const nid = String(n.id)
+    const data = (n.data || {}) as { node_type?: string }
+    if (data.node_type === 'trigger') continue
+    if (!incoming.has(nid)) orphans.add(nid)
+  }
+  for (const n of nodeList) {
+    const nid = String(n.id)
+    const data = (n.data || {}) as { node_type?: string }
+    if (data.node_type === 'end' && !outgoing.has(nid)) orphans.add(nid)
+  }
+  orphanNodeIds.value = orphans
+}
+watch(() => edges.value.length, _recomputeOrphans, { immediate: true })
+watch(() => nodes.value.length, _recomputeOrphans)
+provide('flowOrphanNodeIds', orphanNodeIds)
+
 /** Явный тип — иначе TS разворачивает глубокие дженерики `GraphNode` из Vue Flow до ошибки «слишком глубоко». */
 type FlowNodeRefOption = { id: string; title: string; node_type: string }
 
-const nodeRefOptions = computed((): FlowNodeRefOption[] =>
-  nodes.value.map((n) => {
+const nodeRefOptions = shallowRef<FlowNodeRefOption[]>([])
+const _computeNodeRefOptions = () => {
+  nodeRefOptions.value = nodes.value.map((n) => {
     const data = (n.data || {}) as Record<string, unknown>
     const title = typeof data.title === 'string' && data.title.trim() ? data.title : String(n.id)
     const nodeType = typeof data.node_type === 'string' ? data.node_type : String(n.type ?? '')
-    return {
-      id: String(n.id),
-      title,
-      node_type: nodeType,
-    }
-  }),
-)
+    return { id: String(n.id), title, node_type: nodeType }
+  })
+}
+_computeNodeRefOptions()
 provide('flowNodeRefOptions', nodeRefOptions)
 
 /**
@@ -1487,10 +1506,51 @@ const cloneGraph = (): { nodes: Node[]; edges: FlowEdge[] } => ({
 const historyStates = ref<Array<{ nodes: Node[]; edges: FlowEdge[] }>>([])
 const historyPtr = ref(-1)
 
+/** Кэш id нод, layout/reactive-state которых уже прогреты — каждая нода прогревается один раз. */
+const _prewarmedNodeIds = new Set<string>()
+
+/**
+ * Pre-warm layout + Vue Flow reactive caches.
+ *
+ * Пользовательское наблюдение: первый драг ноды лагает, второй+ — плавный.
+ * Причина: Vue Flow создаёт reactive Proxy для `position.x/y`, `dimensions`,
+ * `computedPosition`, `handleBounds` ЛЕНИВО — на первое JS-обращение. В первый
+ * mousemove одновременно создаются прокси, меряются handle bounds и стартует
+ * drag-pipeline → лаг. Прогрев убирает эту работу из горячего пути.
+ */
+const prewarmLayout = () => {
+  if (typeof document === 'undefined') return
+
+  const all = getNodes.value
+
+  // 1) DOM layout warm-up для НОВЫХ нод (тех, что ещё не прогревались).
+  for (const n of all) {
+    if (_prewarmedNodeIds.has(n.id)) continue
+    const el = document.querySelector<HTMLElement>(`.vue-flow__node[data-id="${n.id}"]`)
+    if (el) {
+      void el.offsetHeight
+      el.querySelectorAll<HTMLElement>('.vue-flow__handle').forEach((h) => { void h.offsetHeight })
+    }
+    // 2) Vue Flow reactive proxies warm-up: создать Proxy заранее.
+    void n.position?.x
+    void n.position?.y
+    void (n as { dimensions?: { width: number; height: number } }).dimensions?.width
+    void (n as { dimensions?: { width: number; height: number } }).dimensions?.height
+    void (n as { computedPosition?: { x: number; y: number } }).computedPosition?.x
+    void (n as { computedPosition?: { x: number; y: number } }).computedPosition?.y
+    // 3) Принудительно пересчитать handle bounds через Vue Flow API.
+    try { updateNodeInternals(n.id) }
+    catch { /* нода может ещё не быть в DOM */ }
+    _prewarmedNodeIds.add(n.id)
+  }
+}
+
 watch(
   () => props.revision,
   () => {
     syncFromProps()
+    // Сбрасываем кэш прогретых нод — при revision change набор нод мог измениться
+    _prewarmedNodeIds.clear()
     nextTick(() => {
       nextTick(() => {
         try {
@@ -1499,6 +1559,8 @@ watch(
         catch {
           /* Vue Flow ещё не смонтирован в первом кадре */
         }
+        // Прогрев теперь происходит через onNodesInitialized — официальный
+        // Vue Flow event «все ноды измерены и готовы».
         historyStates.value = [cloneGraph()]
         historyPtr.value = 0
       })
@@ -1536,25 +1598,104 @@ const requestImmediatePersist = () => {
   emit('requestImmediatePersist')
 }
 
-watch(
-  [nodes, edges],
-  () => debouncedPushDefinition(),
-  { deep: true },
-)
+const isDraggingNode = ref(false)
+provide('isDraggingNode', isDraggingNode)
+
+/**
+ * Per-node флаг: id ноды, которую В ДАННЫЙ МОМЕНТ тащат (или null).
+ * В отличие от CSS-класса `.dragging` (он добавляется на mousedown — даже без движения,
+ * из-за чего пропадал контент при клике), `draggingNodeId` устанавливается только когда
+ * Vue Flow эмитит JS-событие `onNodeDragStart` — то есть при ФАКТИЧЕСКОМ драге.
+ * Используется в condition-карточках чтобы прятать тяжёлые inline-ветки только
+ * на время реального драга именно этой ноды.
+ */
+const draggingNodeId = ref<string | null>(null)
+provide('draggingNodeId', draggingNodeId)
+
+/**
+ * Реактивность ТОЛЬКО на меняющиеся события — position-events игнорируем
+ * (они летят сотнями за drag-кадр, и это было главной причиной лагов).
+ * Vue Flow посылает явные change-types: position | dimensions | add | remove | replace | select | data
+ */
+const NON_POSITION_NODE_CHANGE = (t: string) => t !== 'position' && t !== 'select' && t !== 'dimensions'
+
+onNodesChange((changes) => {
+  if (isDraggingNode.value) return
+  const meaningful = changes.some(c => NON_POSITION_NODE_CHANGE(String(c.type ?? '')))
+  if (!meaningful) return
+  _computeNodeRefOptions()
+  debouncedPushDefinition()
+  debouncedRecordHistory()
+})
+
+onEdgesChange((changes) => {
+  if (isDraggingNode.value) return
+  const meaningful = changes.some(c => c.type !== 'select')
+  if (!meaningful) return
+  debouncedPushDefinition()
+  debouncedRecordHistory()
+})
+
+/**
+ * Pre-warm: при ПЕРВОМ hover на ноду прогреваем её layout И Vue Flow reactive state.
+ * Кэшируем по id (см. _prewarmedNodeIds) — каждая нода прогревается ОДИН РАЗ,
+ * иначе движение мыши по канвасу триггерит layout flush на каждый mouse-enter.
+ */
+const onNodeMouseEnter = (evt: { node?: { id: string } }) => {
+  const id = evt.node?.id
+  if (!id || _prewarmedNodeIds.has(id)) return
+  _prewarmedNodeIds.add(id)
+
+  // 1) DOM layout warm-up для ноды и её handles
+  if (typeof document !== 'undefined') {
+    const nodeEl = document.querySelector<HTMLElement>(`.vue-flow__node[data-id="${id}"]`)
+    if (nodeEl) {
+      void nodeEl.offsetHeight
+      nodeEl.querySelectorAll<HTMLElement>('.vue-flow__handle').forEach((h) => {
+        void h.offsetHeight
+      })
+    }
+  }
+
+  // 2) Vue Flow reactive proxies warm-up: создаст Proxy для свойств ноды
+  const node = findNode(id)
+  if (node) {
+    void node.position?.x
+    void node.position?.y
+    void (node as { dimensions?: { width: number } }).dimensions?.width
+    void (node as { computedPosition?: { x: number } }).computedPosition?.x
+  }
+
+  // 3) Force-кэш внутренних bounds Vue Flow для этой конкретной ноды
+  try { updateNodeInternals(id) }
+  catch { /* ignore */ }
+}
+
+const onNodeDragStart = (evt: { node?: { id: string } }) => {
+  isDraggingNode.value = true
+  draggingNodeId.value = evt.node?.id ?? null
+}
+const onNodeDragStop = () => {
+  isDraggingNode.value = false
+  draggingNodeId.value = null
+  // Только сейчас position изменилась окончательно — единственный момент сохранения после drag.
+  debouncedPushDefinition()
+  debouncedRecordHistory()
+}
 
 watch(
-  viewport,
+  () => [viewport.value.x, viewport.value.y, viewport.value.zoom] as const,
   () => {
     emitViewportDebounced()
   },
-  { deep: true },
 )
 
 const nodeSearchOpen = ref(false)
 const nodeSearchQuery = ref('')
 const nodeSearchInputRef = ref<HTMLInputElement | null>(null)
 
-const filteredSearchNodes = computed(() => {
+const filteredSearchNodes = shallowRef<{ id: string; title: string; sub: string }[]>([])
+const _runFilteredSearch = () => {
   const q = nodeSearchQuery.value.trim().toLowerCase()
   const out: { id: string; title: string; sub: string }[] = []
   for (const n of nodes.value) {
@@ -1570,14 +1711,13 @@ const filteredSearchNodes = computed(() => {
     const hay = `${title} ${situation} ${whenRel} ${phrases} ${routeHint} ${gq}`.toLowerCase()
     if (q && !hay.includes(q))
       continue
-    out.push({
-      id: String(n.id),
-      title: title || String(n.id),
-      sub: situation || gq || '',
-    })
+    out.push({ id: String(n.id), title: title || String(n.id), sub: situation || gq || '' })
   }
-  return q ? out.slice(0, 40) : out.slice(0, 40)
-})
+  filteredSearchNodes.value = out.slice(0, 40)
+}
+const debouncedRunFilteredSearch = useDebounceFn(_runFilteredSearch, 200)
+watch(nodeSearchQuery, debouncedRunFilteredSearch)
+watch(nodeSearchOpen, (open) => { if (open) _runFilteredSearch() })
 
 /** Выделить узел, открыть инспектор, подскроллить вид к узлу (из диалога «Готовность» и поиска). */
 const focusCanvasNode = (id: string): boolean => {
@@ -1641,7 +1781,6 @@ const recordHistory = () => {
 
 const debouncedRecordHistory = useDebounceFn(recordHistory, 400)
 
-watch([nodes, edges], () => debouncedRecordHistory(), { deep: true })
 
 if (import.meta.client) {
   useEventListener(window, 'keydown', (e: KeyboardEvent) => {
@@ -1690,8 +1829,15 @@ const onConnect = (connection: Connection) => {
 const onNodeClick = (evt: { node?: { id: string } }) => {
   const id = evt.node?.id ?? null
   selectedId.value = id
-  inspectorNodeId.value = id
   closeEdgeLabelPopup()
+  emit('selectNode', id)
+}
+
+const onNodeDblClick = (evt: { node?: { id: string } }) => {
+  const id = evt.node?.id ?? null
+  if (!id) return
+  selectedId.value = id
+  inspectorNodeId.value = id
   emit('selectNode', id)
 }
 
@@ -1772,6 +1918,15 @@ const onPaletteDragStart = (event: DragEvent, type: string, catalogDrop: boolean
   event.dataTransfer?.setData('application/vueflow', type)
   event.dataTransfer?.setData('application/catalog', catalogDrop ? '1' : '0')
   event.dataTransfer!.effectAllowed = 'move'
+}
+
+const addNodeAtCenter = (type: string, catalogDrop: boolean = false) => {
+  const wrapper = canvasWrapperRef.value
+  const rect = wrapper?.getBoundingClientRect()
+  const cx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2
+  const cy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2
+  const position = project({ x: cx, y: cy })
+  createNodeAtPosition(type, position, catalogDrop)
 }
 
 if (import.meta.client) {
@@ -1916,9 +2071,9 @@ const runAutoLayout = () => {
     return
   const g = new dagre.graphlib.Graph()
   g.setDefaultEdgeLabel(() => ({}))
-  g.setGraph({ rankdir: 'LR', ranksep: 90, nodesep: 48, marginx: 24, marginy: 24 })
-  const nw = 240
-  const nh = 96
+  g.setGraph({ rankdir: 'LR', ranksep: 120, nodesep: 80, marginx: 40, marginy: 40 })
+  const nw = 300
+  const nh = 180
   for (const n of nodes.value)
     g.setNode(n.id, { width: nw, height: nh })
   for (const e of edges.value) {
@@ -1933,6 +2088,9 @@ const runAutoLayout = () => {
     const y = pos ? pos.y - nh / 2 : n.position.y
     return { ...n, position: { x, y } }
   })
+  // Position-changes больше не реактивны → явный save после layout
+  debouncedPushDefinition()
+  debouncedRecordHistory()
   nextTick(() => {
     try {
       fitView({ padding: 0.2, duration: 350 })
@@ -1951,16 +2109,7 @@ const onDragOver = (event: DragEvent) => {
   }
 }
 
-const onDrop = (event: DragEvent) => {
-  const type = event.dataTransfer?.getData('application/vueflow')
-  if (!type) return
-
-  const position = project({
-    x: event.clientX - 40,
-    y: event.clientY - 40,
-  })
-
-  const catalogDrop = event.dataTransfer?.getData('application/catalog') === '1'
+const createNodeAtPosition = (type: string, position: XYPosition, catalogDrop: boolean): string => {
   const id = nanoid()
   const meta = NODE_TYPES.find(t => t.value === type)
   const commonTitle = meta?.label ?? 'Новый узел'
@@ -1970,62 +2119,22 @@ const onDrop = (event: DragEvent) => {
     node_type: type,
   }
   if (type === 'trigger') {
-    dropData = {
-      ...dropData,
-      client_phrase_examples: [],
-      keyword_hints: [],
-      when_relevant: '',
-      is_flow_entry: true,
-      is_searchable: true,
-    }
+    dropData = { ...dropData, client_phrase_examples: [], keyword_hints: [], when_relevant: '', is_flow_entry: true, is_searchable: true }
   }
   else if (type === 'expertise') {
-    dropData = {
-      ...dropData,
-      situation: '',
-      example_phrases: [],
-      is_searchable: true,
-    }
+    dropData = { ...dropData, situation: '', example_phrases: [], is_searchable: true }
   }
   else if (type === 'question') {
-    dropData = {
-      ...dropData,
-      good_question: '',
-      alternative_phrasings: [],
-      expected_answer_type: 'open',
-      why_we_ask: '',
-      stage: null,
-      level: 1,
-      service_ids: [],
-      employee_ids: [],
-      is_searchable: true,
-      kg_links: {},
-      conditions: [],
-    }
+    dropData = { ...dropData, good_question: '', alternative_phrasings: [], expected_answer_type: 'open', why_we_ask: '', stage: null, level: 1, service_ids: [], employee_ids: [], is_searchable: true, kg_links: {}, conditions: [] }
   }
   else if (type === 'condition') {
-    dropData = {
-      ...dropData,
-      routing_hint: '',
-      conditions: [],
-    }
+    dropData = { ...dropData, routing_hint: '', conditions: [] }
   }
   else if (type === 'goto') {
-    dropData = {
-      ...dropData,
-      target_flow_id: '',
-      target_node_ref: null,
-      transition_phrase: '',
-      trigger_situation: '',
-    }
+    dropData = { ...dropData, target_flow_id: '', target_node_ref: null, transition_phrase: '', trigger_situation: '' }
   }
   else if (type === 'end') {
-    dropData = {
-      ...dropData,
-      outcome_type: null,
-      final_action: '',
-      kg_links: {},
-    }
+    dropData = { ...dropData, outcome_type: null, final_action: '', kg_links: {} }
   }
   else if (type === 'business_rule') {
     dropData = {
@@ -2045,25 +2154,30 @@ const onDrop = (event: DragEvent) => {
     }
   }
   else {
-    dropData = {
-      ...dropData,
-      situation: '',
-      ...(entrySearchable ? { is_searchable: true } : {}),
-      ...(type === 'trigger' ? { is_flow_entry: true } : {}),
-    }
+    dropData = { ...dropData, situation: '', ...(entrySearchable ? { is_searchable: true } : {}), ...(type === 'trigger' ? { is_flow_entry: true } : {}) }
   }
-
-  const newNode: Node = {
-    id,
-    type: 'expert',
-    position,
-    data: dropData,
-  }
-
+  const newNode: Node = { id, type: 'expert', position, data: dropData }
   nodes.value = [...nodes.value, newNode]
   isPaletteOpen.value = false
   inspectorNodeId.value = id
   requestImmediatePersist()
+  return id
+}
+
+const onDrop = (event: DragEvent) => {
+  const type = event.dataTransfer?.getData('application/vueflow')
+  if (!type) return
+  const catalogDrop = event.dataTransfer?.getData('application/catalog') === '1'
+  const position = project({ x: event.clientX - 40, y: event.clientY - 40 })
+  createNodeAtPosition(type, position, catalogDrop)
+}
+
+/** Drop из CustomFlow — позиция уже в координатах канваса. */
+const onCustomFlowDrop = (event: DragEvent, projected: XYPosition) => {
+  const type = event.dataTransfer?.getData('application/vueflow')
+  if (!type) return
+  const catalogDrop = event.dataTransfer?.getData('application/catalog') === '1'
+  createNodeAtPosition(type, projected, catalogDrop)
 }
 
 defineExpose({
@@ -2103,6 +2217,7 @@ defineExpose({
     radial-gradient(circle at 85% 18%, rgba(168, 85, 247, 0.08), transparent 22%),
     radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.10), transparent 24%),
     linear-gradient(180deg, rgba(255,255,255,0.72), rgba(248,250,252,0.94));
+  background-color: #f8fafc;
 }
 
 .script-flow-canvas::before {
@@ -2123,17 +2238,14 @@ defineExpose({
   cursor: grabbing;
 }
 
-.vue-flow__node {
+/* GPU-слой только на тащимой ноде, не на всех 30+. */
+.vue-flow__node.dragging {
   will-change: transform;
-  transition: filter 0.18s ease, opacity 0.18s ease;
 }
 
-.vue-flow__node:hover {
-  filter: drop-shadow(0 12px 24px rgba(15, 23, 42, 0.10));
-}
-
-.vue-flow__node.selected {
-  filter: drop-shadow(0 18px 34px rgba(79, 70, 229, 0.18));
+/* Во время drag отключаем pointer-events на остальных, чтобы не было hit-test работы. */
+.script-flow-canvas.is-dragging .vue-flow__node:not(.dragging) {
+  pointer-events: none !important;
 }
 
 .vue-flow__handle {
@@ -2142,11 +2254,9 @@ defineExpose({
   border: 2px solid white !important;
   background: #6366f1 !important;
   box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.10) !important;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
 .vue-flow__handle:hover {
-  transform: scale(1.25);
   box-shadow: 0 0 0 6px rgba(99, 102, 241, 0.16) !important;
 }
 
@@ -2155,14 +2265,12 @@ defineExpose({
   stroke-width: 3px !important;
   stroke-linecap: round !important;
   stroke-linejoin: round !important;
-  transition: stroke 0.18s ease, stroke-width 0.18s ease, filter 0.18s ease;
 }
 
 .vue-flow__edge.selected .vue-flow__edge-path,
 .vue-flow__edge:hover .vue-flow__edge-path {
   stroke: rgba(79, 70, 229, 0.82) !important;
   stroke-width: 3.5px !important;
-  filter: drop-shadow(0 0 6px rgba(99, 102, 241, 0.16));
 }
 
 .vue-flow__edge-textbg {

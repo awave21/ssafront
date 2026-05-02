@@ -99,6 +99,28 @@ def message_type(msg: dict[str, Any]) -> str:
     ).strip().lower()
 
 
+def is_deleted_message(msg: dict[str, Any]) -> bool:
+    return coerce_bool(msg.get("is_deleted")) is True
+
+
+def is_edited_message(msg: dict[str, Any]) -> bool:
+    return coerce_bool(msg.get("is_edited")) is True
+
+
+def is_deleted_message(msg: dict[str, Any]) -> bool:
+    for key in ("is_deleted", "isDeleted"):
+        if coerce_bool(msg.get(key)) is True:
+            return True
+    return False
+
+
+def is_edited_message(msg: dict[str, Any]) -> bool:
+    for key in ("is_edited", "isEdited"):
+        if coerce_bool(msg.get(key)) is True:
+            return True
+    return False
+
+
 def is_text_message(msg: dict[str, Any]) -> bool:
     msg_type = message_type(msg)
     if not msg_type:

@@ -38,8 +38,7 @@
     <MessageComposer
       :is-sending="isSending"
       :is-streaming="isStreaming"
-      :agent-enabled="!isManagerSendMode"
-      @send="handleSend"
+      @send-manager="handleSendManager"
       @attach-image="handleAttachImage"
     />
   </div>
@@ -77,7 +76,8 @@ const {
   error: messagesError,
   dialogHasMore
 } = useMessages()
-const { sendDialogOutbound, isPhoneOperatorDialog } = useDialogOutboundSend()
+const { sendManagerMessage } = useMessages()
+const { isPhoneOperatorDialog } = useDialogOutboundSend()
 
 const { markAsRead, getDialogById, syncDialogAgentStatus } = useDialogs()
 
@@ -127,16 +127,8 @@ const loadMoreMessages = async () => {
 }
 
 // Handlers
-const handleSend = async (content: string) => {
-  await sendDialogOutbound({
-    agentId: props.agent.id,
-    dialogId: props.dialogId,
-    content,
-    dialog: currentDialog.value,
-    isAgentEnabled: isAgentEnabled.value,
-    isWsConnected: props.isWsConnected,
-    wsSendMessage: props.wsSendMessage
-  })
+const handleSendManager = async (content: string) => {
+  await sendManagerMessage(props.agent.id, props.dialogId, content)
 }
 
 const handleAttachImage = async (_file: File) => {
@@ -144,7 +136,7 @@ const handleAttachImage = async (_file: File) => {
 }
 
 const handleRetry = async (messageId: string) => {
-  await retryMessage(props.agent.id, props.dialogId, messageId, isAgentEnabled.value)
+  await retryMessage(props.agent.id, props.dialogId, messageId)
 }
 
 // Watch for dialog changes

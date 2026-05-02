@@ -278,16 +278,18 @@ async def _search_semantic(
         logger.warning("failed_to_create_query_embedding")
         return []
     
-    # Форматируем embedding для PostgreSQL
-    embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+    # Форматируем embedding для PostgreSQL.
+    # Важно: передаём как TEXT literal, чтобы asyncpg не пытался кодировать
+    # значение как vector на клиенте.
+    embedding_str = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
     
     sql = text("""
-        SELECT id, data, 1 - (embedding <=> CAST(:embedding AS vector)) as relevance
+        SELECT id, data, 1 - (embedding <=> CAST(CAST(:embedding AS text) AS vector)) as relevance
         FROM directory_items
         WHERE directory_id = :directory_id
           AND tenant_id = :tenant_id
           AND embedding IS NOT NULL
-        ORDER BY embedding <=> CAST(:embedding AS vector)
+        ORDER BY embedding <=> CAST(CAST(:embedding AS text) AS vector)
         LIMIT :limit
     """)
     
@@ -419,9 +421,9 @@ async def update_item_embedding(
     )
     if embedding:
         # Используем raw SQL для надёжного сохранения вектора
-        embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+        embedding_str = "[" + ",".join(str(float(x)) for x in embedding) + "]"
         await db.execute(
-            text("UPDATE directory_items SET embedding = CAST(:embedding AS vector) WHERE id = :id"),
+            text("UPDATE directory_items SET embedding = CAST(CAST(:embedding AS text) AS vector) WHERE id = :id"),
             {"embedding": embedding_str, "id": item.id},
         )
         await db.commit()

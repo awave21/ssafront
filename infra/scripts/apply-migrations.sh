@@ -20,14 +20,16 @@ fi
 
 cd "$INFRA_DIR"
 
+_sudo() { if [[ -n "${SUDO_ASKPASS:-}" ]]; then sudo -A "$@"; else sudo "$@"; fi; }
+
 if docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   DC=(docker compose)
-elif sudo docker info >/dev/null 2>&1 && sudo docker compose version >/dev/null 2>&1; then
-  DC=(sudo docker compose)
+elif _sudo docker info >/dev/null 2>&1 && _sudo docker compose version >/dev/null 2>&1; then
+  DC=(_sudo docker compose)
 elif docker info >/dev/null 2>&1 && docker-compose version >/dev/null 2>&1; then
   DC=(docker-compose)
-elif sudo docker info >/dev/null 2>&1 && sudo docker-compose version >/dev/null 2>&1; then
-  DC=(sudo docker-compose)
+elif _sudo docker info >/dev/null 2>&1 && _sudo docker-compose version >/dev/null 2>&1; then
+  DC=(_sudo docker-compose)
 else
   echo "Ошибка: docker/docker compose недоступны."
   echo "Проверьте установку Docker и права пользователя (группа docker или sudo)."

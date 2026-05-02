@@ -118,8 +118,11 @@ async def run_agent_with_tools(
     settings = get_settings()
     model_name = agent.model or settings.pydanticai_default_model
 
-    # Фолбек для некорректного имени модели "string" (часто дефолт в Swagger UI)
-    if model_name == "string":
+    # Валидация имени модели: только допустимые символы, без произвольных строк из БД.
+    # Формат: [provider:]model-name-with-dots-and-dashes, напр. "openai:gpt-4o-mini"
+    import re as _re
+    _MODEL_NAME_RE = _re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.:/ ]{0,99}$")
+    if not model_name or model_name == "string" or not _MODEL_NAME_RE.match(model_name):
         logger.warning(
             "invalid_model_name_fallback",
             agent_id=str(agent.id),
@@ -148,7 +151,7 @@ async def run_agent_with_tools(
         )
         wrapped_tools.append(pydantic_tool)
     
-    sqns_toolsets, sqns_tools, sqns_bridge = await prepare_sqns_tooling(agent, user)
+    sqns_toolsets, sqns_tools = await prepare_sqns_tooling(agent, user)
     if sqns_tools:
         wrapped_tools.extend(sqns_tools)
     if extra_tools:
@@ -185,8 +188,13 @@ async def run_agent_with_tools(
     elif agent.system_prompt:
         agent_summary_context = agent.system_prompt[:1500]
 
+    # summary_threshold < max_history_messages: DB хранит больше сообщений чем порог
+    # суммаризатора, поэтому summary срабатывает на старте каждого run с полной историей.
+    # 60% даёт summary_threshold=30 при default max_history=50.
+    _max_hist = agent.max_history_messages or 50
+    summary_threshold = max(10, int(_max_hist * 0.6))
     history_processors = create_history_processor(
-        max_messages=agent.max_history_messages or 50,
+        max_messages=summary_threshold,
         enable_summary=True,
         summary_model=settings.summary_model,
         openai_api_key=openai_api_key,
@@ -194,17 +202,14 @@ async def run_agent_with_tools(
     )
     
     # Собираем агента с tools и toolsets.
-    # Инжектируем SQNS_PROMPT_BRIDGE только в режиме "auto".
-    # В режиме "manual" пользователь пишет инструкции в системном промпте сам.
-    base_system_prompt = system_prompt_override if system_prompt_override is not None else agent.system_prompt
-    _bridges_auto = (getattr(agent, "runtime_bridges_mode", "manual") or "manual") == "auto"
-    if sqns_bridge and _bridges_auto:
-        base_system_prompt = ((base_system_prompt or "").rstrip() + "\n\n" + sqns_bridge).strip()
-    # Дата/время в промпт — только в auto; в manual не добавляем скрытых блоков.
-    if _bridges_auto:
-        enriched_system_prompt = _enrich_system_prompt_with_datetime(base_system_prompt, agent.timezone)
-    else:
-        enriched_system_prompt = (base_system_prompt or "").strip()
+    # IMPORTANT: поведение и стиль должны задаваться ТОЛЬКО явным system_prompt
+    # пользователя (или system_prompt_override). Никаких скрытых auto-bridges.
+    enriched_system_prompt = (
+        system_prompt_override if system_prompt_override is not None else agent.system_prompt
+    )
+    enriched_system_prompt = (enriched_system_prompt or "").strip()
+    agent_tz = getattr(agent, "timezone", None) or "UTC"
+    enriched_system_prompt = _enrich_system_prompt_with_datetime(enriched_system_prompt, tz_name=agent_tz)
     pydantic_agent = _build_agent(
         model_name,
         enriched_system_prompt,
@@ -324,13 +329,14 @@ async def run_agent_with_tools(
 
     try:
         span_context = logfire.span("agent_run", **span_attributes)
-    except Exception:
+    except Exception as _span_exc:
+        logger.warning("logfire_span_unavailable", error=str(_span_exc))
         span_context = nullcontext()
 
     # Per-agent лимиты переопределяют глобальные настройки платформы.
     effective_tool_calls_limit = getattr(agent, "max_tool_calls", None) or settings.runtime_tool_calls_limit
-    # request_limit = tool_calls_limit + 1 (последний запрос для финального ответа)
-    effective_request_limit = max(effective_tool_calls_limit + 1, settings.runtime_request_limit)
+    # request_limit = tool_calls_limit + 1 (один финальный LLM-запрос после всех тулов)
+    effective_request_limit = effective_tool_calls_limit + 1
 
     agent_deps = AgentDeps(
         openai_api_key=openai_api_key,
@@ -344,6 +350,7 @@ async def run_agent_with_tools(
             usage_limits=UsageLimits(
                 tool_calls_limit=effective_tool_calls_limit,
                 request_limit=effective_request_limit,
+                total_tokens_limit=settings.runtime_total_tokens_limit,
             ),
             deps=agent_deps,
         )

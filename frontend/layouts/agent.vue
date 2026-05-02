@@ -241,11 +241,32 @@ onMounted(() => {
             </button>
           </template>
 
-          <!-- Публикация потока — крайний правый элемент шапки -->
+          <!-- Публикация потока — индикатор сохранения + свитч -->
           <div
             v-if="scriptFlowToolbarPayload"
-            class="flex shrink-0 items-center lg:ml-2"
+            class="flex shrink-0 items-center gap-2 lg:ml-2"
           >
+            <Transition
+              enter-active-class="transition-opacity duration-150"
+              leave-active-class="transition-opacity duration-150"
+              enter-from-class="opacity-0"
+              leave-to-class="opacity-0"
+            >
+              <span
+                v-if="scriptFlowToolbarPayload.saveError"
+                class="max-w-[14rem] truncate text-[11px] font-medium text-destructive"
+                :title="scriptFlowToolbarPayload.saveError"
+              >{{ scriptFlowToolbarPayload.saveError }}</span>
+              <span
+                v-else-if="scriptFlowToolbarPayload.saving"
+                class="text-[11px] text-muted-foreground"
+              >Сохранение…</span>
+              <span
+                v-else-if="scriptFlowToolbarPayload.hasUnsavedChanges"
+                class="text-[11px] text-amber-600 dark:text-amber-400"
+                title="Несохранённые изменения · Ctrl+S"
+              >●</span>
+            </Transition>
             <Switch
               :model-value="scriptFlowToolbarPayload.flow.flow_status === 'published'"
               :disabled="scriptFlowToolbarPayload.publishing"

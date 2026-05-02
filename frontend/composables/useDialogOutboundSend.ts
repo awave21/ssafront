@@ -66,7 +66,7 @@ export const useDialogOutboundSend = () => {
       return
     }
 
-    await sendMessage(agentId, dialogId, content, 'text', isAgentEnabled)
+    await sendMessage(agentId, dialogId, content, 'text')
   }
 
   return {

@@ -56,6 +56,25 @@ def sanitize_rich_text(value: str | None) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def sanitize_multiline_rich_text(value: str | None) -> str:
+    if not value:
+        return ""
+    text = str(value).replace("\r\n", "\n").replace("\r", "\n")
+    text = _TAG_RE.sub(" ", text)
+    out_lines: list[str] = []
+    prev_blank = False
+    for raw_line in text.split("\n"):
+        line = re.sub(r"[ \t]+", " ", raw_line).strip()
+        if not line:
+            if out_lines and not prev_blank:
+                out_lines.append("")
+            prev_blank = True
+            continue
+        out_lines.append(line)
+        prev_blank = False
+    return "\n".join(out_lines).strip()
+
+
 def _fmt_price(value: Decimal | None) -> str:
     if value is None:
         return ""
@@ -72,27 +91,32 @@ def _duration_minutes(seconds: int | None) -> str:
     return f"{m} мин"
 
 
+def _safe_section_slug(value: str | None, *, fallback: str) -> str:
+    raw = re.sub(r"[^a-zA-Z0-9._-]+", "_", (value or "")).strip("._-")
+    return (raw or fallback)[:80]
+
+
+def _section_sort_key(key: str) -> tuple[int, str]:
+    ordered_prefixes = (
+        "input/01_",
+        "input/02_",
+        "input/03_",
+        "input/04_",
+        "input/05_",
+        "input/06_",
+        "input/07_",
+        "input/08_",
+    )
+    for idx, prefix in enumerate(ordered_prefixes):
+        if key.startswith(prefix):
+            return idx, key
+    return len(ordered_prefixes), key
+
+
 def _corpus_bytes_from_sections(sections: dict[str, str], *, agent_id: UUID) -> tuple[bytes, str]:
-    ordered_keys = [
-        "input/01_categories.txt",
-        "input/02_services.txt",
-        "input/03_specialists.txt",
-        "input/04_relations.txt",
-        "input/05_employees_crm.txt",
-        "input/06_script_flows.txt",
-        "input/07_knowledge_files.txt",
-        "input/08_directories.txt",
-    ]
     parts: list[str] = []
-    for key in ordered_keys:
-        if key not in sections:
-            continue
-        parts.append(f"###GRAPH_SECTION:<{key}>###\n")
-        chunk = sections[key]
-        parts.append(chunk if chunk.endswith("\n") else chunk + "\n")
-    for key, val in sorted(sections.items()):
-        if key in ordered_keys:
-            continue
+    for key in sorted(sections, key=_section_sort_key):
+        val = sections[key]
         parts.append(f"###GRAPH_SECTION:<{key}>###\n")
         parts.append(val if val.endswith("\n") else val + "\n")
     body = "".join(parts).encode("utf-8")
@@ -100,11 +124,17 @@ def _corpus_bytes_from_sections(sections: dict[str, str], *, agent_id: UUID) -> 
 
 
 def write_graphrag_sections_to_workspace(ws: Path, sections: dict[str, str]) -> None:
+    input_dir = ws / "input"
+    expected = {str(Path(rel)) for rel in sections}
+    for path in input_dir.glob("*.txt"):
+        rel = str(path.relative_to(ws))
+        if rel not in expected:
+            path.unlink()
     for rel, text in sections.items():
         path = ws / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-    legacy_readme = ws / "input" / "00_README.txt"
+    legacy_readme = input_dir / "00_README.txt"
     if legacy_readme.is_file():
         legacy_readme.unlink()
 
@@ -265,6 +295,8 @@ async def gather_sqns_graphrag_sections(
         "\n".join(lines_rel) if len(lines_rel) > 5 else "\n".join(lines_rel + ["(нет связей)"])
     )
 
+    _CORPUS_DIRECTIVE_RE = re.compile(r"\[⚡[^\]]*\]|\[🔧[^\]]*\]")
+
     flow_stmt = (
         select(ScriptFlow)
         .where(ScriptFlow.agent_id == agent_id, ScriptFlow.flow_status == "published")
@@ -280,6 +312,7 @@ async def gather_sqns_graphrag_sections(
             flow_definition=flow.flow_definition or {},
             profile_lookup=profile_lookup,
         )
+        compiled = _CORPUS_DIRECTIVE_RE.sub("", compiled)
         lines_sf.append(f"## {sanitize_rich_text(flow.name)}\n\n{compiled}\n")
     sections["input/06_script_flows.txt"] = (
         "\n".join(lines_sf) if len(lines_sf) > 2 else "\n".join(lines_sf + ["(нет опубликованных сценариев)"])
@@ -295,13 +328,17 @@ async def gather_sqns_graphrag_sections(
         .order_by(KnowledgeFile.order_index, KnowledgeFile.title)
     )
     kfiles = (await db.execute(k_stmt)).scalars().all()
-    lines_kn: list[str] = ["# Файлы базы знаний", ""]
-    for f in kfiles:
-        body = sanitize_rich_text(f.content)[:120_000]
-        lines_kn.append(f"## {sanitize_rich_text(f.title)}\n{body}\n")
-    sections["input/07_knowledge_files.txt"] = (
-        "\n".join(lines_kn) if len(lines_kn) > 2 else "\n".join(lines_kn + ["(нет файлов)"])
-    )
+    if not kfiles:
+        sections["input/07_knowledge_files.txt"] = "# Файлы базы знаний\n\n(нет файлов)"
+    for idx, f in enumerate(kfiles, start=1):
+        body = sanitize_multiline_rich_text(f.content)[:120_000]
+        tags = [sanitize_rich_text(tag) for tag in (f.meta_tags or []) if sanitize_rich_text(tag)]
+        block: list[str] = ["# Файл базы знаний", "", f"Название: {sanitize_rich_text(f.title)}"]
+        if tags:
+            block.append(f"Теги: {', '.join(tags)}")
+        block.extend(["", body or "(пустой файл)"])
+        slug = _safe_section_slug(f.title, fallback=f"knowledge_{idx}")
+        sections[f"input/07_knowledge_{idx:03d}_{slug}_{str(f.id)[:8]}.txt"] = "\n".join(block).strip() + "\n"
 
     d_stmt = (
         select(Directory)

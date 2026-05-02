@@ -31,6 +31,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { SimulationNodeDatum } from 'd3'
 import type { UnifiedGraphNodeDto, UnifiedGraphPreview, UnifiedGraphRelationDto } from '../../../types/unifiedGraph'
+import { ORIGIN_COLORS, ORIGIN_LABELS } from './colors'
 
 type SimNode = UnifiedGraphNodeDto &
   SimulationNodeDatum & { x?: number; y?: number; vx?: number; vy?: number; fx?: number | null; fy?: number | null }
@@ -38,20 +39,6 @@ type SimNode = UnifiedGraphNodeDto &
 type SimLink = Omit<UnifiedGraphRelationDto, 'source_graph_node_id' | 'target_graph_node_id'> & {
   source: SimNode | string
   target: SimNode | string
-}
-
-const ORIGIN_COLORS: Record<string, string> = {
-  sqns: '#6366f1',
-  knowledge: '#22c55e',
-  directory: '#f97316',
-  script_bridge: '#ec4899',
-}
-
-const ORIGIN_LABELS: Record<string, string> = {
-  sqns: 'SQNS',
-  knowledge: 'Файлы',
-  directory: 'Справочники',
-  script_bridge: 'Сценарии',
 }
 
 const HTML_TAG_RE = /<[^>]+>/g

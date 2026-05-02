@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -27,6 +28,7 @@ from app.schemas.knowledge_file import (
 from app.services.knowledge_chunking import DEFAULT_CHUNK_OVERLAP_CHARS, DEFAULT_CHUNK_SIZE_CHARS
 from app.services.knowledge_file_extractors import extract_text_from_uploaded_bytes
 from app.services.knowledge_files import search_indexed_knowledge_files
+from app.services.graphrag_export.corpus_dispatch import maybe_auto_dispatch_graphrag_corpus
 from app.services.runtime.model_resolver import resolve_openai_client
 from app.services.tenant_llm_config import get_decrypted_api_key
 from app.services.knowledge_index_jobs import (
@@ -38,6 +40,10 @@ from app.services.knowledge_index_jobs import (
 router = APIRouter()
 
 MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024
+
+
+def _schedule_graphrag_refresh(agent_id: UUID, tenant_id: UUID) -> None:
+    asyncio.create_task(maybe_auto_dispatch_graphrag_corpus(agent_id, tenant_id))
 
 
 def _knowledge_file_read_with_chunks(item: KnowledgeFile, chunks_count: int | None) -> KnowledgeFileRead:
@@ -174,6 +180,8 @@ async def create_knowledge_file(
     db.add(item)
     await db.commit()
     await db.refresh(item)
+    if item.type == "file":
+        _schedule_graphrag_refresh(agent_id, user.tenant_id)
     return _knowledge_file_read_with_chunks(
         item, 0 if item.type == "file" else None
     )
@@ -266,6 +274,7 @@ async def upload_knowledge_file(
     db.add(item)
     await db.commit()
     await db.refresh(item)
+    _schedule_graphrag_refresh(agent_id, user.tenant_id)
     return _knowledge_file_read_with_chunks(item, 0)
 
 
@@ -428,18 +437,25 @@ async def update_knowledge_file(
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="parent_id must point to a folder")
         item.parent_id = parent_id
 
+    graphrag_reindex_needed = False
     if "title" in patch_data and payload.title is not None:
         item.title = payload.title.strip()
+        if item.type == "file":
+            graphrag_reindex_needed = True
     if "meta_tags" in patch_data and item.type == "file":
         item.meta_tags = payload.meta_tags or []
+        graphrag_reindex_needed = True
     if "content" in patch_data and item.type == "file" and payload.content is not None:
         item.content = payload.content
         item.vector_status = "not_indexed"
         item.embedding = None
         item.index_error = None
         item.indexed_at = None
+        graphrag_reindex_needed = True
     if "is_enabled" in patch_data and payload.is_enabled is not None:
         item.is_enabled = payload.is_enabled
+        if item.type == "file":
+            graphrag_reindex_needed = True
     if "order_index" in patch_data and payload.order_index is not None:
         item.order_index = payload.order_index
     if "chunk_size_chars" in patch_data and item.type == "folder":
@@ -467,6 +483,9 @@ async def update_knowledge_file(
             folder_id=item.id,
         )
 
+    if graphrag_reindex_needed:
+        _schedule_graphrag_refresh(agent_id, user.tenant_id)
+
     if item.type == "file":
         cc = await _file_chunk_count(
             db, tenant_id=user.tenant_id, agent_id=agent_id, file_id=item.id
@@ -484,8 +503,11 @@ async def delete_knowledge_file(
 ) -> None:
     await get_agent_or_404(agent_id, db, user)
     item = await _get_item_or_404(db, tenant_id=user.tenant_id, agent_id=agent_id, item_id=item_id)
+    should_refresh_graphrag = item.type == "file"
     await db.delete(item)
     await db.commit()
+    if should_refresh_graphrag:
+        _schedule_graphrag_refresh(agent_id, user.tenant_id)
 
 
 @router.post("/{item_id}/index", response_model=KnowledgeFileIndexResponse)

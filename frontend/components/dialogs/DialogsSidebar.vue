@@ -74,9 +74,9 @@
       </div>
     </div>
 
-    <!-- Search -->
-    <div class="px-4 py-3">
-      <div class="relative">
+    <!-- Search + Create -->
+    <div class="px-4 py-3 flex items-center gap-2">
+      <div class="relative flex-1">
         <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
         <input
           v-model="searchQuery"
@@ -85,6 +85,14 @@
           class="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
         />
       </div>
+      <button
+        v-if="selectedAgentId"
+        @click="$emit('create-dialog')"
+        class="p-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors flex-shrink-0"
+        title="Создать диалог"
+      >
+        <Plus class="w-4 h-4" />
+      </button>
     </div>
 
     <!-- Dialogs List -->
@@ -130,7 +138,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { onClickOutside } from '@vueuse/core'
-import { ChevronDown, Search, Check, Loader2, MessageSquare } from 'lucide-vue-next'
+import { ChevronDown, Search, Check, Loader2, MessageSquare, Plus } from 'lucide-vue-next'
 import { useDialogs } from '../../composables/useDialogs'
 import DialogItem from './DialogItem.vue'
 import type { Agent } from '../../composables/useAgents'
@@ -185,12 +193,21 @@ const agentsCountLabel = computed(() => {
 
 const filteredDialogs = computed(() => {
   if (!searchQuery.value.trim()) return dialogs.value
-  
+
   const query = searchQuery.value.toLowerCase()
   return dialogs.value.filter(dialog => {
-    const title = dialog.title || 'Диалог'
-    const preview = dialog.last_message_preview || ''
-    return title.toLowerCase().includes(query) || preview.toLowerCase().includes(query)
+    const title = (dialog.title || '').toLowerCase()
+    const preview = (dialog.last_message_preview || '').toLowerCase()
+    const username = (dialog.user_info?.username || '').toLowerCase()
+    const phone = (dialog.user_info?.phone || '').toLowerCase()
+    const firstName = (dialog.user_info?.first_name || '').toLowerCase()
+    const lastName = (dialog.user_info?.last_name || '').toLowerCase()
+    return title.includes(query) ||
+      preview.includes(query) ||
+      username.includes(query) ||
+      phone.includes(query) ||
+      firstName.includes(query) ||
+      lastName.includes(query)
   })
 })
 

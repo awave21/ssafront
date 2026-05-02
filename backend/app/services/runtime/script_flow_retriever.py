@@ -177,7 +177,8 @@ class ScriptFlowRetriever:
         if query_embedding is None:
             return []
 
-        embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        # Pass as TEXT literal so asyncpg doesn't try to encode it as a vector client-side.
+        embedding_str = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
         where_sql = [
             "tenant_id = :tenant_id",
             "agent_id = :agent_id",
@@ -218,10 +219,10 @@ class ScriptFlowRetriever:
                 communication_style,
                 preferred_phrases,
                 forbidden_phrases,
-                1 - (embedding <=> CAST(:embedding AS vector)) AS score
+                1 - (embedding <=> CAST(CAST(:embedding AS text) AS vector)) AS score
             FROM script_flow_node_indexes
             WHERE {' AND '.join(where_sql)}
-            ORDER BY embedding <=> CAST(:embedding AS vector)
+            ORDER BY embedding <=> CAST(CAST(:embedding AS text) AS vector)
             LIMIT :limit
             """
         )

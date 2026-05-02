@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sse_starlette.sse import EventSourceResponse
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_scope
@@ -420,6 +420,39 @@ async def list_messages(
 
     logger.info("list_messages_mapped", count=len(all_mapped))
     return {"messages": all_mapped[-limit:]}
+
+@router.delete("/{dialog_id}/history")
+async def clear_dialog_history(
+    agent_id: UUID,
+    dialog_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("dialogs:write")),
+) -> dict[str, Any]:
+    """
+    Очистить историю сообщений диалога (удалить все session_messages).
+    """
+    agent = await get_agent_or_404(agent_id, db, user)
+
+    stmt = (
+        delete(SessionMessage)
+        .where(
+            SessionMessage.session_id == dialog_id,
+            SessionMessage.tenant_id == agent.tenant_id,
+        )
+    )
+    result = await db.execute(stmt)
+    await db.commit()
+
+    deleted_count = result.rowcount
+    logger.info(
+        "dialog_history_cleared",
+        agent_id=str(agent_id),
+        dialog_id=dialog_id,
+        deleted_count=deleted_count,
+    )
+
+    return {"ok": True, "deleted_count": deleted_count}
+
 
 @router.post("/{dialog_id}/messages", response_model=Any)
 async def send_message(

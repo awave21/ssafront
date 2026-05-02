@@ -193,6 +193,7 @@ async def process_webhook_inbound_agent_message(
     run_agent: bool = True,
     log_source: str = "webhook",
     telegram_debug_audit: bool = False,
+    provider_message_ids: list[str] | None = None,
 ) -> str | None:
     """
     Сохранить сообщение пользователя в сессию; при run_agent=True выполнить агента.
@@ -257,6 +258,8 @@ async def process_webhook_inbound_agent_message(
 
     try:
         user_message = build_user_prompt(input_text)
+        if provider_message_ids:
+            user_message["provider_message_ids"] = provider_message_ids
 
         tenant = await db.get(Tenant, agent.tenant_id)
         rules_enabled = bool(getattr(agent, "function_rules_enabled", True)) and bool(

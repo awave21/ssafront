@@ -1,19 +1,8 @@
 <template>
   <div class="space-y-3">
-    <div class="space-y-1.5 rounded-xl border border-border/80 bg-background/95 px-3 py-3 shadow-sm">
-      <p class="text-[11px] font-semibold text-foreground">
-        Смысловые связи шага
-      </p>
-      <p class="text-[11px] leading-relaxed text-muted-foreground">
-        Покажите, на какие знания опирается этот шаг с точки зрения эксперта:
-        какой мотив он раскрывает, какими аргументами подкрепляется, какие возражения снимает
-        и к какому итогу ведёт.
-      </p>
-      <p class="text-[11px] leading-relaxed text-muted-foreground">
-        Сами элементы добавляются в
-        <a :href="libraryHref" target="_blank" class="font-medium underline">библиотеке знаний</a>,
-        а здесь вы связываете их с конкретным шагом сценария.
-      </p>
+    <div class="flex items-center justify-between">
+      <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Смысловые связи</p>
+      <a :href="libraryHref" target="_blank" class="text-[10px] text-muted-foreground hover:text-foreground underline">библиотека →</a>
     </div>
 
     <div v-for="bucket in BUCKETS" :key="bucket.key" class="space-y-1.5">

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routers.webhooks_inbound_agent import append_wappi_linked_account_message
@@ -240,4 +240,108 @@ async def link_or_append_wappi_operator_message(
         base_user_info=base_user_info,
         log_source=log_source,
         message_metadata=message_metadata,
+    )
+
+
+async def find_inbound_message_by_provider_id(
+    db: AsyncSession,
+    *,
+    agent_id: UUID,
+    session_id: str,
+    provider_message_id: str,
+) -> "SessionMessage | None":
+    """Найти входящее сообщение клиента по provider_message_id."""
+    from app.db.models.session_message import SessionMessage
+    from app.db.models.run import Run
+
+    # Ищем в session_messages где в JSONB поле message хранится provider_message_ids содержащий нужный id
+    stmt = (
+        select(SessionMessage)
+        .join(Run, Run.id == SessionMessage.run_id)
+        .where(
+            SessionMessage.session_id == session_id,
+            Run.agent_id == agent_id,
+            SessionMessage.message["provider_message_ids"].astext.contains(provider_message_id),
+        )
+        .order_by(SessionMessage.message_index.desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def update_inbound_message_content(
+    db: AsyncSession,
+    *,
+    agent_id: UUID,
+    session_id: str,
+    session_message: "SessionMessage",
+    new_text: str,
+) -> None:
+    """Обновить текст входящего сообщения (редактирование)."""
+    from app.utils.broadcast import broadcaster
+
+    payload = dict(session_message.message)
+    parts = payload.get("parts")
+    if isinstance(parts, list) and parts:
+        new_parts = []
+        for part in parts:
+            p = dict(part)
+            if p.get("part_kind") in ("user-prompt", "user_prompt", "user"):
+                p["content"] = new_text
+            new_parts.append(p)
+        payload["parts"] = new_parts
+    payload["is_edited"] = True
+    session_message.message = payload
+    await db.commit()
+
+    await broadcaster.publish(
+        agent_id,
+        {
+            "type": "message_updated",
+            "data": {
+                "id": str(session_message.id),
+                "session_id": session_id,
+                "agent_id": str(agent_id),
+                "edit": True,
+                "new_text": new_text,
+            },
+        },
+    )
+
+
+async def mark_inbound_message_deleted(
+    db: AsyncSession,
+    *,
+    agent_id: UUID,
+    session_id: str,
+    session_message: "SessionMessage",
+) -> None:
+    """Пометить входящее сообщение как удалённое."""
+    from app.utils.broadcast import broadcaster
+
+    payload = dict(session_message.message)
+    parts = payload.get("parts")
+    if isinstance(parts, list) and parts:
+        new_parts = []
+        for part in parts:
+            p = dict(part)
+            if p.get("part_kind") in ("user-prompt", "user_prompt", "user"):
+                p["content"] = "[сообщение удалено]"
+            new_parts.append(p)
+        payload["parts"] = new_parts
+    payload["is_deleted"] = True
+    session_message.message = payload
+    await db.commit()
+
+    await broadcaster.publish(
+        agent_id,
+        {
+            "type": "message_updated",
+            "data": {
+                "id": str(session_message.id),
+                "session_id": session_id,
+                "agent_id": str(agent_id),
+                "deleted": True,
+            },
+        },
     )

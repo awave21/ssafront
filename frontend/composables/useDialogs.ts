@@ -115,10 +115,7 @@ export const useDialogs = () => {
    * Fetch dialogs for a specific agent
    */
   const fetchDialogs = async (agentId: string, options?: { archived?: boolean }) => {
-    if (!agentId) {
-      console.warn('[useDialogs] fetchDialogs called without agentId')
-      return
-    }
+    if (!agentId) return
 
     isLoading.value = true
     error.value = null
@@ -134,26 +131,19 @@ export const useDialogs = () => {
       const url = `agents/${agentId}/dialogs${queryString ? `?${queryString}` : ''}`
 
       const response = await apiFetch<DialogsListResponse | Dialog[]>(url)
-      
-      // Handle both response formats: {dialogs: [...]} or direct array [...]
+
       let dialogsList: Dialog[] = []
       if (Array.isArray(response)) {
         dialogsList = response
       } else if (response && typeof response === 'object' && 'dialogs' in response) {
         dialogsList = response.dialogs || []
       } else if (response && typeof response === 'object' && 'items' in response) {
-        // Some APIs use 'items' instead of 'dialogs'
         dialogsList = (response as any).items || []
       }
-      
+
       dialogs.value = dialogsList.map(normalizeDialog)
     } catch (err: any) {
-      console.error('[useDialogs] Error fetching dialogs:', err)
-      console.error('[useDialogs] Error details:', {
-        status: err?.statusCode || err?.status,
-        data: err?.data,
-        message: err?.message
-      })
+      console.error('[useDialogs] fetchDialogs error:', err)
       error.value = getReadableErrorMessage(err, 'Не удалось загрузить диалоги')
       dialogs.value = []
     } finally {
@@ -264,7 +254,6 @@ export const useDialogs = () => {
       : 'active'
     const prevDialogStateStatus = idx !== -1 ? dialogs.value[idx].dialog_state_status : undefined
 
-    // Optimistic update (бэк для Telegram синхронизирует dialog_states: disabled | active)
     const optimisticStatus: DialogAgentStatus = currentStatus === 'active' ? 'paused' : 'active'
     const optimisticDialogState: DialogStateStatus = optimisticStatus === 'paused' ? 'disabled' : 'active'
     if (idx !== -1) {
@@ -277,23 +266,10 @@ export const useDialogs = () => {
 
     try {
       const nextIsDisabled = currentStatus === 'active'
-
-      console.info('[Dialog Agent Toggle] PUT state request', {
-        method: 'PUT',
-        url: stateUrl,
-        body: { is_disabled: nextIsDisabled },
-        action: nextIsDisabled ? 'disable' : 'enable'
-      })
       await apiFetch(stateUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: { is_disabled: nextIsDisabled }
-      })
-      console.info('[Dialog Agent Toggle] PUT state response', {
-        method: 'PUT',
-        url: stateUrl,
-        success: true,
-        is_disabled: nextIsDisabled
       })
 
       const finalStatus: DialogAgentStatus = nextIsDisabled ? 'paused' : 'active'
@@ -307,7 +283,6 @@ export const useDialogs = () => {
       }
       return finalStatus
     } catch (err: any) {
-      // Rollback on failure
       if (idx !== -1) {
         dialogs.value[idx] = {
           ...dialogs.value[idx],
@@ -334,23 +309,7 @@ export const useDialogs = () => {
     const stateUrl = `agents/${agentId}/users/${encodeURIComponent(platform)}/${encodeURIComponent(platformUserId)}/state`
 
     try {
-      console.info('[Dialog Agent Toggle] GET state sync request', {
-        method: 'GET',
-        url: stateUrl,
-        agentId,
-        platform,
-        platformUserId,
-        dialogId: dialog.id
-      })
       const currentState = await apiFetch<UserAgentStateResponse>(stateUrl)
-      console.info('[Dialog Agent Toggle] GET state sync response', {
-        method: 'GET',
-        url: stateUrl,
-        is_disabled: currentState.is_disabled,
-        is_disabled_type: typeof (currentState as any)?.is_disabled,
-        disabled_at: currentState.disabled_at,
-        disabled_by_user_id: currentState.disabled_by_user_id
-      })
       const userDisabled = coerceIsDisabled((currentState as any)?.is_disabled)
       const ds = dialog.dialog_state_status
       const dialogPausedFromDialogState = ds === 'disabled' || ds === 'paused'
@@ -361,8 +320,7 @@ export const useDialogs = () => {
         dialogs.value[idx] = { ...dialogs.value[idx], agent_status: normalized }
       }
       return normalized
-    } catch (err: any) {
-      console.error('[useDialogs] syncDialogAgentStatus error:', err)
+    } catch {
       return null
     }
   }

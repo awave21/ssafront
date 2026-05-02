@@ -78,44 +78,38 @@ def extract_text_contents(msg_data: dict[str, Any]) -> list[str]:
     Извлечь все текстовые фрагменты из pydantic-ai сообщения.
 
     Стратегия:
-    1. parts → content / text
-    2. Вложенные parts (один уровень)
-    3. Корневые content / text
-    4. Fallback по известным ключам
+    1. parts → только kind="text" части
+    2. Если есть любые структурированные части (tool-call/tool-return) но нет текста → пусто
+    3. Корневые content / text (для неструктурированных сообщений)
+    4. Fallback по известным ключам (только для сообщений без parts)
     """
+    structured = extract_structured_parts(msg_data)
+
     contents = [
         str(part.get("content", ""))
-        for part in extract_structured_parts(msg_data)
+        for part in structured
         if part.get("kind") == "text" and part.get("content")
     ]
     if contents:
         return contents
 
-    # 3. Корневые поля
+    # Если сообщение имеет структурированные части (tool-call / tool-return / text),
+    # но текстовых среди них нет — это чисто инструментальное сообщение, не показывать.
+    if structured:
+        return []
+
+    # 3. Корневые поля — для сообщений без parts (нестандартный формат)
     root_text = msg_data.get("content") or msg_data.get("text")
-    if root_text and str(root_text) not in contents:
-        contents.append(str(root_text))
+    if root_text and isinstance(root_text, str):
+        contents.append(root_text)
 
-    # 4. Fallback — перебираем типичные ключи
+    # 4. Fallback по известным ключам (только если parts отсутствуют)
     if not contents:
-        for key in ("parts", "content", "text", "message"):
+        for key in ("content", "text", "body", "input", "output", "message"):
             val = msg_data.get(key)
             if isinstance(val, str) and val:
                 contents.append(val)
-            elif isinstance(val, list):
-                for item in val:
-                    if isinstance(item, str):
-                        contents.append(item)
-                    elif isinstance(item, dict):
-                        t = item.get("content") or item.get("text")
-                        if t:
-                            contents.append(str(t))
-
-    if not contents:
-        for key in ("content", "text", "body", "input", "output"):
-            val = msg_data.get(key)
-            if isinstance(val, str) and val:
-                contents.append(val)
+                break
 
     return contents
 
