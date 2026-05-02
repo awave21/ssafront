@@ -11,3 +11,5 @@ data/graphrag/*
 backup_before_password_change.sql
 .DS_Store
 node_modules
+.claude/
+.cursor/
