@@ -1,4 +1,7 @@
-.claude/
+.claude/*
+!.claude/commands/
+.claude/settings.local.json
+.claude/sudo-askpass.sh
 .cursor/
 CLAUDE.md
 .DS_Store
