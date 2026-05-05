@@ -40,11 +40,11 @@ const TG = 'https://t.me/order_chatmedbot'
           </div>
 
           <!-- CTAs -->
-          <div class="mt-6 flex flex-wrap items-center gap-3">
-            <a :href="TG" target="_blank" rel="noopener" class="cta-peach inline-flex items-center gap-2 px-6 py-3.5 rounded-full font-medium">
+          <div class="mt-6 flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3">
+            <a :href="TG" target="_blank" rel="noopener" class="cta-peach inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-full font-medium">
               Запросить демо <ArrowUpRight :size="16" />
             </a>
-            <a :href="TG" target="_blank" rel="noopener" class="cta-outline inline-flex items-center gap-2 px-6 py-3.5 rounded-full font-medium">
+            <a :href="TG" target="_blank" rel="noopener" class="cta-outline inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-full font-medium">
               Получить консультацию
             </a>
           </div>

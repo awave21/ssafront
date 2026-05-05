@@ -12,7 +12,7 @@ const { el: revealEl, isVisible } = useReveal()
       <div class="grid grid-cols-12 gap-8 mb-20">
         <div class="col-span-12 md:col-span-4">
           <div class="mono text-[var(--w-ink-soft)] mb-6">— раздел 01</div>
-          <h2 class="display text-[clamp(40px,5.5vw,80px)]">
+          <h2 class="display text-[clamp(26px,8vw,80px)]">
             <span style="font-style:normal; font-variation-settings:'opsz' 96,'SOFT' 30; font-weight:350;">Почему</span><br />
             <span style="background: var(--w-brand-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">Chatmedbot</span>?
           </h2>

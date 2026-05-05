@@ -59,7 +59,7 @@ const radarLabelPos = WELCOME_RADAR_DATA.labels.map((label, i) => ({
       <div class="grid grid-cols-12 gap-8 mb-16">
         <div class="col-span-12 md:col-span-7">
           <div class="mono text-[var(--w-ink-soft)] mb-6">— раздел 02</div>
-          <h2 class="display text-[clamp(40px,5.5vw,80px)] leading-[1.02]">
+          <h2 class="display text-[clamp(26px,8vw,80px)] leading-[1.02]">
             <span style="font-style:normal; font-variation-settings:'opsz' 96,'SOFT' 30; font-weight:350;">Контроль и аналитика —</span>
             <br /><span style="background: var(--w-brand-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">в одном интерфейсе.</span>
           </h2>
@@ -111,18 +111,18 @@ const radarLabelPos = WELCOME_RADAR_DATA.labels.map((label, i) => ({
       <!-- Charts -->
       <div class="mt-10 grid grid-cols-12 gap-6">
         <!-- Area chart -->
-        <div class="col-span-12 lg:col-span-7 rounded-2xl bg-[var(--w-surface)] border border-[var(--w-rule)]/60 p-7">
-          <div class="flex items-baseline justify-between mb-5">
-            <div>
-              <div class="mono text-[var(--w-ink-soft)]">динамика записей · неделя</div>
-              <h4 class="serif text-[20px] mt-1" style="font-variation-settings:'opsz' 64; font-weight:500;">Созданные и отменённые записи</h4>
-            </div>
-            <div class="flex items-center gap-4 mono text-[var(--w-ink-soft)]">
-              <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-[var(--w-green)]" />созданные</span>
-              <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-[#C56666]" />отменённые</span>
+        <div class="col-span-12 lg:col-span-7 rounded-2xl bg-[var(--w-surface)] border border-[var(--w-rule)]/60 p-5 md:p-7">
+          <div class="mb-4">
+            <div class="mono text-[var(--w-ink-soft)]">динамика записей · неделя</div>
+            <div class="flex flex-wrap items-center justify-between gap-2 mt-1">
+              <h4 class="serif text-[18px] md:text-[20px]" style="font-variation-settings:'opsz' 64; font-weight:500;">Созданные и отменённые записи</h4>
+              <div class="flex items-center gap-3 mono text-[var(--w-ink-soft)]">
+                <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-[var(--w-green)]" />созд.</span>
+                <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-[#C56666]" />отм.</span>
+              </div>
             </div>
           </div>
-          <svg :viewBox="`0 0 ${W} ${H}`" class="w-full h-[240px]" preserveAspectRatio="none">
+          <svg :viewBox="`0 0 ${W} ${H}`" class="w-full h-[180px] md:h-[240px]" preserveAspectRatio="none">
             <defs>
               <linearGradient id="gTeal" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stop-color="#4A9B7F" stop-opacity="0.35"/>
@@ -144,14 +144,17 @@ const radarLabelPos = WELCOME_RADAR_DATA.labels.map((label, i) => ({
         </div>
 
         <!-- Radar -->
-        <div class="col-span-12 lg:col-span-5 rounded-2xl bg-[var(--w-surface)] border border-[var(--w-rule)]/60 p-7">
+        <div class="col-span-12 lg:col-span-5 rounded-2xl bg-[var(--w-surface)] border border-[var(--w-rule)]/60 p-5 md:p-7">
           <div class="mono text-[var(--w-ink-soft)] mb-1">производительность ии-агента</div>
-          <h4 class="serif text-[20px]" style="font-variation-settings:'opsz' 64; font-weight:500;">Метрики качества работы</h4>
-          <svg viewBox="0 0 240 260" class="w-full h-[260px] mt-2">
-            <circle v-for="(r,i) in radarRings" :key="i" :cx="RADAR_CX" :cy="RADAR_CY" :r="r" fill="none" stroke="#D9D2C4" stroke-width="1" :stroke-dasharray="i < radarRings.length-1 ? '2 3' : ''"/>
-            <line v-for="(a,i) in angles" :key="'a'+i" :x1="RADAR_CX" :y1="RADAR_CY" :x2="RADAR_CX+RADAR_R*Math.cos(a)" :y2="RADAR_CY+RADAR_R*Math.sin(a)" stroke="#D9D2C4" stroke-width="1"/>
-            <polygon :points="radarPoints" fill="rgba(74,155,127,0.25)" stroke="#2A6B55" stroke-width="1.5"/>
-            <text v-for="(l,i) in radarLabelPos" :key="'lab'+i" :x="l.x" :y="l.y" :text-anchor="l.anchor" font-family="JetBrains Mono" font-size="8" fill="#5A5F5C" letter-spacing="0.1em" dominant-baseline="middle">{{l.label.toUpperCase()}}</text>
+          <h4 class="serif text-[18px] md:text-[20px]" style="font-variation-settings:'opsz' 64; font-weight:500;">Метрики качества работы</h4>
+          <!-- Radar с увеличенным viewBox для лейблов -->
+          <svg viewBox="0 0 300 280" class="w-full h-[240px] md:h-[260px] mt-2">
+            <g transform="translate(30, 0)">
+              <circle v-for="(r,i) in radarRings" :key="i" :cx="RADAR_CX" :cy="RADAR_CY" :r="r" fill="none" stroke="#D9D2C4" stroke-width="1" :stroke-dasharray="i < radarRings.length-1 ? '2 3' : ''"/>
+              <line v-for="(a,i) in angles" :key="'a'+i" :x1="RADAR_CX" :y1="RADAR_CY" :x2="RADAR_CX+RADAR_R*Math.cos(a)" :y2="RADAR_CY+RADAR_R*Math.sin(a)" stroke="#D9D2C4" stroke-width="1"/>
+              <polygon :points="radarPoints" fill="rgba(74,155,127,0.25)" stroke="#2A6B55" stroke-width="1.5"/>
+              <text v-for="(l,i) in radarLabelPos" :key="'lab'+i" :x="l.x" :y="l.y" :text-anchor="l.anchor" font-family="JetBrains Mono" font-size="7.5" fill="#5A5F5C" letter-spacing="0.08em" dominant-baseline="middle">{{l.label.toUpperCase()}}</text>
+            </g>
           </svg>
         </div>
       </div>

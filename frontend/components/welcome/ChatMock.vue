@@ -80,7 +80,7 @@ onMounted(() => setTimeout(runDialog, 800))
       </div>
 
       <!-- Messages -->
-      <div ref="chatContainer" class="px-5 py-5 space-y-3 bg-[var(--w-paper)]/40 h-[340px] overflow-y-auto">
+      <div ref="chatContainer" class="px-5 py-5 space-y-3 bg-[var(--w-paper)]/40 h-[240px] md:h-[340px] overflow-y-auto">
         <transition-group name="msg">
           <div
             v-for="(m, i) in visibleMessages"

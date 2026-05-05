@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..700,0..100;1,9..144,300..700,0..100&family=JetBrains+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap');
 
 .welcome-root {
+  overflow-x: clip;
   --w-peach: #F5A962;
   --w-peach-deep: #E08F47;
   --w-peach-tint: #FEF3E7;

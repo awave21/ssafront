@@ -19,6 +19,21 @@ definePageMeta({
   layout: false,
 })
 
+useHead({
+  title: 'chatmedbot — ИИ-агенты для медицинских клиник',
+  meta: [
+    {
+      name: 'description',
+      content:
+        'Умные ИИ-агенты для вашей клиники. Запись пациентов, аналитика, интеграции с МИС и CRM. Без шаблонных «здравствуйте, я бот».',
+    },
+  ],
+  link: [
+    { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
+    { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
+  ],
+})
+
 const router = useRouter()
 const showLanding = ref(false)
 const config = useRuntimeConfig()
@@ -33,7 +48,8 @@ onMounted(() => {
     router.replace('/dashboard')
     return
   }
-  showLanding.value = true
+  // lk.chatmedbot.ru — отправляем на красивую точку входа
+  router.replace('/login')
 })
 </script>
 

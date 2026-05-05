@@ -31,13 +31,13 @@
             href="https://t.me/order_chatmedbot"
             target="_blank"
             rel="noopener"
-            class="block serif text-[20px] hover:text-[var(--w-peach)] transition-colors"
+            class="block serif text-[16px] md:text-[20px] hover:text-[var(--w-peach)] transition-colors break-all"
           >
             t.me/order_chatmedbot
           </a>
           <a
             href="mailto:hello@chatmedbot.ru"
-            class="mt-2 block serif text-[20px] hover:text-[var(--w-peach)] transition-colors"
+            class="mt-2 block serif text-[16px] md:text-[20px] hover:text-[var(--w-peach)] transition-colors break-all"
           >
             hello@chatmedbot.ru
           </a>

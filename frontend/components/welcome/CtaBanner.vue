@@ -14,14 +14,14 @@ const TG = 'https://t.me/order_chatmedbot'
         />
         <div
           aria-hidden="true"
-          class="display absolute -bottom-20 -left-6 text-[280px] leading-none text-[var(--w-peach)]/30 select-none"
+          class="display hidden sm:block absolute -bottom-20 -left-6 text-[280px] leading-none text-[var(--w-peach)]/30 select-none"
           style="font-style: italic;"
         >&rdquo;</div>
 
-        <div class="relative grid grid-cols-12 gap-8 px-8 md:px-14 py-14 md:py-20">
+        <div class="relative grid grid-cols-12 gap-6 px-5 sm:px-8 md:px-14 py-10 md:py-20">
           <div class="col-span-12 md:col-span-7">
-            <div class="mono text-[var(--w-peach-deep)] mb-6">готовы начать?</div>
-            <h2 class="display text-[clamp(40px,6vw,92px)] leading-[1]">
+            <div class="mono text-[var(--w-peach-deep)] mb-4 md:mb-6">готовы начать?</div>
+            <h2 class="display text-[clamp(26px,8vw,92px)] leading-[1]">
               <span style="font-style: normal; font-variation-settings: 'opsz' 144, 'SOFT' 30; font-weight: 350;">Один разговор —</span><br />
               и ваш агент<br />
               <span style="background: var(--w-brand-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">в работе.</span>
@@ -32,12 +32,12 @@ const TG = 'https://t.me/order_chatmedbot'
               Мы покажем демо на вашей реальной переписке и обсудим, что можно
               автоматизировать в первую очередь — без обязательств.
             </p>
-            <div class="flex flex-wrap gap-3">
+            <div class="flex flex-col sm:flex-row flex-wrap gap-3">
               <a
                 :href="TG"
                 target="_blank"
                 rel="noopener"
-                class="cta-peach inline-flex items-center gap-2 px-7 py-4 rounded-full font-medium text-[16px]"
+                class="cta-peach inline-flex items-center justify-center gap-2 px-7 py-4 rounded-full font-medium text-[16px]"
               >
                 Запросить демо
                 <ArrowUpRight :size="17" />
@@ -46,13 +46,13 @@ const TG = 'https://t.me/order_chatmedbot'
                 :href="TG"
                 target="_blank"
                 rel="noopener"
-                class="cta-outline inline-flex items-center gap-2 px-7 py-4 rounded-full font-medium text-[16px]"
+                class="cta-outline inline-flex items-center justify-center gap-2 px-7 py-4 rounded-full font-medium text-[16px]"
               >
                 Получить консультацию
               </a>
             </div>
-            <div class="mt-6 mono text-[var(--w-ink-soft)]">
-              без обязательств · ответ в течение 12 минут
+            <div class="mt-4 mono text-[var(--w-ink-soft)] leading-relaxed">
+              без обязательств<br class="sm:hidden" /><span class="hidden sm:inline"> · </span>ответ в течение 12 минут
             </div>
           </div>
         </div>

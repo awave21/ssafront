@@ -17,7 +17,7 @@ const { el: revealEl, isVisible } = useReveal()
       <div class="grid grid-cols-12 gap-8 mb-14">
         <div class="col-span-12 md:col-span-7">
           <div class="mono text-[var(--w-ink-soft)] mb-6">— раздел 03</div>
-          <h2 class="display text-[clamp(40px,5.5vw,80px)] leading-[1.02]">
+          <h2 class="display text-[clamp(26px,8vw,80px)] leading-[1.02]">
             <span style="font-style: normal; font-variation-settings: 'opsz' 96, 'SOFT' 30; font-weight: 350;">Встраивается в ваше</span><br />
             <span style="background: var(--w-brand-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">рабочее пространство.</span>
           </h2>
