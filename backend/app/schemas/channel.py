@@ -9,10 +9,22 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 # Telegram Bot Token format: 123456789:ABCdefGHIjklMNOpqrSTUvwxYZ
 TELEGRAM_TOKEN_PATTERN = re.compile(r"^\d{8,15}:[A-Za-z0-9_-]{30,50}$")
+COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+class WidgetSettings(BaseModel):
+    title: str = Field(default="Чат с нами", max_length=60)
+    subtitle: str | None = Field(None, max_length=100)
+    welcome_message: str | None = Field(None, max_length=500)
+    primary_color: str = Field(default="#3B82F6", pattern=r"^#[0-9a-fA-F]{6}$")
+    position: Literal["bottom-right", "bottom-left"] = Field(default="bottom-right")
+    launcher_icon: Literal["chat", "bubble", "sparkle"] = Field(default="chat")
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class ChannelBase(BaseModel):
-    type: Literal["telegram", "telegram_phone", "whatsapp", "max"] = Field(..., description="Тип канала")
+    type: Literal["telegram", "telegram_phone", "whatsapp", "max", "web_widget"] = Field(..., description="Тип канала")
     telegram_bot_token: str | None = Field(None, description="Токен Telegram-бота")
     telegram_webhook_enabled: bool = Field(False, description="Активен ли webhook")
     telegram_webhook_endpoint: str | None = Field(None, description="Webhook endpoint для Telegram")
@@ -30,7 +42,7 @@ class ChannelCreate(ChannelBase):
 
 
 class ChannelUpdate(BaseModel):
-    type: Literal["telegram", "telegram_phone", "whatsapp", "max"] | None = Field(None, description="Тип канала")
+    type: Literal["telegram", "telegram_phone", "whatsapp", "max", "web_widget"] | None = Field(None, description="Тип канала")
     telegram_bot_token: str | None = Field(None, description="Токен Telegram-бота")
     telegram_webhook_enabled: bool | None = Field(None, description="Активен ли webhook")
     telegram_webhook_endpoint: str | None = Field(None, description="Webhook endpoint для Telegram")
@@ -54,7 +66,7 @@ class TelegramBotTokenUpdate(BaseModel):
         return v
 
 
-PublicChannelType = Literal["Telegram_Bot", "Telegram_Phone", "Whatsapp_Phone", "Max_Phone"]
+PublicChannelType = Literal["Telegram_Bot", "Telegram_Phone", "Whatsapp_Phone", "Max_Phone", "Web_Widget"]
 
 
 class ChannelConnectionPayload(BaseModel):
@@ -62,6 +74,8 @@ class ChannelConnectionPayload(BaseModel):
     telegram_bot_token: str | None = Field(None, max_length=100, description="Токен Telegram-бота")
     whatsapp_phone: str | None = Field(None, description="Телефон WhatsApp")
     max_bot_id: str | None = Field(None, max_length=64, description="ID бота Wappi MAX (query bot_id при отправке)")
+    widget_settings: WidgetSettings | None = Field(None, description="Настройки виджета")
+    widget_allowed_origins: list[str] | None = Field(None, description="Разрешённые домены (пусто = все)")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -107,6 +121,16 @@ class ChannelRead(ChannelBase):
     created_at: datetime
     updated_at: datetime | None
 
+    # Web widget fields
+    widget_settings: WidgetSettings | None = None
+    widget_allowed_origins: list[str] | None = None
+    widget_api_key_last4: str | None = None
+
+
+class ChannelConnectRead(ChannelRead):
+    """Returned only on connect — includes one-time raw API key."""
+    raw_api_key: str | None = None
+
 
 class ChannelAuthQrRead(BaseModel):
     status: str
@@ -138,3 +162,8 @@ class ChannelAuth2FARead(BaseModel):
     uuid: str | None = None
     time: str | None = None
     timestamp: int | None = None
+
+
+class WidgetRotateKeyRead(BaseModel):
+    raw_api_key: str
+    last4: str

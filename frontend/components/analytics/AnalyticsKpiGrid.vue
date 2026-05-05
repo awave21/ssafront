@@ -105,6 +105,9 @@
               >
                 {{ card.description }}
               </p>
+              <p v-if="card.note" class="mt-0.5 text-[10px] font-medium text-amber-600">
+                {{ card.note }}
+              </p>
             </div>
           </div>
         </div>
@@ -147,6 +150,7 @@ type KpiCard = {
   diff: number | null
   sparklineData?: number[]
   description: string
+  note?: string
   icon: Component
   visitCohort?: PatientsVisitCohort
 }
@@ -436,7 +440,10 @@ const sections = computed((): { title: string; gridClass: string; cards: KpiCard
           value: formatMoney(value.revenue_total),
           diff: calculateDiff(value.revenue_total, prev?.revenue_total),
           sparklineData: sparklinePoints.value.map((p) => p.revenue_total),
-          description: 'Платежи с датой оплаты в выбранном периоде',
+          description: 'Получено в периоде (по дате оплаты)',
+          note: value.revenue_crossperiod > 0
+            ? `в т.ч. ${formatMoney(value.revenue_crossperiod)} за визиты других периодов`
+            : undefined,
           icon: Wallet,
         },
       ],

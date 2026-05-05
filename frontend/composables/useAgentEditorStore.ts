@@ -26,9 +26,25 @@ type AgentForm = {
   }
 }
 
-type ChannelTypePath = 'telegram' | 'telegram_phone' | 'whatsapp' | 'max'
-type ChannelTypePublic = 'Telegram_Bot' | 'Telegram_Phone' | 'Whatsapp_Phone' | 'Max_Phone'
+type ChannelTypePath = 'telegram' | 'telegram_phone' | 'whatsapp' | 'max' | 'web_widget'
+type ChannelTypePublic = 'Telegram_Bot' | 'Telegram_Phone' | 'Whatsapp_Phone' | 'Max_Phone' | 'Web_Widget'
 type PhoneChannelTypePath = 'telegram_phone' | 'whatsapp' | 'max'
+
+export type WidgetSettings = {
+  title: string
+  subtitle?: string | null
+  welcome_message?: string | null
+  primary_color: string
+  position: 'bottom-right' | 'bottom-left'
+  launcher_icon: 'chat' | 'bubble' | 'sparkle'
+}
+
+export type WebWidgetChannel = {
+  id: string
+  widget_settings: WidgetSettings
+  widget_allowed_origins: string[]
+  widget_api_key_last4?: string | null
+}
 
 type AgentChannelRecord = {
   id: string
@@ -37,6 +53,9 @@ type AgentChannelRecord = {
   telegram_webhook_enabled?: boolean | null
   telegram_webhook_endpoint?: string | null
   is_authorized?: boolean | null
+  widget_settings?: WidgetSettings | null
+  widget_allowed_origins?: string[] | null
+  widget_api_key_last4?: string | null
 }
 
 type ChannelAuthQrResponse = {
@@ -514,6 +533,7 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
 
   const channels = ref<AgentChannelRecord[]>([])
   const telegramChannel = ref<TelegramChannel>(null)
+  const webWidgetChannel = ref<WebWidgetChannel | null>(null)
   const telegramPhoneChannel = computed(() => channels.value.find((ch) => ch.type === 'telegram_phone') ?? null)
   const whatsappPhoneChannel = computed(() => channels.value.find((ch) => ch.type === 'whatsapp') ?? null)
   const maxPhoneChannel = computed(() => channels.value.find((ch) => ch.type === 'max') ?? null)
@@ -774,11 +794,19 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
         webhook_enabled: Boolean(tg.telegram_webhook_enabled),
         webhook_endpoint: tg.telegram_webhook_endpoint ?? null
       } : null
+      const ww = fetchedChannels.find((ch) => ch.type === 'web_widget')
+      webWidgetChannel.value = ww ? {
+        id: ww.id,
+        widget_settings: ww.widget_settings ?? { title: 'Чат с нами', primary_color: '#3B82F6', position: 'bottom-right', launcher_icon: 'chat' },
+        widget_allowed_origins: ww.widget_allowed_origins ?? [],
+        widget_api_key_last4: ww.widget_api_key_last4 ?? null,
+      } : null
       channelsLoaded.value = true
     } catch (err: any) {
       console.error('Failed to fetch channels:', err)
       channels.value = []
       telegramChannel.value = null
+      webWidgetChannel.value = null
     } finally {
       isLoadingChannels.value = false
     }
@@ -793,18 +821,52 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     type: ChannelTypePublic
     telegram_bot_token?: string | null
     whatsapp_phone?: string | null
+    widget_settings?: WidgetSettings | null
+    widget_allowed_origins?: string[] | null
   }) => {
+    if (!agent.value) return null
+    const result = await apiFetch<AgentChannelRecord & { raw_api_key?: string | null }>(
+      `/agents/${agent.value.id}/channels`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token.value}`,
+          'Content-Type': 'application/json'
+        },
+        body: payload
+      }
+    )
+    await fetchChannels()
+    return result
+  }
+
+  const updateWidgetSettings = async (settings: WidgetSettings, allowedOrigins: string[]) => {
     if (!agent.value) return false
     await apiFetch(`/agents/${agent.value.id}/channels`, {
-      method: 'POST',
+      method: 'PUT',
       headers: {
         Authorization: `Bearer ${token.value}`,
         'Content-Type': 'application/json'
       },
-      body: payload
+      body: {
+        type: 'Web_Widget',
+        widget_settings: settings,
+        widget_allowed_origins: allowedOrigins,
+      }
     })
     await fetchChannels()
     return true
+  }
+
+  const rotateWebWidgetKey = async (): Promise<{ raw_api_key: string; last4: string } | null> => {
+    if (!agent.value) return null
+    return await apiFetch<{ raw_api_key: string; last4: string }>(
+      `/agents/${agent.value.id}/channels/web_widget/rotate-key`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token.value}` }
+      }
+    )
   }
 
   const disconnectChannel = async (channelType: ChannelTypePath) => {
@@ -1462,10 +1524,13 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     fetchToolsData,
     ensureToolsLoaded,
     toggleTool,
+    webWidgetChannel,
     fetchChannels,
     ensureChannelsLoaded,
     connectChannel,
     disconnectChannel,
+    updateWidgetSettings,
+    rotateWebWidgetKey,
     fetchChannelAuthQr,
     submitChannelAuth2FA,
     ensureDirectoriesLoaded,

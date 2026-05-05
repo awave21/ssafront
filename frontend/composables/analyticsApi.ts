@@ -16,7 +16,29 @@ import type {
   ServicesTableQuery,
   ToolCallHistoryQuery,
   ToolCallHistoryResponse,
+  AiRecommendationsResponse,
+  BotHealthResponse,
+  FunnelResponse,
+  InsightsResponse,
+  ManagersOverviewResponse,
+  ManagersTimelineResponse,
+  StaffDetailResponse,
+  StaffOverviewResponse,
 } from '~/types/analytics'
+
+type V2QueryInput = {
+  dateFrom: string
+  dateTo: string
+  timezone: string
+}
+
+const toV2Query = (q: V2QueryInput): Record<string, string> => {
+  const out: Record<string, string> = {}
+  if (q.dateFrom) out.date_from = q.dateFrom
+  if (q.dateTo) out.date_to = q.dateTo
+  if (q.timezone) out.timezone = q.timezone
+  return out
+}
 
 type AnalyticsQueryInput = Pick<
   AnalyticsFilters,
@@ -268,6 +290,66 @@ export const useAnalyticsApi = () => {
     throw lastError || new Error('Tool calls history endpoint not found')
   }
 
+  // ===== Analytics v2 =====
+
+  const getStaffOverview = async (agentId: string, q: V2QueryInput): Promise<StaffOverviewResponse> => {
+    return await apiFetch<StaffOverviewResponse>(`/agents/${agentId}/analytics/staff/overview`, {
+      query: toV2Query(q),
+    })
+  }
+
+  const getStaffDetail = async (
+    agentId: string,
+    resourceExternalId: number,
+    q: V2QueryInput,
+  ): Promise<StaffDetailResponse> => {
+    return await apiFetch<StaffDetailResponse>(
+      `/agents/${agentId}/analytics/staff/${resourceExternalId}`,
+      { query: toV2Query(q) },
+    )
+  }
+
+  const getManagersOverview = async (agentId: string, q: V2QueryInput): Promise<ManagersOverviewResponse> => {
+    return await apiFetch<ManagersOverviewResponse>(`/agents/${agentId}/analytics/managers/overview`, {
+      query: toV2Query(q),
+    })
+  }
+
+  const getManagersTimeline = async (agentId: string, q: V2QueryInput): Promise<ManagersTimelineResponse> => {
+    return await apiFetch<ManagersTimelineResponse>(`/agents/${agentId}/analytics/managers/timeline`, {
+      query: toV2Query(q),
+    })
+  }
+
+  const getBotHealth = async (agentId: string, q: V2QueryInput): Promise<BotHealthResponse> => {
+    return await apiFetch<BotHealthResponse>(`/agents/${agentId}/analytics/bot/health`, {
+      query: toV2Query(q),
+    })
+  }
+
+  const getFunnel = async (agentId: string, q: V2QueryInput): Promise<FunnelResponse> => {
+    return await apiFetch<FunnelResponse>(`/agents/${agentId}/analytics/funnel`, {
+      query: toV2Query(q),
+    })
+  }
+
+  const getInsights = async (agentId: string, q: V2QueryInput): Promise<InsightsResponse> => {
+    return await apiFetch<InsightsResponse>(`/agents/${agentId}/analytics/insights`, {
+      query: toV2Query(q),
+    })
+  }
+
+  const getAiRecommendations = async (
+    agentId: string,
+    q: V2QueryInput,
+    forceRefresh = false,
+  ): Promise<AiRecommendationsResponse> => {
+    return await apiFetch<AiRecommendationsResponse>(`/agents/${agentId}/analytics/ai-recommendations`, {
+      method: 'POST',
+      query: { ...toV2Query(q), force_refresh: forceRefresh ? 'true' : 'false' },
+    })
+  }
+
   return {
     getAgentsForFilter,
     getFiltersMeta,
@@ -278,5 +360,13 @@ export const useAnalyticsApi = () => {
     getCommoditiesTable,
     getSqnsResourcesForFilter,
     getToolCallsHistory,
+    getStaffOverview,
+    getStaffDetail,
+    getManagersOverview,
+    getManagersTimeline,
+    getBotHealth,
+    getFunnel,
+    getInsights,
+    getAiRecommendations,
   }
 }

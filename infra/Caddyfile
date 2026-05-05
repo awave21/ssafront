@@ -2,6 +2,13 @@
 	email {$ACME_EMAIL}
 }
 
+chatmedbot.ru {
+	encode zstd gzip
+	handle {
+		reverse_proxy landing:80
+	}
+}
+
 api.chatmedbot.ru {
 	encode zstd gzip
 

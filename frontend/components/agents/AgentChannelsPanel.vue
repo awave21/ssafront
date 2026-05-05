@@ -106,22 +106,54 @@
         @authorize="authorizePhoneChannel('maxPhone', 'max', 'MAX')"
       />
 
-      <div class="p-4 border border-slate-100 rounded-lg bg-slate-50/50 opacity-60">
-        <div class="flex items-start justify-between">
-          <div class="flex gap-4">
-            <div class="w-12 h-12 bg-gradient-to-br from-purple-400 to-purple-600 rounded-md flex items-center justify-center">
-              <MessageSquare class="w-6 h-6 text-white" />
+      <!-- Web Widget Channel -->
+      <div
+        class="p-4 border rounded-lg transition-all"
+        :class="[
+          webWidgetChannel
+            ? 'border-purple-100 bg-purple-50/30'
+            : 'border-slate-100 bg-white hover:border-slate-200'
+        ]"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex gap-4 min-w-0">
+            <div class="w-12 h-12 bg-gradient-to-br from-purple-400 to-purple-600 rounded-md flex items-center justify-center flex-shrink-0">
+              <Globe class="w-6 h-6 text-white" />
             </div>
-            <div>
+            <div class="min-w-0">
               <h4 class="font-bold text-slate-900">Виджет на сайт</h4>
               <p class="text-sm text-slate-500 mt-1">
-                Встраиваемый чат-виджет для вашего сайта.
+                Встраиваемый чат-виджет для любого сайта. Один тег &lt;script&gt; — и готово.
               </p>
+              <div v-if="webWidgetChannel" class="mt-3 flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-green-100 text-green-700">
+                  Активен
+                </span>
+                <span v-if="webWidgetChannel.widget_api_key_last4" class="text-[10px] text-slate-400 font-mono">
+                  ···{{ webWidgetChannel.widget_api_key_last4 }}
+                </span>
+              </div>
             </div>
           </div>
-          <span class="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-200 text-slate-500 uppercase">
-            Скоро
-          </span>
+
+          <div v-if="canEditAgents" class="flex items-center gap-2 flex-shrink-0">
+            <button
+              v-if="webWidgetChannel"
+              @click="showWidgetSheet = true"
+              class="px-3 py-1.5 rounded-md text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 transition-colors"
+            >
+              Настроить
+            </button>
+            <button
+              v-else
+              @click="handleConnectWidget"
+              :disabled="widgetConnecting"
+              class="px-3 py-1.5 rounded-md text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-50"
+            >
+              <Loader2 v-if="widgetConnecting" class="w-3 h-3 animate-spin" />
+              <span v-else>Подключить</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -151,17 +183,27 @@
       @saved="handleChannelSaved"
       @deleted="handleChannelDeleted"
     />
+
+    <WebWidgetEditSheet
+      v-if="agent"
+      :open="showWidgetSheet"
+      :channel="webWidgetChannel"
+      @update:open="showWidgetSheet = $event"
+      @connected="handleWidgetConnected"
+      @disconnected="handleWidgetDisconnected"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { Loader2, MessageCircle, MessageSquare, Send, Smartphone } from 'lucide-vue-next'
+import { Globe, Loader2, MessageCircle, MessageSquare, Send, Smartphone } from 'lucide-vue-next'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import { usePermissions } from '~/composables/usePermissions'
 import { useToast } from '~/composables/useToast'
 import ChannelEditSheet from '~/components/ChannelEditSheet.vue'
+import WebWidgetEditSheet from '~/components/agents/WebWidgetEditSheet.vue'
 import AgentChannelActionCard from '~/components/agents/AgentChannelActionCard.vue'
 import AgentChannelQrModal from '~/components/agents/AgentChannelQrModal.vue'
 import AgentChannelTwoFactorModal from '~/components/agents/AgentChannelTwoFactorModal.vue'
@@ -174,6 +216,7 @@ const store = useAgentEditorStore()
 const {
   agent,
   telegramChannel,
+  webWidgetChannel,
   telegramPhoneChannel,
   whatsappPhoneChannel,
   maxPhoneChannel,
@@ -183,6 +226,8 @@ const { canEditAgents } = usePermissions()
 const { success: toastSuccess, error: toastError } = useToast()
 
 const showChannelEditSheet = ref(false)
+const showWidgetSheet = ref(false)
+const widgetConnecting = ref(false)
 const channelLoading = ref<Record<PhoneChannelKey, boolean>>({
   telegramPhone: false,
   whatsappPhone: false,
@@ -227,6 +272,28 @@ watch([showQrModal, showTwoFactorModal], ([isQrOpen, isTwoFactorOpen]) => {
   twoFactorError.value = null
   twoFactorLoading.value = false
 })
+
+const handleConnectWidget = async () => {
+  widgetConnecting.value = true
+  try {
+    const result = await store.connectChannel({ type: 'Web_Widget' })
+    if (result?.raw_api_key) {
+      showWidgetSheet.value = true
+    }
+  } catch (err: any) {
+    toastError(getErrorMessage(err, 'Не удалось подключить виджет'))
+  } finally {
+    widgetConnecting.value = false
+  }
+}
+
+const handleWidgetConnected = () => {
+  showWidgetSheet.value = false
+}
+
+const handleWidgetDisconnected = () => {
+  showWidgetSheet.value = false
+}
 
 const getErrorMessage = (err: any, fallback: string) => {
   const msg = err?.data?.detail ?? err?.data?.message ?? err?.message ?? fallback

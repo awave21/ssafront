@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import Boolean, Enum, ForeignKey, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -21,7 +21,7 @@ class Channel(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     )
 
     type: Mapped[str] = mapped_column(
-        Enum("telegram", "telegram_phone", "whatsapp", "max", name="channel_type"),
+        Enum("telegram", "telegram_phone", "whatsapp", "max", "web_widget", name="channel_type"),
         nullable=False,
         index=True,
     )
@@ -44,6 +44,17 @@ class Channel(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     telegram_webhook_token: Mapped[str | None] = mapped_column(String(120), nullable=True)
     telegram_webhook_secret: Mapped[str | None] = mapped_column(String(120), nullable=True)
     telegram_webhook_endpoint: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Web widget fields
+    widget_api_key_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("api_keys.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    widget_api_key_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    widget_allowed_origins: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    widget_settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     agent_links: Mapped[list["AgentChannel"]] = relationship(
         "AgentChannel",

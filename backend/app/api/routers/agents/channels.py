@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_scope
 from app.core.config import get_settings
+from app.db.models.api_key import ApiKey
 from app.db.models.channel import AgentChannel, Channel
 from app.db.session import get_db
 from app.schemas.auth import AuthContext
@@ -18,10 +19,14 @@ from app.schemas.channel import (
     ChannelAuth2FAPayload,
     ChannelAuth2FARead,
     ChannelAuthQrRead,
+    ChannelConnectRead,
     ChannelConnectionPayload,
     ChannelDisconnectPayload,
     ChannelRead,
+    WidgetRotateKeyRead,
+    WidgetSettings,
 )
+from app.services.api_keys import generate_api_key, hash_api_key
 from app.services.audit import write_audit
 from app.services.telegram import TelegramWebhookError, set_telegram_webhook
 from app.services.wappi import (
@@ -41,15 +46,25 @@ router = APIRouter()
 webhook_logger = structlog.get_logger("webhooks")
 wappi_webhook_logger = structlog.get_logger("webhooks.wappi")
 
-AVAILABLE_CHANNEL_TYPES = ["Telegram_Bot", "Telegram_Phone", "Whatsapp_Phone", "Max_Phone"]
+AVAILABLE_CHANNEL_TYPES = ["Telegram_Bot", "Telegram_Phone", "Whatsapp_Phone", "Max_Phone", "Web_Widget"]
 CHANNEL_TYPE_MAP = {
     "Telegram_Bot": "telegram",
     "Telegram_Phone": "telegram_phone",
     "Whatsapp_Phone": "whatsapp",
     "Max_Phone": "max",
+    "Web_Widget": "web_widget",
 }
 WAPPI_PHONE_CHANNEL_TYPES = {"telegram_phone", "whatsapp", "max"}
 WAPPI_PHONE_2FA_CHANNEL_TYPES = {"telegram_phone", "max"}
+
+WIDGET_DEFAULT_SETTINGS: dict = {
+    "title": "Чат с нами",
+    "subtitle": None,
+    "welcome_message": None,
+    "primary_color": "#3B82F6",
+    "position": "bottom-right",
+    "launcher_icon": "chat",
+}
 
 
 def _generate_webhook_token() -> str:
@@ -151,6 +166,43 @@ def _is_wappi_2fa_error(exc: ChannelProfileExternalError) -> bool:
         "неверный пароль",
     )
     return any(marker in normalized for marker in markers)
+
+
+async def _revoke_widget_api_key(db: AsyncSession, channel: Channel) -> None:
+    """Revoke the api_key attached to a web_widget channel if present."""
+    if not channel.widget_api_key_id:
+        return
+    stmt = select(ApiKey).where(ApiKey.id == channel.widget_api_key_id)
+    result = await db.execute(stmt)
+    api_key_obj = result.scalar_one_or_none()
+    if api_key_obj and api_key_obj.revoked_at is None:
+        api_key_obj.revoked_at = datetime.utcnow()
+
+
+async def _create_widget_api_key(
+    db: AsyncSession,
+    user: AuthContext,
+    agent,
+    channel: Channel,
+) -> tuple[str, ApiKey]:
+    """Create a new api_key for web_widget channel, bind it, update channel."""
+    settings = get_settings()
+    raw_key = generate_api_key()
+    key_hash = hash_api_key(raw_key, settings.api_key_pepper)
+    api_key_obj = ApiKey(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        key_hash=key_hash,
+        last4=raw_key[-4:],
+        scopes=["runs:write", "dialogs:read"],
+        name=f"Web Widget — {agent.name}",
+        agent_id=agent.id,
+    )
+    db.add(api_key_obj)
+    await db.flush()
+    channel.widget_api_key_id = api_key_obj.id
+    channel.widget_api_key_last4 = raw_key[-4:]
+    return raw_key, api_key_obj
 
 
 async def _get_channel_for_agent_by_type_or_404(
@@ -422,7 +474,7 @@ async def submit_channel_auth_2fa_password(
 
 @router.post(
     "/{agent_id}/channels",
-    response_model=ChannelRead,
+    response_model=ChannelConnectRead,
     status_code=status.HTTP_201_CREATED,
     summary="Подключить канал",
     response_description="Подключенный канал",
@@ -432,7 +484,7 @@ async def connect_channel(
     payload: ChannelConnectionPayload,
     db: AsyncSession = Depends(get_db),
     user: AuthContext = Depends(require_scope("agents:write")),
-) -> ChannelRead:
+) -> ChannelConnectRead:
     agent = await get_agent_or_404(agent_id, db, user)
     agent_id_str = str(agent_id)
     resolved_type = _resolve_channel_type(payload.type)
@@ -453,9 +505,14 @@ async def connect_channel(
             detail="Channel already connected",
         )
     channel = Channel(type=resolved_type)
+    raw_key: str | None = None
     if resolved_type == "telegram":
         channel.telegram_bot_token = payload.telegram_bot_token
         channel.telegram_webhook_enabled = True
+    elif resolved_type == "web_widget":
+        settings_data = (payload.widget_settings or WidgetSettings()).model_dump()
+        channel.widget_settings = settings_data
+        channel.widget_allowed_origins = payload.widget_allowed_origins or []
     db.add(channel)
     await db.flush()
     db.add(AgentChannel(agent_id=agent.id, channel_id=channel.id))
@@ -527,10 +584,15 @@ async def connect_channel(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Не удалось подключить номер мессенджера. Попробуйте позже",
             ) from exc
+    elif resolved_type == "web_widget":
+        raw_key, api_key_obj = await _create_widget_api_key(db, user, agent, channel)
     await db.commit()
     await db.refresh(channel)
     await write_audit(db, user, "agent.channel.connect", "agent", str(agent.id))
-    return ChannelRead.model_validate(channel)
+    result = ChannelConnectRead.model_validate(channel)
+    if raw_key:
+        result.raw_api_key = raw_key
+    return result
 
 
 @router.put(
@@ -568,6 +630,11 @@ async def update_channel(
         _log_telegram_webhook_connected(agent_id=agent_id, channel=channel, action="update")
     elif resolved_type == "max" and payload.max_bot_id is not None:
         channel.wappi_max_bot_id = payload.max_bot_id.strip() or None
+    elif resolved_type == "web_widget":
+        if payload.widget_settings is not None:
+            channel.widget_settings = payload.widget_settings.model_dump()
+        if payload.widget_allowed_origins is not None:
+            channel.widget_allowed_origins = payload.widget_allowed_origins
     await db.commit()
     await db.refresh(channel)
     await write_audit(db, user, "agent.channel.update", "agent", str(agent_id))
@@ -575,11 +642,11 @@ async def update_channel(
 
 
 def _resolve_channel_type_from_path(channel_type: str) -> str:
-    """Path segment 'telegram' | 'telegram_phone' | 'whatsapp' | 'max' -> internal type."""
+    """Path segment 'telegram' | 'telegram_phone' | 'whatsapp' | 'max' | 'web_widget' -> internal type."""
     if channel_type not in CHANNEL_TYPE_MAP.values():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Unsupported channel type; use 'telegram', 'telegram_phone', 'whatsapp' or 'max'",
+            detail="Unsupported channel type; use 'telegram', 'telegram_phone', 'whatsapp', 'max' or 'web_widget'",
         )
     return channel_type
 
@@ -649,6 +716,8 @@ async def disconnect_channel_by_type(
         await db.commit()
         await write_audit(db, user, "agent.channel.disconnect", "agent", str(agent_id))
         return None
+    if resolved_type == "web_widget":
+        await _revoke_widget_api_key(db, channel)
     await db.delete(link)
     await db.flush()
     stmt = select(AgentChannel.id).where(AgentChannel.channel_id == channel.id)
@@ -726,6 +795,8 @@ async def disconnect_channel(
         await db.commit()
         await write_audit(db, user, "agent.channel.disconnect", "agent", str(agent_id))
         return None
+    if resolved_type == "web_widget":
+        await _revoke_widget_api_key(db, channel)
     await db.delete(link)
     await db.flush()
     stmt = select(AgentChannel.id).where(AgentChannel.channel_id == channel.id)
@@ -736,3 +807,21 @@ async def disconnect_channel(
     await db.commit()
     await write_audit(db, user, "agent.channel.disconnect", "agent", str(agent_id))
     return None
+
+
+@router.post(
+    "/{agent_id}/channels/web_widget/rotate-key",
+    response_model=WidgetRotateKeyRead,
+    summary="Перевыпустить API-ключ для web-виджета",
+)
+async def rotate_widget_key(
+    agent_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> WidgetRotateKeyRead:
+    agent = await get_agent_or_404(agent_id, db, user)
+    channel, _link = await _get_channel_for_agent_by_type_or_404(db, agent_id, "web_widget")
+    await _revoke_widget_api_key(db, channel)
+    raw_key, _key_obj = await _create_widget_api_key(db, user, agent, channel)
+    await db.commit()
+    return WidgetRotateKeyRead(raw_api_key=raw_key, last4=raw_key[-4:])

@@ -71,6 +71,11 @@ class AnalyticsOverviewResponse(BaseModel):
         ge=0,
         description="Число платежей с суммой и датой оплаты в выбранном периоде.",
     )
+    revenue_crossperiod: float = Field(
+        default=0,
+        ge=0,
+        description="Часть revenue_total — платежи за визиты, дата которых вне текущего периода.",
+    )
     revenue_basis: AnalyticsRevenueBasis = Field(
         default="all",
         description="База выручки: all — все типы; clinical — услуги, товары, сертификаты/alternative-payment (как итог отчёта по услугам SQNS), без other-income.",

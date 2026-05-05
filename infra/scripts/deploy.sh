@@ -99,8 +99,8 @@ case "$TARGET" in
     "${DC[@]}" up -d api sqns-sync-worker script-flow-index-worker
     ;;
   frontend)
-    echo "Деплой frontend: пересборка frontend + проверка воркеров"
-    "${DC[@]}" up -d --build frontend
+    echo "Деплой frontend: пересборка frontend + landing + проверка воркеров"
+    "${DC[@]}" up -d --build frontend landing
     "${DC[@]}" up -d sqns-sync-worker script-flow-index-worker
     ;;
   worker)
@@ -120,21 +120,21 @@ case "$TARGET" in
   all)
     echo "Деплой all: db/redis + сборка + миграции до api + запуск сервисов + netdata + caddy"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" build api frontend sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" build api frontend landing sqns-sync-worker script-flow-index-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
-    "${DC[@]}" up -d api frontend sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" up -d api frontend landing sqns-sync-worker script-flow-index-worker
     "${DC[@]}" up -d --remove-orphans netdata caddy
     ;;
   full)
     echo "Деплой full: db/redis + сборка + миграции до api + запуск + netdata/caddy + pgadmin/watcher"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" build api frontend sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" build api frontend landing sqns-sync-worker script-flow-index-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
-    "${DC[@]}" up -d api frontend sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" up -d api frontend landing sqns-sync-worker script-flow-index-worker
     "${DC[@]}" up -d --remove-orphans netdata caddy pgadmin watcher
     ;;
   *)

@@ -1,32 +1,66 @@
-<template>
-  <div class="min-h-screen flex items-center justify-center bg-slate-50 px-4">
-    <p class="text-slate-600">Переадресация...</p>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  ensureFreshAccessToken,
   getStoredAccessToken,
-  isAccessTokenExpired
+  isAccessTokenExpired,
 } from '~/composables/authSessionManager'
+import WelcomeHeader from '~/components/welcome/Header.vue'
+import WelcomeHero from '~/components/welcome/Hero.vue'
+import WelcomeFeatures from '~/components/welcome/Features.vue'
+import WelcomeAnalytics from '~/components/welcome/Analytics.vue'
+import WelcomeIntegrations from '~/components/welcome/Integrations.vue'
+import WelcomeSteps from '~/components/welcome/Steps.vue'
+import WelcomeCtaBanner from '~/components/welcome/CtaBanner.vue'
+import WelcomeFooter from '~/components/welcome/Footer.vue'
+import WelcomeHairline from '~/components/welcome/HairlineRule.vue'
 
 definePageMeta({
-  layout: false
+  layout: false,
 })
 
 const router = useRouter()
+const showLanding = ref(false)
+const config = useRuntimeConfig()
 
-onMounted(async () => {
-  const accessToken = getStoredAccessToken()
-  if (accessToken && !isAccessTokenExpired(accessToken)) {
-    await router.replace('/dashboard')
+onMounted(() => {
+  if (config.public.landingMode === 'true') {
+    showLanding.value = true
     return
   }
-
-  const ensuredToken = await ensureFreshAccessToken({ forceRefresh: true })
-  await router.replace(ensuredToken.token ? '/dashboard' : '/login')
+  const accessToken = getStoredAccessToken()
+  if (accessToken && !isAccessTokenExpired(accessToken)) {
+    router.replace('/dashboard')
+    return
+  }
+  showLanding.value = true
 })
 </script>
+
+<template>
+  <div v-if="showLanding" class="welcome-root min-h-screen">
+    <WelcomeHeader />
+    <main>
+      <WelcomeHero />
+      <WelcomeHairline label="что внутри" />
+      <WelcomeFeatures />
+      <WelcomeHairline />
+      <WelcomeAnalytics />
+      <WelcomeHairline />
+      <WelcomeIntegrations />
+      <WelcomeHairline label="процесс внедрения" />
+      <WelcomeSteps />
+      <WelcomeCtaBanner />
+    </main>
+    <WelcomeFooter />
+  </div>
+  <div v-else class="min-h-screen flex items-center justify-center" style="background:#FAF7F2">
+    <p class="mono" style="font-family:'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;font-size:11px;color:#5A5F5C">загрузка</p>
+  </div>
+</template>
+
+<style src="~/assets/css/welcome.css"></style>
+
+<style>
+html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+</style>

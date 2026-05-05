@@ -9,6 +9,7 @@ from app.api.routers.credentials import router as credentials_router
 from app.api.routers.health import router as health_router
 from app.api.routers.integrations import router as integrations_router
 from app.api.routers.invitations import router as invitations_router
+from app.api.routers.widget import router as widget_router
 from app.api.routers.model_pricing import router as model_pricing_router
 from app.api.routers.runs import router as runs_router
 from app.api.routers.tables import router as tables_router
@@ -36,3 +37,4 @@ api_router.include_router(webhooks_router, tags=["webhooks"])
 api_router.include_router(ws_router, tags=["websocket"])
 api_router.include_router(integrations_router, prefix="/integrations", tags=["integrations"])
 api_router.include_router(tenant_settings_router, prefix="/tenant-settings", tags=["tenant-settings"])
+api_router.include_router(widget_router, prefix="/widget", tags=["widget"])

@@ -1,40 +1,46 @@
 <template>
   <div class="w-full px-4 py-10 flex flex-col gap-8 bg-[#f8fafc] min-h-screen">
-    <div class="max-w-7xl mx-auto w-full space-y-10">
-      <div
-        v-if="error && activeTab === 'dashboard'"
-        class="rounded-3xl border border-rose-100 bg-rose-50/50 p-4 text-sm text-rose-600 flex items-center gap-3 shadow-sm"
+    <div class="max-w-7xl mx-auto w-full space-y-8">
+
+      <!-- Filter bar (shared across all tabs) -->
+      <AnalyticsDashboardSection
+        :filters="filters"
+        :agents="agentOptions"
+        :channels="availableChannels"
+        :tags="availableTags"
+        :resources="analyticsResources"
+        :loading="dashboardContentBusy"
+        @update-filters="updateFilters"
+        @refresh="refreshAll"
+        @reset="resetAll"
       >
-        <div class="h-2 w-2 rounded-full bg-rose-500 animate-pulse"></div>
-        <span class="font-bold">{{ error }}</span>
-      </div>
+        <!-- Tab nav -->
+        <Tabs v-model:value="activeTab" class="w-full">
+          <TabsList class="bg-white border border-slate-100 p-1.5 rounded-3xl shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] mb-8 h-14 flex w-fit gap-1">
+            <TabsTrigger
+              v-for="tab in tabs"
+              :key="tab.key"
+              :value="tab.key"
+              class="rounded-2xl px-6 h-full data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-primary/20 transition-all font-bold text-sm flex items-center gap-2"
+            >
+              <component :is="tab.icon" class="h-4 w-4" />
+              {{ tab.label }}
+            </TabsTrigger>
+          </TabsList>
 
-      <Tabs v-model:value="activeTab" class="w-full">
-        <TabsList class="bg-white border border-slate-100 p-1.5 rounded-3xl shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] mb-10 h-14 w-fit">
-          <TabsTrigger value="dashboard" class="rounded-2xl px-10 h-full data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-primary/20 transition-all font-bold text-sm">
-            Дашборд
-          </TabsTrigger>
-          <TabsTrigger value="services" class="rounded-2xl px-10 h-full data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-primary/20 transition-all font-bold text-sm">
-            Услуги
-          </TabsTrigger>
-          <TabsTrigger value="commodities" class="rounded-2xl px-10 h-full data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-primary/20 transition-all font-bold text-sm">
-            Товары
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="dashboard" class="outline-none">
-          <AnalyticsDashboardSection
-            :filters="filters"
-            :agents="agentOptions"
-            :channels="availableChannels"
-            :tags="availableTags"
-            :resources="analyticsResources"
-            :loading="dashboardContentBusy || servicesPending"
-            @update-filters="updateFilters"
-            @refresh="refreshAll"
-            @reset="resetAll"
-          >
-            <div class="space-y-12">
+          <!-- Обзор -->
+          <TabsContent value="overview" class="outline-none">
+            <OverviewTab
+              :ai-reco="v2.aiReco.value"
+              :ai-reco-loading="v2.aiRecoLoading.value"
+              :insights="v2.insights.value"
+              :funnel="v2.funnel.value"
+              :staff="v2.staff.value"
+              :overview="overview"
+              @refresh-ai="handleRefreshAi"
+              @go-to-tab="activeTab = $event"
+              @navigate="navigateUrl"
+            >
               <AnalyticsKpiGrid
                 :overview="overview"
                 :previous-overview="previousOverview"
@@ -58,122 +64,114 @@
                 :overview="overview"
                 :loading="dashboardContentBusy"
               />
-            </div>
-          </AnalyticsDashboardSection>
-        </TabsContent>
+            </OverviewTab>
+          </TabsContent>
 
-        <TabsContent value="services" class="space-y-10 outline-none">
-          <AnalyticsDashboardSection
-            :filters="filters"
-            :agents="agentOptions"
-            :channels="availableChannels"
-            :tags="availableTags"
-            :resources="analyticsResources"
-            :loading="dashboardContentBusy || servicesPending"
-            @update-filters="updateFilters"
-            @refresh="refreshAll"
-            @reset="resetAll"
-          >
-            <ServicesTableToolbar
-              :resource-external-id="servicesQuery.resourceExternalId"
-              :resources="servicesResources"
-              :loading="servicesPending"
-              @update-resource="updateServicesQuery"
-              @export-current="exportServicesCurrent"
-              @export-all="exportServicesAll"
+          <!-- Сотрудники -->
+          <TabsContent value="staff" class="outline-none">
+            <StaffTab
+              :data="v2.staff.value"
+              :loading="v2.pending.value"
+              @open-detail="openStaffDetail"
             />
+          </TabsContent>
 
-            <ServicesTotalsBar v-if="servicesTotals" :totals="servicesTotals" />
-
-            <div class="grid grid-cols-1 gap-10">
-              <CategoriesTopCards :items="servicesItems" :loading="servicesPending" />
-              <ServicesTopCards :items="servicesItems" :loading="servicesPending" />
-            </div>
-
-            <ServicesMetricsTable
-              :items="servicesItems"
-              :loading="servicesPending"
-              :error-message="servicesErrorMessage"
-              :totals="servicesTotals"
-              :total-items="servicesTotalItems"
-              :current-page="servicesCurrentPage"
-              :total-pages="servicesTotalPages"
-              :sort-by="servicesQuery.sortBy"
-              :sort-order="servicesQuery.sortOrder"
-              @sort-change="setServicesSort"
-              @page-change="setServicesPage"
-              @retry="refreshServices"
+          <!-- Менеджеры -->
+          <TabsContent value="managers" class="outline-none">
+            <ManagersTab
+              :overview="v2.managers.value"
+              :timeline="v2.managersTimeline.value"
+              :loading="v2.pending.value"
             />
-          </AnalyticsDashboardSection>
-        </TabsContent>
+          </TabsContent>
 
-        <TabsContent value="commodities" class="space-y-10 outline-none">
-          <AnalyticsDashboardSection
-            :filters="filters"
-            :agents="agentOptions"
-            :channels="availableChannels"
-            :tags="availableTags"
-            :resources="analyticsResources"
-            :loading="dashboardContentBusy || commoditiesPending"
-            @update-filters="updateFilters"
-            @refresh="refreshAll"
-            @reset="resetAll"
-          >
-            <ServicesTableToolbar
-              :resource-external-id="commoditiesQuery.resourceExternalId"
-              :resources="commoditiesResources"
-              :loading="commoditiesPending"
-              @update-resource="updateCommoditiesQuery"
-              @export-current="exportCommoditiesCurrent"
-              @export-all="exportCommoditiesAll"
+          <!-- Бот -->
+          <TabsContent value="bot" class="outline-none">
+            <BotTab
+              :data="v2.botHealth.value"
+              :loading="v2.pending.value"
             />
+          </TabsContent>
 
-            <CommoditiesTotalsBar v-if="commoditiesTotals" :totals="commoditiesTotals" />
+          <!-- Каталог -->
+          <TabsContent value="catalog" class="outline-none">
+            <CatalogTab>
+              <template #services>
+                <div class="space-y-8">
+                  <ServicesTableToolbar
+                    :resource-external-id="servicesQuery.resourceExternalId"
+                    :resources="servicesResources"
+                    :loading="servicesPending"
+                    @update-resource="updateServicesQuery"
+                    @export-current="exportServicesCurrent"
+                    @export-all="exportServicesAll"
+                  />
+                  <ServicesTotalsBar v-if="servicesTotals" :totals="servicesTotals" />
+                  <div class="grid grid-cols-1 gap-10">
+                    <CategoriesTopCards :items="servicesItems" :loading="servicesPending" />
+                    <ServicesTopCards :items="servicesItems" :loading="servicesPending" />
+                  </div>
+                  <ServicesMetricsTable
+                    :items="servicesItems"
+                    :loading="servicesPending"
+                    :error-message="servicesErrorMessage"
+                    :totals="servicesTotals"
+                    :total-items="servicesTotalItems"
+                    :current-page="servicesCurrentPage"
+                    :total-pages="servicesTotalPages"
+                    :sort-by="servicesQuery.sortBy"
+                    :sort-order="servicesQuery.sortOrder"
+                    @sort-change="setServicesSort"
+                    @page-change="setServicesPage"
+                    @retry="refreshServices"
+                  />
+                </div>
+              </template>
+              <template #commodities>
+                <div class="space-y-8">
+                  <ServicesTableToolbar
+                    :resource-external-id="commoditiesQuery.resourceExternalId"
+                    :resources="commoditiesResources"
+                    :loading="commoditiesPending"
+                    @update-resource="updateCommoditiesQuery"
+                    @export-current="exportCommoditiesCurrent"
+                    @export-all="exportCommoditiesAll"
+                  />
+                  <CommoditiesTotalsBar v-if="commoditiesTotals" :totals="commoditiesTotals" />
+                  <div class="grid grid-cols-1 gap-10">
+                    <CommodityCategoriesTopCards :items="commoditiesItems" :loading="commoditiesPending" />
+                    <CommoditiesTopCards :items="commoditiesItems" :loading="commoditiesPending" />
+                  </div>
+                  <CommoditiesMetricsTable
+                    :items="commoditiesItems"
+                    :loading="commoditiesPending"
+                    :error-message="commoditiesErrorMessage"
+                    :totals="commoditiesTotals"
+                    :total-items="commoditiesTotalItems"
+                    :current-page="commoditiesCurrentPage"
+                    :total-pages="commoditiesTotalPages"
+                    :sort-by="commoditiesQuery.sortBy"
+                    :sort-order="commoditiesQuery.sortOrder"
+                    @sort-change="setCommoditiesSort"
+                    @page-change="setCommoditiesPage"
+                    @retry="refreshCommodities"
+                  />
+                </div>
+              </template>
+            </CatalogTab>
+          </TabsContent>
+        </Tabs>
+      </AnalyticsDashboardSection>
 
-            <div class="grid grid-cols-1 gap-10">
-              <CommodityCategoriesTopCards :items="commoditiesItems" :loading="commoditiesPending" />
-              <CommoditiesTopCards :items="commoditiesItems" :loading="commoditiesPending" />
-            </div>
-
-            <CommoditiesMetricsTable
-              :items="commoditiesItems"
-              :loading="commoditiesPending"
-              :error-message="commoditiesErrorMessage"
-              :totals="commoditiesTotals"
-              :total-items="commoditiesTotalItems"
-              :current-page="commoditiesCurrentPage"
-              :total-pages="commoditiesTotalPages"
-              :sort-by="commoditiesQuery.sortBy"
-              :sort-order="commoditiesQuery.sortOrder"
-              @sort-change="setCommoditiesSort"
-              @page-change="setCommoditiesPage"
-              @retry="refreshCommodities"
-            />
-          </AnalyticsDashboardSection>
-        </TabsContent>
-      </Tabs>
-
-      <div
-        v-if="phase2Backlog.length"
-        class="rounded-3xl border border-slate-100 bg-white/50 p-8 backdrop-blur-sm shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]"
-      >
-        <div class="flex flex-col gap-1 mb-6">
-          <h3 class="text-sm font-black text-slate-900 uppercase tracking-widest">Следующий этап метрик</h3>
-          <p class="text-xs font-medium text-slate-400">
-            Эти показатели будут добавлены в ближайших обновлениях для более глубокого анализа.
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <Badge
-            v-for="item in phase2Backlog"
-            :key="item"
-            variant="secondary"
-            class="bg-white text-slate-600 border border-slate-100 hover:bg-slate-50 transition-all px-4 py-2 rounded-xl text-xs font-bold shadow-sm"
-          >
-            {{ item }}
-          </Badge>
-        </div>
-      </div>
+      <!-- Staff detail drawer -->
+      <StaffDetailDrawer
+        :resource-id="selectedStaffId"
+        :agent-id="filters.agentId"
+        :date-from="filters.dateFrom"
+        :date-to="filters.dateTo"
+        :timezone="filters.timezone"
+        @close="selectedStaffId = null"
+      />
     </div>
   </div>
 </template>
@@ -184,9 +182,14 @@ definePageMeta({
 })
 
 import { computed, onMounted, ref } from 'vue'
+import { LayoutDashboard, Users, MessageSquare, Bot, BookOpen } from 'lucide-vue-next'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '~/components/ui/tabs'
+
 import AnalyticsBreakdown from '~/components/analytics/AnalyticsBreakdown.vue'
 import AnalyticsDashboardSection from '~/components/analytics/AnalyticsDashboardSection.vue'
 import AnalyticsKpiGrid from '~/components/analytics/AnalyticsKpiGrid.vue'
+import AnalyticsTimeseries from '~/components/analytics/AnalyticsTimeseries.vue'
+import CategoriesTopCards from '~/components/analytics/CategoriesTopCards.vue'
 import CommoditiesMetricsTable from '~/components/analytics/CommoditiesMetricsTable.vue'
 import CommoditiesTotalsBar from '~/components/analytics/CommoditiesTotalsBar.vue'
 import CommoditiesTopCards from '~/components/analytics/CommoditiesTopCards.vue'
@@ -194,26 +197,37 @@ import CommodityCategoriesTopCards from '~/components/analytics/CommodityCategor
 import ServicesMetricsTable from '~/components/analytics/ServicesMetricsTable.vue'
 import ServicesTableToolbar from '~/components/analytics/ServicesTableToolbar.vue'
 import ServicesTopCards from '~/components/analytics/ServicesTopCards.vue'
-import CategoriesTopCards from '~/components/analytics/CategoriesTopCards.vue'
 import ServicesTotalsBar from '~/components/analytics/ServicesTotalsBar.vue'
-import AnalyticsTimeseries from '~/components/analytics/AnalyticsTimeseries.vue'
-import { Badge } from '~/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '~/components/ui/tabs'
+
+import OverviewTab from '~/components/analytics/v2/OverviewTab.vue'
+import StaffTab from '~/components/analytics/v2/StaffTab.vue'
+import ManagersTab from '~/components/analytics/v2/ManagersTab.vue'
+import BotTab from '~/components/analytics/v2/BotTab.vue'
+import CatalogTab from '~/components/analytics/v2/CatalogTab.vue'
+import StaffDetailDrawer from '~/components/analytics/v2/StaffDetailDrawer.vue'
+
 import { useDashboardData } from '~/composables/useDashboardData'
 import { useCommoditiesAnalyticsTable } from '~/composables/useCommoditiesAnalyticsTable'
 import { useServicesAnalyticsTable } from '~/composables/useServicesAnalyticsTable'
+import { useAnalyticsV2Data } from '~/composables/useAnalyticsV2Data'
 
 const { pageTitle } = useLayoutState()
-const activeTab = ref('dashboard')
+const activeTab = ref('overview')
+
+const tabs = [
+  { key: 'overview', label: 'Обзор', icon: LayoutDashboard },
+  { key: 'staff', label: 'Сотрудники', icon: Users },
+  { key: 'managers', label: 'Менеджеры', icon: MessageSquare },
+  { key: 'bot', label: 'Бот', icon: Bot },
+  { key: 'catalog', label: 'Каталог', icon: BookOpen },
+]
 
 const {
   pending,
-  error,
   filters,
   agentOptions,
   availableChannels,
   availableTags,
-  phase2Backlog,
   overview,
   previousOverview,
   timeseries,
@@ -228,6 +242,14 @@ const {
 } = useDashboardData()
 
 const dashboardContentBusy = computed(() => pending.value || isBootstrapping.value)
+
+const v2 = useAnalyticsV2Data(filters)
+
+const selectedStaffId = ref<number | null>(null)
+const openStaffDetail = (id: number) => { selectedStaffId.value = id }
+
+const handleRefreshAi = () => v2.fetchAiReco(true)
+const navigateUrl = (url: string) => { window.location.href = url }
 
 const {
   query: servicesQuery,
@@ -266,9 +288,7 @@ const {
 } = useCommoditiesAnalyticsTable(computed(() => filters.agentId), { syncFromDashboard: filters })
 
 const refreshAll = async () => {
-  await refresh()
-  await refreshServices()
-  await refreshCommodities()
+  await Promise.allSettled([refresh(), v2.fetchAll(), refreshServices(), refreshCommodities()])
 }
 
 const resetAll = async () => {

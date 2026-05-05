@@ -30,6 +30,21 @@ from app.services.analytics import (
     build_analytics_period,
     default_analytics_dates,
 )
+from app.schemas.analytics_v2 import (
+    AiRecommendationsResponse,
+    BotHealthResponse,
+    FunnelResponse,
+    InsightsResponse,
+    ManagersOverviewResponse,
+    ManagersTimelineResponse,
+    StaffDetailResponse,
+    StaffOverviewResponse,
+)
+from app.services.analytics_v2.ai_recommendations import AiRecommendationsService
+from app.services.analytics_v2.bot_health import BotHealthService
+from app.services.analytics_v2.insights import InsightsService
+from app.services.analytics_v2.managers import ManagersAnalyticsService
+from app.services.analytics_v2.staff import StaffAnalyticsService
 
 router = APIRouter()
 
@@ -316,4 +331,169 @@ async def get_agent_analytics_commodities_table(
         revenue_basis=revenue_basis,
         payment_methods=payment_methods or None,
         revenue_categories=revenue_categories or None,
+    )
+
+
+# ============================================================================
+# Analytics v2: per-doctor / per-manager / bot health / insights / AI summary
+# ============================================================================
+
+
+@router.get("/analytics/staff/overview", response_model=StaffOverviewResponse)
+async def get_staff_overview(
+    agent_id: UUID,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    timezone: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> StaffOverviewResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    period = _resolve_period(
+        date_from=date_from,
+        date_to=date_to,
+        timezone_name=timezone,
+        fallback_timezone=agent.timezone,
+    )
+    return await StaffAnalyticsService(db, agent.id).get_overview(period)
+
+
+@router.get("/analytics/staff/{resource_external_id}", response_model=StaffDetailResponse)
+async def get_staff_detail(
+    agent_id: UUID,
+    resource_external_id: int,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    timezone: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> StaffDetailResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    period = _resolve_period(
+        date_from=date_from,
+        date_to=date_to,
+        timezone_name=timezone,
+        fallback_timezone=agent.timezone,
+    )
+    detail = await StaffAnalyticsService(db, agent.id).get_detail(period, resource_external_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Сотрудник не найден или нет визитов в периоде")
+    return detail
+
+
+@router.get("/analytics/managers/overview", response_model=ManagersOverviewResponse)
+async def get_managers_overview(
+    agent_id: UUID,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    timezone: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> ManagersOverviewResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    period = _resolve_period(
+        date_from=date_from,
+        date_to=date_to,
+        timezone_name=timezone,
+        fallback_timezone=agent.timezone,
+    )
+    return await ManagersAnalyticsService(db, agent.id, agent.tenant_id).get_overview(period)
+
+
+@router.get("/analytics/managers/timeline", response_model=ManagersTimelineResponse)
+async def get_managers_timeline(
+    agent_id: UUID,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    timezone: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> ManagersTimelineResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    period = _resolve_period(
+        date_from=date_from,
+        date_to=date_to,
+        timezone_name=timezone,
+        fallback_timezone=agent.timezone,
+    )
+    return await ManagersAnalyticsService(db, agent.id, agent.tenant_id).get_timeline(period)
+
+
+@router.get("/analytics/bot/health", response_model=BotHealthResponse)
+async def get_bot_health(
+    agent_id: UUID,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    timezone: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> BotHealthResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    period = _resolve_period(
+        date_from=date_from,
+        date_to=date_to,
+        timezone_name=timezone,
+        fallback_timezone=agent.timezone,
+    )
+    return await BotHealthService(db, agent.id, agent.tenant_id).get_health(period)
+
+
+@router.get("/analytics/funnel", response_model=FunnelResponse)
+async def get_funnel(
+    agent_id: UUID,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    timezone: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> FunnelResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    period = _resolve_period(
+        date_from=date_from,
+        date_to=date_to,
+        timezone_name=timezone,
+        fallback_timezone=agent.timezone,
+    )
+    return await BotHealthService(db, agent.id, agent.tenant_id).get_funnel(period)
+
+
+@router.get("/analytics/insights", response_model=InsightsResponse)
+async def get_insights(
+    agent_id: UUID,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    timezone: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> InsightsResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    period = _resolve_period(
+        date_from=date_from,
+        date_to=date_to,
+        timezone_name=timezone,
+        fallback_timezone=agent.timezone,
+    )
+    return await InsightsService(db, agent.id, agent.tenant_id).collect(period)
+
+
+@router.post("/analytics/ai-recommendations", response_model=AiRecommendationsResponse)
+async def post_ai_recommendations(
+    agent_id: UUID,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    timezone: str | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> AiRecommendationsResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    period = _resolve_period(
+        date_from=date_from,
+        date_to=date_to,
+        timezone_name=timezone,
+        fallback_timezone=agent.timezone,
+    )
+    return await AiRecommendationsService(db, agent.id, agent.tenant_id).generate(
+        period,
+        force_refresh=force_refresh,
     )

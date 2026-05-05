@@ -113,6 +113,35 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Open CORS for widget public endpoints (no credentials)
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import Response as StarletteResponse
+
+    class WidgetCORSMiddleware(BaseHTTPMiddleware):
+        _PUBLIC_PREFIXES = (
+            "/api/v1/widget/",
+            "/api/v1/integrations/chat",
+        )
+
+        async def dispatch(self, request: Request, call_next):
+            is_public = any(request.url.path.startswith(p) for p in self._PUBLIC_PREFIXES)
+            if not is_public:
+                return await call_next(request)
+            origin = request.headers.get("origin", "*")
+            if request.method == "OPTIONS":
+                resp = StarletteResponse(status_code=204)
+                resp.headers["Access-Control-Allow-Origin"] = origin
+                resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+                resp.headers["Access-Control-Allow-Headers"] = "content-type, x-api-key"
+                resp.headers["Access-Control-Max-Age"] = "3600"
+                return resp
+            response = await call_next(request)
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+            return response
+
+    app.add_middleware(WidgetCORSMiddleware)
+
     app.add_middleware(SlowAPIMiddleware)
 
     @app.middleware("http")

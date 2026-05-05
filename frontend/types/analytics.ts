@@ -25,6 +25,7 @@ export type AnalyticsOverview = {
   avg_check: number
   revenue_total: number
   payments_total: number
+  revenue_crossperiod: number
   revenue_basis?: AnalyticsRevenueBasis
   period_start: string
   period_end: string
@@ -323,4 +324,217 @@ export type ToolCallHistoryResponse = {
   total: number
   limit: number
   offset: number
+}
+
+// ===== Analytics v2 =====
+
+export type StaffMember = {
+  resource_external_id: number
+  full_name: string
+  position: string | null
+  is_fired: boolean
+  visits_total: number
+  arrived_total: number
+  no_show_total: number
+  no_show_pct: number
+  primary_total: number
+  primary_arrived: number
+  repeat_total: number
+  conversion_pct: number
+  revenue_total: number
+  margin_total: number
+  avg_check: number
+  revenue_delta_pct: number | null
+  visits_delta_pct: number | null
+}
+
+export type StaffOverviewResponse = {
+  period_start: string
+  period_end: string
+  timezone: string
+  items: StaffMember[]
+  employees_total: number
+}
+
+export type StaffServiceLine = {
+  service_external_id: number | null
+  service_name: string
+  bookings_total: number
+  revenue_total: number
+}
+
+export type StaffSparkPoint = {
+  bucket: string
+  visits: number
+  revenue: number
+}
+
+export type StaffDetailResponse = {
+  period_start: string
+  period_end: string
+  timezone: string
+  staff: StaffMember
+  top_services: StaffServiceLine[]
+  sparkline: StaffSparkPoint[]
+}
+
+export type ManagerStat = {
+  user_id: string | null
+  full_name: string
+  email: string | null
+  overrides_count: number
+  bot_disable_count: number
+  dialogs_paused_count: number
+  avg_first_response_seconds: number | null
+  last_active_at: string | null
+}
+
+export type ManagersOverviewResponse = {
+  period_start: string
+  period_end: string
+  timezone: string
+  items: ManagerStat[]
+  managers_total: number
+  overrides_total: number
+  bot_disable_total: number
+}
+
+export type ManagerOverrideEvent = {
+  happened_at: string
+  event_type: 'manager_message' | 'bot_disabled' | 'dialog_paused'
+  session_id: string | null
+  user_id: string | null
+  full_name: string | null
+  text_preview: string | null
+}
+
+export type ManagersTimelineResponse = {
+  period_start: string
+  period_end: string
+  timezone: string
+  events: ManagerOverrideEvent[]
+}
+
+export type BotRunsKpi = {
+  runs_total: number
+  success_pct: number
+  failed_total: number
+  avg_duration_ms: number
+  prompt_tokens_total: number
+  completion_tokens_total: number
+  cost_usd_total: number
+  cost_rub_total: number
+}
+
+export type BotToolStat = {
+  tool_name: string
+  calls_total: number
+  error_count: number
+  error_pct: number
+  p50_ms: number | null
+  p95_ms: number | null
+  avg_ms: number | null
+}
+
+export type BotDialogQuality = {
+  dialogs_total: number
+  dialogs_with_manager: number
+  dialogs_paused: number
+  dialogs_disabled: number
+  autonomy_pct: number
+  avg_messages_per_dialog: number
+}
+
+export type BotBudget = {
+  initial_balance_usd: number
+  spent_usd: number
+  remaining_usd: number
+  spent_pct: number
+  burn_rate_usd_per_day: number
+  days_to_zero: number | null
+  last_14d_usd: number
+}
+
+export type BotHealthResponse = {
+  period_start: string
+  period_end: string
+  timezone: string
+  runs: BotRunsKpi
+  tools: BotToolStat[]
+  dialogs: BotDialogQuality
+  budget: BotBudget
+}
+
+export type FunnelStage = {
+  key: string
+  label: string
+  value: number
+}
+
+export type FunnelResponse = {
+  period_start: string
+  period_end: string
+  timezone: string
+  stages: FunnelStage[]
+}
+
+export type InsightSeverity = 'info' | 'warning' | 'critical'
+export type InsightCategory = 'staff' | 'manager' | 'bot' | 'budget' | 'dialog' | 'organization'
+
+export type Insight = {
+  code: string
+  severity: InsightSeverity
+  category: InsightCategory
+  title: string
+  body: string
+  metric_value: number | null
+  metric_label: string | null
+  entity_type: string | null
+  entity_id: string | null
+  action_url: string | null
+  action_tab: string | null
+}
+
+export type InsightsResponse = {
+  period_start: string
+  period_end: string
+  timezone: string
+  items: Insight[]
+}
+
+export type AiRecommendationPriority = 'high' | 'medium' | 'low'
+export type AiEffortLevel = 'low' | 'medium' | 'high'
+export type AiConfidenceLevel = 'low' | 'medium' | 'high'
+export type AiPeriodVerdict = 'positive' | 'neutral' | 'negative'
+
+export type AiRecommendation = {
+  priority: AiRecommendationPriority
+  title: string
+  body: string
+  root_cause: string | null
+  expected_impact_rub: number | null
+  effort: AiEffortLevel | null
+  confidence: AiConfidenceLevel | null
+  risk_if_ignored: string | null
+  target_entity: string | null
+  target_tab: string | null
+}
+
+export type AiRecommendationsPayload = {
+  summary: string
+  headline_metric: string | null
+  period_verdict: AiPeriodVerdict | null
+  wins: string[]
+  risks: string[]
+  recommendations: AiRecommendation[]
+}
+
+export type AiRecommendationsResponse = {
+  period_start: string
+  period_end: string
+  timezone: string
+  payload: AiRecommendationsPayload
+  generated_at: string
+  cached: boolean
+  model: string | null
 }

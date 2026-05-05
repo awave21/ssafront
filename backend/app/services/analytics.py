@@ -714,6 +714,17 @@ class AgentAnalyticsService:
         primary_avg = primary_revenue / primary_arrived if primary_arrived else Decimal("0")
         repeat_avg = repeat_revenue / repeat_arrived if repeat_arrived else Decimal("0")
 
+        # Payments received in this period for visits OUTSIDE the period window
+        current_visit_ids: set[str] = {str(v.external_id) for v in dataset.visits}
+        revenue_crossperiod = sum(
+            (p.amount for p in view.payments
+             if p.amount is not None and (
+                 not p.visit_external_id or
+                 str(p.visit_external_id).strip() not in current_visit_ids
+             )),
+            start=Decimal("0"),
+        )
+
         return AnalyticsOverviewResponse(
             visits_total=visits_total,
             arrived_total=arrived_total,
@@ -733,6 +744,7 @@ class AgentAnalyticsService:
             avg_check=_round_money(avg_check),
             revenue_total=_round_money(revenue_total),
             payments_total=payments_total,
+            revenue_crossperiod=_round_money(revenue_crossperiod),
             revenue_basis=revenue_basis,
             period_start=period.start_local,
             period_end=period.end_local_exclusive - timedelta(microseconds=1),

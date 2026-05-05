@@ -22,6 +22,7 @@ export default defineNuxtConfig({
       apiBase: "/api/v1",
       siteUrl: "http://localhost:3000",
       domain: "localhost",
+      landingMode: "",
     },
   },
 
