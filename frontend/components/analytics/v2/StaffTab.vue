@@ -129,7 +129,7 @@
                 </th>
                 <th class="px-3 py-3 text-right">
                   <button class="inline-flex items-center gap-1 hover:text-slate-700" @click="toggleSort('no_show_pct')">
-                    No-show <component :is="sortIcon('no_show_pct')" class="h-3 w-3" />
+                    Не пришли <component :is="sortIcon('no_show_pct')" class="h-3 w-3" />
                   </button>
                 </th>
                 <th class="px-3 py-3 text-right">
@@ -322,7 +322,7 @@ const primaryShare = (m: StaffMember) =>
 
 const watchReason = (m: StaffMember) => {
   const reasons: string[] = []
-  if (m.no_show_pct >= 25) reasons.push(`no-show ${m.no_show_pct}%`)
+  if (m.no_show_pct >= 25) reasons.push(`не пришли ${m.no_show_pct}%`)
   if (m.revenue_delta_pct !== null && m.revenue_delta_pct <= -20)
     reasons.push(`выручка ${m.revenue_delta_pct}%`)
   if (m.visits_total >= 10 && m.conversion_pct < 50) reasons.push(`конверсия ${m.conversion_pct}%`)

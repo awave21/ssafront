@@ -538,3 +538,124 @@ export type AiRecommendationsResponse = {
   cached: boolean
   model: string | null
 }
+
+// ──────────────────────────────────────────────────────────────
+// Cross-period payments table
+// ──────────────────────────────────────────────────────────────
+
+export type CrossperiodPaymentsSortBy =
+  | 'payment_date'
+  | 'visit_date'
+  | 'amount'
+  | 'client_name'
+  | 'days_gap'
+
+export type CrossperiodPaymentsQuery = {
+  dateFrom: string
+  dateTo: string
+  timezone: string
+  channel: string
+  revenueBasis: AnalyticsRevenueBasis
+  paymentMethods: AnalyticsPaymentMethod[]
+  revenueCategories: AnalyticsRevenueCategory[]
+  resourceExternalId: number | null
+  clientTags: string[]
+  sortBy: CrossperiodPaymentsSortBy
+  sortOrder: 'asc' | 'desc'
+  limit: number
+  offset: number
+  crossperiodOnly?: boolean
+}
+
+export type AnalyticsCrossperiodPaymentItem = {
+  payment_external_id: string
+  payment_date: string
+  visit_external_id: string | null
+  visit_date: string | null
+  days_gap: number | null
+  direction: 'past' | 'future' | 'unknown' | 'current'
+  is_crossperiod: boolean
+  amount: number
+  payment_method: string | null
+  payment_type_name: string | null
+  payment_type_handle: string | null
+  client_external_id: string | null
+  client_name: string | null
+  resource_external_id: number | null
+  resource_name: string | null
+  visit_attendance: number | null
+  visit_total_price: number | null
+  comment: string | null
+}
+
+export type AnalyticsCrossperiodPaymentsTotals = {
+  payments_total: number
+  amount_total: number
+  amount_past: number
+  amount_future: number
+  amount_unknown: number
+  clients_unique: number
+}
+
+export type AnalyticsCrossperiodPaymentsResponse = {
+  timezone: string
+  period_start: string
+  period_end: string
+  last_sync_at: string | null
+  total: number
+  limit: number
+  offset: number
+  sort_by: CrossperiodPaymentsSortBy
+  sort_order: 'asc' | 'desc'
+  totals: AnalyticsCrossperiodPaymentsTotals
+  items: AnalyticsCrossperiodPaymentItem[]
+}
+
+// ──────────────────────────────────────────────────────────────
+// Client card (patient drawer)
+// ──────────────────────────────────────────────────────────────
+
+export type AnalyticsClientCardVisit = {
+  visit_external_id: string
+  visit_datetime: string
+  attendance: number | null
+  is_primary: boolean
+  resource_external_id: number | null
+  resource_name: string | null
+  services: string[]
+  total_price: number
+  paid_amount: number
+  status: 'arrived' | 'no_show' | 'cancelled' | 'planned'
+}
+
+export type AnalyticsClientCardPayment = {
+  payment_external_id: string
+  payment_date: string
+  amount: number
+  payment_method: string | null
+  payment_type_name: string | null
+  visit_external_id: string | null
+  visit_datetime: string | null
+}
+
+export type AnalyticsClientCardResponse = {
+  client_external_id: string
+  full_name: string | null
+  phone: string | null
+  email: string | null
+  sex: number | null
+  client_type: string | null
+  tags: string[]
+  first_visit_at: string | null
+  last_visit_at: string | null
+  visits_count: number
+  arrived_count: number
+  no_show_count: number
+  no_show_pct: number
+  lifetime_revenue: number
+  avg_check: number
+  top_services: { name: string; count: number }[]
+  top_resources: { name: string; count: number }[]
+  visits: AnalyticsClientCardVisit[]
+  payments: AnalyticsClientCardPayment[]
+}

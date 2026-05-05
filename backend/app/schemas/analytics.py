@@ -231,3 +231,110 @@ class AnalyticsCommoditiesTableResponse(BaseModel):
     sort_order: AnalyticsSortOrder = "desc"
     totals: AnalyticsCommoditiesTableTotals
     items: list[AnalyticsCommodityTableItem] = Field(default_factory=list)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cross-period payments table
+# ─────────────────────────────────────────────────────────────────────────────
+
+AnalyticsCrossperiodPaymentsSortBy = Literal[
+    "payment_date",
+    "visit_date",
+    "amount",
+    "client_name",
+    "days_gap",
+]
+
+
+class AnalyticsCrossperiodPaymentItem(BaseModel):
+    payment_external_id: str
+    payment_date: datetime
+    visit_external_id: str | None = None
+    visit_date: datetime | None = None
+    days_gap: int | None = None
+    direction: Literal["past", "future", "unknown", "current"] = "unknown"
+    is_crossperiod: bool = True
+    amount: float
+    payment_method: str | None = None
+    payment_type_name: str | None = None
+    payment_type_handle: str | None = None
+    client_external_id: str | None = None
+    client_name: str | None = None
+    resource_external_id: int | None = None
+    resource_name: str | None = None
+    visit_attendance: int | None = None
+    visit_total_price: float | None = None
+    comment: str | None = None
+
+
+class AnalyticsCrossperiodPaymentsTotals(BaseModel):
+    payments_total: int = 0
+    amount_total: float = 0.0
+    amount_past: float = 0.0
+    amount_future: float = 0.0
+    amount_unknown: float = 0.0
+    clients_unique: int = 0
+
+
+class AnalyticsCrossperiodPaymentsResponse(BaseModel):
+    timezone: str
+    period_start: datetime
+    period_end: datetime
+    last_sync_at: datetime | None = None
+    total: int = 0
+    limit: int = Field(default=5000, ge=1, le=5000)
+    offset: int = Field(default=0, ge=0)
+    sort_by: AnalyticsCrossperiodPaymentsSortBy = "amount"
+    sort_order: AnalyticsSortOrder = "desc"
+    totals: AnalyticsCrossperiodPaymentsTotals
+    items: list[AnalyticsCrossperiodPaymentItem] = Field(default_factory=list)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Client card (patient drawer)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AnalyticsClientCardVisit(BaseModel):
+    visit_external_id: str
+    visit_datetime: datetime
+    attendance: int | None = None
+    is_primary: bool = False
+    resource_external_id: int | None = None
+    resource_name: str | None = None
+    services: list[str] = Field(default_factory=list)
+    total_price: float = 0.0
+    paid_amount: float = 0.0
+    status: Literal["arrived", "no_show", "cancelled", "planned"] = "planned"
+
+
+class AnalyticsClientCardPayment(BaseModel):
+    payment_external_id: str
+    payment_date: datetime
+    amount: float
+    payment_method: str | None = None
+    payment_type_name: str | None = None
+    visit_external_id: str | None = None
+    visit_datetime: datetime | None = None
+
+
+class AnalyticsClientCardResponse(BaseModel):
+    client_external_id: str
+    full_name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    sex: int | None = None
+    client_type: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    first_visit_at: datetime | None = None
+    last_visit_at: datetime | None = None
+    visits_count: int = 0
+    arrived_count: int = 0
+    no_show_count: int = 0
+    no_show_pct: float = 0.0
+    lifetime_revenue: float = 0.0
+    avg_check: float = 0.0
+    top_services: list[dict] = Field(default_factory=list)
+    top_resources: list[dict] = Field(default_factory=list)
+    visits: list[AnalyticsClientCardVisit] = Field(default_factory=list)
+    payments: list[AnalyticsClientCardPayment] = Field(default_factory=list)

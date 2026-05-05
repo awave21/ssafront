@@ -4,6 +4,8 @@ import type {
   AnalyticsAgentOption,
   AnalyticsBreakdown,
   AnalyticsBreakdownDimension,
+  AnalyticsClientCardResponse,
+  AnalyticsCrossperiodPaymentsResponse,
   AnalyticsFilters,
   AnalyticsFiltersMeta,
   AnalyticsOverview,
@@ -13,6 +15,7 @@ import type {
   AnalyticsTimeGroup,
   AnalyticsTimeseries,
   CommoditiesTableQuery,
+  CrossperiodPaymentsQuery,
   ServicesTableQuery,
   ToolCallHistoryQuery,
   ToolCallHistoryResponse,
@@ -350,6 +353,44 @@ export const useAnalyticsApi = () => {
     })
   }
 
+  const getCrossperiodPaymentsTable = async (
+    agentId: string,
+    query: CrossperiodPaymentsQuery,
+  ): Promise<AnalyticsCrossperiodPaymentsResponse> => {
+    const requestQuery: Record<string, string | number | string[]> = {
+      date_from: query.dateFrom,
+      date_to: query.dateTo,
+      timezone: query.timezone,
+      sort_by: query.sortBy,
+      sort_order: query.sortOrder,
+      limit: query.limit,
+      offset: query.offset,
+    }
+    if (query.channel) requestQuery.channel = query.channel
+    if (query.resourceExternalId !== null) requestQuery.resource_external_id = query.resourceExternalId!
+    if (query.clientTags.length) {
+      requestQuery.tags = query.clientTags.join(',')
+      requestQuery.client_tags = query.clientTags
+    }
+    requestQuery.revenue_basis = query.revenueBasis
+    if (query.paymentMethods?.length) requestQuery.payment_methods = query.paymentMethods
+    if (query.revenueCategories?.length) requestQuery.revenue_categories = query.revenueCategories
+    if (query.crossperiodOnly === false) requestQuery.crossperiod_only = 'false'
+    return await apiFetch<AnalyticsCrossperiodPaymentsResponse>(
+      `/agents/${agentId}/analytics/crossperiod-payments`,
+      { query: requestQuery },
+    )
+  }
+
+  const getClientCard = async (
+    agentId: string,
+    clientExternalId: string | number,
+  ): Promise<AnalyticsClientCardResponse> => {
+    return await apiFetch<AnalyticsClientCardResponse>(
+      `/agents/${agentId}/analytics/clients/${clientExternalId}`,
+    )
+  }
+
   return {
     getAgentsForFilter,
     getFiltersMeta,
@@ -368,5 +409,7 @@ export const useAnalyticsApi = () => {
     getFunnel,
     getInsights,
     getAiRecommendations,
+    getCrossperiodPaymentsTable,
+    getClientCard,
   }
 }

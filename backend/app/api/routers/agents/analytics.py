@@ -13,8 +13,11 @@ from app.db.session import get_db
 from app.schemas.analytics import (
     AnalyticsBreakdownDimension,
     AnalyticsBreakdownResponse,
+    AnalyticsClientCardResponse,
     AnalyticsCommoditiesTableResponse,
     AnalyticsCommoditiesTableSortBy,
+    AnalyticsCrossperiodPaymentsResponse,
+    AnalyticsCrossperiodPaymentsSortBy,
     AnalyticsFiltersMetaResponse,
     AnalyticsOverviewResponse,
     AnalyticsRevenueBasis,
@@ -332,6 +335,63 @@ async def get_agent_analytics_commodities_table(
         payment_methods=payment_methods or None,
         revenue_categories=revenue_categories or None,
     )
+
+
+@router.get("/analytics/crossperiod-payments", response_model=AnalyticsCrossperiodPaymentsResponse)
+async def get_agent_analytics_crossperiod_payments(
+    agent_id: UUID,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    timezone: str | None = Query(default=None),
+    revenue_basis: AnalyticsRevenueBasis = Query(default="all"),
+    channel: str | None = Query(default=None),
+    resource_external_id: int | None = Query(default=None),
+    client_tags: list[str] = Query(default_factory=list, alias="client_tags"),
+    tags: str | None = Query(default=None, alias="tags"),
+    payment_methods: list[str] = Query(default_factory=list, alias="payment_methods"),
+    revenue_categories: list[str] = Query(default_factory=list, alias="revenue_categories"),
+    sort_by: AnalyticsCrossperiodPaymentsSortBy = Query(default="amount"),
+    sort_order: AnalyticsSortOrder = Query(default="desc"),
+    limit: int = Query(default=5000, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
+    crossperiod_only: bool = Query(default=True),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> AnalyticsCrossperiodPaymentsResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    period = _resolve_period(
+        date_from=date_from,
+        date_to=date_to,
+        timezone_name=timezone,
+        fallback_timezone=agent.timezone,
+    )
+    service = AgentAnalyticsService(db, agent)
+    return await service.get_crossperiod_payments_table(
+        period=period,
+        channel=channel,
+        client_tags=_parse_client_tags(client_tags, tags),
+        resource_external_id=resource_external_id,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        limit=limit,
+        offset=offset,
+        revenue_basis=revenue_basis,
+        payment_methods=payment_methods or None,
+        revenue_categories=revenue_categories or None,
+        crossperiod_only=crossperiod_only,
+    )
+
+
+@router.get("/analytics/clients/{client_external_id}", response_model=AnalyticsClientCardResponse)
+async def get_agent_analytics_client_card(
+    agent_id: UUID,
+    client_external_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> AnalyticsClientCardResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    service = AgentAnalyticsService(db, agent)
+    return await service.get_client_card(client_external_id)
 
 
 # ============================================================================

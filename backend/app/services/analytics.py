@@ -16,19 +16,28 @@ from app.db.models.channel import AgentChannel, Channel
 from app.db.models.sqns_service import (
     SqnsClientRecord,
     SqnsCommodity,
+    SqnsEmployee,
     SqnsPayment,
     SqnsService,
     SqnsVisit,
 )
+from app.services.sqns.client_pii import decrypt_client_pii
 from app.services.sqns.visit_arrival import is_sqns_visit_arrived
 from app.schemas.analytics import (
     AnalyticsBreakdownDimension,
     AnalyticsBreakdownItem,
     AnalyticsBreakdownResponse,
+    AnalyticsClientCardPayment,
+    AnalyticsClientCardResponse,
+    AnalyticsClientCardVisit,
     AnalyticsCommoditiesTableResponse,
     AnalyticsCommoditiesTableSortBy,
     AnalyticsCommoditiesTableTotals,
     AnalyticsCommodityTableItem,
+    AnalyticsCrossperiodPaymentItem,
+    AnalyticsCrossperiodPaymentsResponse,
+    AnalyticsCrossperiodPaymentsSortBy,
+    AnalyticsCrossperiodPaymentsTotals,
     AnalyticsFilterOption,
     AnalyticsFiltersMetaResponse,
     AnalyticsOverviewResponse,
@@ -1579,6 +1588,383 @@ class AgentAnalyticsService:
         if sort_by == "avg_check":
             return item.avg_check
         return item.bookings_total
+
+    async def get_crossperiod_payments_table(
+        self,
+        *,
+        period: AnalyticsPeriod,
+        channel: str | None,
+        client_tags: list[str],
+        revenue_basis: AnalyticsRevenueBasis = "all",
+        payment_methods: list[str] | None = None,
+        revenue_categories: list[str] | None = None,
+        resource_external_id: int | None = None,
+        sort_by: AnalyticsCrossperiodPaymentsSortBy = "amount",
+        sort_order: AnalyticsSortOrder = "desc",
+        limit: int = 50,
+        offset: int = 0,
+        crossperiod_only: bool = True,
+    ) -> AnalyticsCrossperiodPaymentsResponse:
+        dataset = await self._load_dataset(period)
+        view = self._build_view(
+            dataset,
+            period=period,
+            channel=channel,
+            client_tags=client_tags,
+            revenue_basis=revenue_basis,
+            payment_methods=payment_methods,
+            revenue_categories=revenue_categories,
+            resource_external_id=resource_external_id,
+        )
+
+        current_visit_ids: set[str] = {str(v.external_id) for v in dataset.visits}
+        in_period_visits: dict[int, SqnsVisit] = {
+            int(v.external_id): v for v in dataset.visits if v.external_id is not None
+        }
+
+        all_filtered: list[SqnsPayment] = [p for p in view.payments if p.amount is not None]
+
+        if crossperiod_only:
+            payments_to_process = [
+                p for p in all_filtered
+                if not p.visit_external_id or str(p.visit_external_id).strip() not in current_visit_ids
+            ]
+        else:
+            payments_to_process = all_filtered
+
+        # Load out-of-period visits
+        out_visit_ids = {
+            int(str(p.visit_external_id).strip())
+            for p in payments_to_process
+            if p.visit_external_id and str(p.visit_external_id).strip().isdigit()
+            and str(p.visit_external_id).strip() not in current_visit_ids
+        }
+        visits_by_ext_id: dict[int, SqnsVisit] = {}
+        if out_visit_ids:
+            stmt = select(SqnsVisit).where(
+                SqnsVisit.agent_id == self.agent.id,
+                SqnsVisit.external_id.in_(out_visit_ids),
+            )
+            for v in (await self.db.execute(stmt)).scalars():
+                visits_by_ext_id[int(v.external_id)] = v
+
+        # Load clients
+        client_ids_needed: set[int] = set()
+        for p in payments_to_process:
+            cid = self._parse_client_external_id(p.client_external_id)
+            if cid is not None:
+                client_ids_needed.add(cid)
+        for v in list(visits_by_ext_id.values()) + list(in_period_visits.values()):
+            if v.client_external_id is not None:
+                client_ids_needed.add(int(v.client_external_id))
+
+        clients_by_ext: dict[int, SqnsClientRecord] = {}
+        if client_ids_needed:
+            stmt = select(SqnsClientRecord).where(
+                SqnsClientRecord.agent_id == self.agent.id,
+                SqnsClientRecord.external_id.in_(client_ids_needed),
+            )
+            for c in (await self.db.execute(stmt)).scalars():
+                clients_by_ext[int(c.external_id)] = c
+
+        # Load resources (employees with full_name) — for both in-period and out-of-period visits
+        resource_ids_needed: set[int] = {
+            int(v.resource_external_id)
+            for v in list(visits_by_ext_id.values()) + list(in_period_visits.values())
+            if v.resource_external_id is not None
+        }
+        resources_by_ext: dict[int, str] = {}
+        if resource_ids_needed:
+            stmt = select(SqnsEmployee).where(
+                SqnsEmployee.agent_id == self.agent.id,
+                SqnsEmployee.external_id.in_(resource_ids_needed),
+            )
+            for e in (await self.db.execute(stmt)).scalars():
+                resources_by_ext[int(e.external_id)] = e.full_name
+
+        def _client_name(payment: SqnsPayment, visit: SqnsVisit | None) -> str | None:
+            cid = (
+                int(visit.client_external_id) if visit and visit.client_external_id is not None
+                else self._parse_client_external_id(payment.client_external_id)
+            )
+            if cid is None:
+                return None
+            c = clients_by_ext.get(cid)
+            if c is None:
+                return None
+            pii = decrypt_client_pii(c.pii_data)
+            parts = [pii.get("lastname"), pii.get("firstname"), pii.get("patronymic")]
+            name = " ".join(p for p in parts if p)
+            return name or None
+
+        def _direction(visit: SqnsVisit | None) -> str:
+            if visit is None or visit.visit_datetime is None:
+                return "unknown"
+            vdt = visit.visit_datetime
+            if vdt < period.start_utc:
+                return "past"
+            if vdt >= period.end_utc:
+                return "future"
+            return "unknown"
+
+        # Build all items (for totals)
+        all_items: list[AnalyticsCrossperiodPaymentItem] = []
+        unique_clients: set[str] = set()
+
+        for p in payments_to_process:
+            ext_id_int = int(str(p.visit_external_id).strip()) if p.visit_external_id and str(p.visit_external_id).strip().isdigit() else None
+            is_in_period = ext_id_int is not None and str(p.visit_external_id).strip() in current_visit_ids
+            is_crossperiod = not is_in_period
+
+            # Prefer in-period visit from dataset; fallback to out-of-period DB lookup
+            visit = (in_period_visits.get(ext_id_int) if is_in_period else visits_by_ext_id.get(ext_id_int)) if ext_id_int is not None else None
+
+            direction = "current" if is_in_period else _direction(visit)
+            cname = _client_name(p, visit)
+            resource_ext = int(visit.resource_external_id) if visit and visit.resource_external_id is not None else None
+            resource_nm = resources_by_ext.get(resource_ext) if resource_ext is not None else None
+
+            if p.visit_external_id:
+                unique_clients.add(str(p.visit_external_id))
+            cid_str = str(self._parse_client_external_id(p.client_external_id) or "")
+            if cid_str:
+                unique_clients.discard(str(p.visit_external_id))
+                unique_clients.add(cid_str)
+
+            visit_dt = visit.visit_datetime if visit else None
+            days_gap: int | None = None
+            if visit_dt is not None and p.payment_date is not None:
+                delta = visit_dt - p.payment_date
+                days_gap = delta.days
+
+            all_items.append(
+                AnalyticsCrossperiodPaymentItem(
+                    payment_external_id=str(p.external_id),
+                    payment_date=p.payment_date,  # type: ignore[arg-type]
+                    visit_external_id=str(p.visit_external_id) if p.visit_external_id else None,
+                    visit_date=visit_dt,
+                    days_gap=days_gap,
+                    direction=direction,  # type: ignore[arg-type]
+                    is_crossperiod=is_crossperiod,
+                    amount=float(p.amount or 0),
+                    payment_method=p.payment_method,
+                    payment_type_name=p.payment_type_name,
+                    payment_type_handle=p.payment_type_handle,
+                    client_external_id=str(self._parse_client_external_id(p.client_external_id)) if self._parse_client_external_id(p.client_external_id) else None,
+                    client_name=cname,
+                    resource_external_id=resource_ext,
+                    resource_name=resource_nm,
+                    visit_attendance=visit.attendance if visit else None,
+                    visit_total_price=float(visit.total_price) if visit and visit.total_price is not None else None,
+                    comment=p.comment,
+                )
+            )
+
+        # Totals
+        totals = AnalyticsCrossperiodPaymentsTotals(
+            payments_total=len(all_items),
+            amount_total=round(sum(i.amount for i in all_items), 2),
+            amount_past=round(sum(i.amount for i in all_items if i.direction == "past"), 2),
+            amount_future=round(sum(i.amount for i in all_items if i.direction == "future"), 2),
+            amount_unknown=round(sum(i.amount for i in all_items if i.direction == "unknown"), 2),
+            clients_unique=len({i.client_external_id for i in all_items if i.client_external_id}),
+        )
+
+        # Sort
+        reverse = sort_order == "desc"
+        if sort_by == "payment_date":
+            all_items.sort(key=lambda i: i.payment_date or datetime.min.replace(tzinfo=ZoneInfo("UTC")), reverse=reverse)
+        elif sort_by == "visit_date":
+            all_items.sort(key=lambda i: i.visit_date or datetime.min.replace(tzinfo=ZoneInfo("UTC")), reverse=reverse)
+        elif sort_by == "client_name":
+            all_items.sort(key=lambda i: (i.client_name or "").lower(), reverse=reverse)
+        elif sort_by == "days_gap":
+            all_items.sort(key=lambda i: i.days_gap if i.days_gap is not None else 0, reverse=reverse)
+        else:  # amount
+            all_items.sort(key=lambda i: i.amount, reverse=reverse)
+
+        page = all_items[offset: offset + limit]
+
+        return AnalyticsCrossperiodPaymentsResponse(
+            timezone=period.timezone_name,
+            period_start=period.start_local,
+            period_end=period.end_local_exclusive - timedelta(microseconds=1),
+            last_sync_at=self.agent.sqns_last_sync_at,
+            total=len(all_items),
+            limit=limit,
+            offset=offset,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            totals=totals,
+            items=page,
+        )
+
+    async def get_client_card(self, client_external_id: int) -> AnalyticsClientCardResponse:
+        # Client info
+        stmt = select(SqnsClientRecord).where(
+            SqnsClientRecord.agent_id == self.agent.id,
+            SqnsClientRecord.external_id == client_external_id,
+        )
+        client = (await self.db.execute(stmt)).scalar_one_or_none()
+
+        pii: dict = {}
+        tags_list: list[str] = []
+        if client is not None:
+            pii = decrypt_client_pii(client.pii_data)
+            raw_tags = client.tags if isinstance(client.tags, list) else []
+            for tag in raw_tags:
+                if isinstance(tag, str) and tag.strip():
+                    tags_list.append(tag.strip())
+                elif isinstance(tag, dict):
+                    t = tag.get("name") or tag.get("tag") or tag.get("value")
+                    if t:
+                        tags_list.append(str(t).strip())
+
+        full_name_parts = [pii.get("lastname"), pii.get("firstname"), pii.get("patronymic")]
+        full_name = " ".join(p for p in full_name_parts if p) or None
+
+        # All visits for this client
+        visits_stmt = select(SqnsVisit).where(
+            SqnsVisit.agent_id == self.agent.id,
+            SqnsVisit.client_external_id == client_external_id,
+        ).order_by(SqnsVisit.visit_datetime.desc().nullslast())
+        visits = list((await self.db.execute(visits_stmt)).scalars())
+
+        # All payments for this client
+        payments_stmt = select(SqnsPayment).where(
+            SqnsPayment.agent_id == self.agent.id,
+            SqnsPayment.client_external_id == str(client_external_id),
+        ).order_by(SqnsPayment.payment_date.desc().nullslast())
+        payments = list((await self.db.execute(payments_stmt)).scalars())
+
+        # Resource names
+        resource_ids = {int(v.resource_external_id) for v in visits if v.resource_external_id is not None}
+        resources_by_ext: dict[int, str] = {}
+        if resource_ids:
+            emp_stmt = select(SqnsEmployee).where(
+                SqnsEmployee.agent_id == self.agent.id,
+                SqnsEmployee.external_id.in_(resource_ids),
+            )
+            for e in (await self.db.execute(emp_stmt)).scalars():
+                resources_by_ext[int(e.external_id)] = e.full_name
+
+        # Payments per visit
+        pay_by_visit: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        # Map visit_external_id → datetime for client card payments cross-period flag
+        visit_dt_by_ext: dict[str, datetime | None] = {str(v.external_id): v.visit_datetime for v in visits}
+        for p in payments:
+            if p.visit_external_id and p.amount:
+                pay_by_visit[str(p.visit_external_id)] += p.amount
+
+        # Aggregates
+        arrived_count = 0
+        no_show_count = 0
+        service_counter: dict[str, int] = defaultdict(int)
+        resource_counter: dict[str, int] = defaultdict(int)
+
+        card_visits: list[AnalyticsClientCardVisit] = []
+        for v in visits:
+            is_arrived = is_sqns_visit_arrived(v)
+            if not v.deleted:
+                if is_arrived:
+                    arrived_count += 1
+                elif v.attendance is not None:
+                    no_show_count += 1
+
+            # Status
+            if v.deleted:
+                status = "cancelled"
+            elif is_arrived:
+                status = "arrived"
+            elif v.attendance is not None:
+                status = "no_show"
+            elif v.visit_datetime and v.visit_datetime > datetime.now(ZoneInfo("UTC")):
+                status = "planned"
+            else:
+                status = "no_show"
+
+            # Services from raw_data
+            svc_names: list[str] = []
+            raw = v.raw_data if isinstance(v.raw_data, dict) else {}
+            for svc in raw.get("services", []):
+                if isinstance(svc, dict):
+                    nm = svc.get("name") or svc.get("title") or svc.get("serviceName")
+                    if nm:
+                        svc_names.append(str(nm))
+                        service_counter[str(nm)] += 1
+
+            res_id = int(v.resource_external_id) if v.resource_external_id is not None else None
+            res_name = resources_by_ext.get(res_id) if res_id is not None else None
+            if res_name:
+                resource_counter[res_name] += 1
+
+            card_visits.append(
+                AnalyticsClientCardVisit(
+                    visit_external_id=str(v.external_id),
+                    visit_datetime=v.visit_datetime,  # type: ignore[arg-type]
+                    attendance=v.attendance,
+                    is_primary=bool(v.is_primary_visit),
+                    resource_external_id=res_id,
+                    resource_name=res_name,
+                    services=svc_names,
+                    total_price=float(v.total_price or 0),
+                    paid_amount=float(pay_by_visit.get(str(v.external_id), Decimal("0"))),
+                    status=status,  # type: ignore[arg-type]
+                )
+            )
+
+        card_payments: list[AnalyticsClientCardPayment] = [
+            AnalyticsClientCardPayment(
+                payment_external_id=str(p.external_id),
+                payment_date=p.payment_date,  # type: ignore[arg-type]
+                amount=float(p.amount or 0),
+                payment_method=p.payment_method,
+                payment_type_name=p.payment_type_name,
+                visit_external_id=str(p.visit_external_id) if p.visit_external_id else None,
+                visit_datetime=visit_dt_by_ext.get(str(p.visit_external_id)) if p.visit_external_id else None,
+            )
+            for p in payments
+        ]
+
+        total_revenue = sum(float(p.amount or 0) for p in payments)
+        avg_check = total_revenue / arrived_count if arrived_count else 0.0
+        visits_count = sum(1 for v in visits if not v.deleted)
+        no_show_pct = round(no_show_count / visits_count * 100, 1) if visits_count else 0.0
+
+        non_deleted = [v for v in visits if not v.deleted and v.visit_datetime is not None]
+        first_visit_at = non_deleted[-1].visit_datetime if non_deleted else None
+        last_visit_at = non_deleted[0].visit_datetime if non_deleted else None
+
+        top_services = [
+            {"name": k, "count": v}
+            for k, v in sorted(service_counter.items(), key=lambda x: -x[1])[:5]
+        ]
+        top_resources = [
+            {"name": k, "count": v}
+            for k, v in sorted(resource_counter.items(), key=lambda x: -x[1])[:3]
+        ]
+
+        return AnalyticsClientCardResponse(
+            client_external_id=str(client_external_id),
+            full_name=full_name,
+            phone=pii.get("phone"),
+            email=pii.get("email"),
+            sex=client.sex if client else None,
+            client_type=client.client_type if client else None,
+            tags=tags_list,
+            first_visit_at=first_visit_at,
+            last_visit_at=last_visit_at,
+            visits_count=visits_count,
+            arrived_count=arrived_count,
+            no_show_count=no_show_count,
+            no_show_pct=no_show_pct,
+            lifetime_revenue=round(total_revenue, 2),
+            avg_check=round(avg_check, 2),
+            top_services=top_services,
+            top_resources=top_resources,
+            visits=card_visits,
+            payments=card_payments,
+        )
 
     @staticmethod
     def _parse_client_external_id(value: str | None) -> int | None:

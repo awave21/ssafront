@@ -26,11 +26,12 @@
         accent="emerald"
         format="money"
         :sub="kpiData.revenue_crossperiod > 0 ? `в т.ч. ${fmtMoney(kpiData.revenue_crossperiod)} за визиты других периодов` : undefined"
+        :sub-href="crossperiodRoute"
       />
       <KpiTile label="Записей" :value="kpiData.visits" :icon="CalendarCheck" accent="primary" />
       <KpiTile label="Конверсия" :value="kpiData.conversion_pct" :icon="Percent" accent="primary" format="pct" />
       <KpiTile label="Средний чек" :value="kpiData.avg_check" :icon="Receipt" accent="slate" format="money" />
-      <KpiTile label="No-show" :value="kpiData.no_show_pct" :icon="UserX" accent="rose" format="pct" />
+      <KpiTile label="Не пришли" :value="kpiData.no_show_pct" :icon="UserX" accent="rose" format="pct" sub="Записались, но не явились на приём" />
     </section>
 
     <!-- Funnel -->
@@ -57,6 +58,7 @@ import FunnelChart from './FunnelChart.vue'
 import KpiTile from './KpiTile.vue'
 import type {
   AiRecommendationsResponse,
+  AnalyticsFilters,
   AnalyticsOverview,
   InsightsResponse,
   FunnelResponse,
@@ -70,6 +72,8 @@ const props = defineProps<{
   funnel: FunnelResponse | null
   staff: StaffOverviewResponse | null
   overview: AnalyticsOverview | null
+  agentId?: string
+  filters?: AnalyticsFilters
 }>()
 
 defineEmits<{
@@ -77,6 +81,23 @@ defineEmits<{
   (e: 'go-to-tab', tab: string): void
   (e: 'navigate', url: string): void
 }>()
+
+const crossperiodRoute = computed(() => {
+  if (!props.agentId || !props.filters) return undefined
+  const f = props.filters
+  const q = new URLSearchParams()
+  q.set('agent_id', f.agentId)
+  q.set('date_from', f.dateFrom)
+  q.set('date_to', f.dateTo)
+  q.set('timezone', f.timezone)
+  if (f.channel) q.set('channel', f.channel)
+  q.set('revenue_basis', f.revenueBasis)
+  if (f.paymentMethods?.length) q.set('payment_methods', f.paymentMethods.join(','))
+  if (f.revenueCategories?.length) q.set('revenue_categories', f.revenueCategories.join(','))
+  if (kpiData.value?.revenue) q.set('revenue_total', String(Math.round(kpiData.value.revenue)))
+  if (kpiData.value?.revenue_crossperiod) q.set('revenue_crossperiod', String(Math.round(kpiData.value.revenue_crossperiod)))
+  return `/analytics/crossperiod-payments?${q.toString()}`
+})
 
 const businessInsights = computed(() =>
   (props.insights?.items ?? []).filter(

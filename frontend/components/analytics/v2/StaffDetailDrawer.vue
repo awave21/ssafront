@@ -31,7 +31,7 @@
               </div>
             </div>
             <div class="rounded-2xl bg-slate-50 px-4 py-3">
-              <div class="text-[9px] font-black uppercase tracking-wider text-slate-400">No-show</div>
+              <div class="text-[9px] font-black uppercase tracking-wider text-slate-400">Не пришли</div>
               <div class="mt-1 text-xl font-black tabular-nums" :class="noShowClass(detail.staff.no_show_pct)">
                 {{ detail.staff.no_show_pct }}%
               </div>

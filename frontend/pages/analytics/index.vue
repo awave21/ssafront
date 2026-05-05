@@ -37,6 +37,8 @@
               :funnel="v2.funnel.value"
               :staff="v2.staff.value"
               :overview="overview"
+              :agent-id="filters.agentId"
+              :filters="filters"
               @refresh-ai="handleRefreshAi"
               @go-to-tab="activeTab = $event"
               @navigate="navigateUrl"
