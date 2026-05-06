@@ -20,6 +20,19 @@ api.chatmedbot.ru {
 	reverse_proxy api:8000
 }
 
+devteam.chatmedbot.ru {
+	encode zstd gzip
+
+	@devteamApi path /api/devteam/*
+	handle @devteamApi {
+		reverse_proxy devteam:8090
+	}
+
+	handle {
+		reverse_proxy devteam-ui:80
+	}
+}
+
 lk.chatmedbot.ru {
 	encode zstd gzip
 
@@ -33,6 +46,11 @@ lk.chatmedbot.ru {
 	@apiPath path /api/v1/*
 	handle @apiPath {
 		reverse_proxy api:8000
+	}
+
+	@devteamPath path /api/devteam/*
+	handle @devteamPath {
+		reverse_proxy devteam:8090
 	}
 
 	handle {

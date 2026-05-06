@@ -4,28 +4,26 @@ from pydantic_settings import BaseSettings
 
 
 class DevTeamConfig(BaseSettings):
-    # Макс — главный бот
-    telegram_bot_token: str = ""
+    # PostgreSQL
+    database_url: str = "postgresql://devteam:devteam@localhost:5433/devteam"
 
-    # Боты специалистов
-    bot_token_backend: str = ""
-    bot_token_frontend: str = ""
-    bot_token_devops: str = ""
-    bot_token_ai_engineer: str = ""
-    bot_token_analyst: str = ""
+    # API-токен для авторизации запросов фронта к devteam-API
+    api_token: str = "devteam-secret"
 
-    # Группа куда все боты пишут
-    group_chat_id: int = 0
+    # FastAPI сервер
+    host: str = "0.0.0.0"
+    port: int = 8090
 
-    # Разрешённые пользователи (через запятую)
-    allowed_chat_ids: str = ""
+    # Рабочая директория агентов (песочница)
+    default_cwd: str = "/Users/maksimmoskovec/Documents/ИИ агенты/Агентская система/ssafront"
 
-    # Claude
-    anthropic_api_key: str = ""
-    claude_model: str = "claude-sonnet-4-6"
+    # Модель Claude
+    model: str = "claude-sonnet-4-6"
 
-    project_root: str = "/opt/myapp"
+    # Максимум tool-use итераций за один запуск агента
+    max_turns_per_run: int = 25
 
+    # Паттерны bash-команд, которые блокируются (can_use_tool callback)
     bash_deny_patterns: list[str] = [
         "rm -rf /",
         "rm -rf /*",
@@ -35,22 +33,10 @@ class DevTeamConfig(BaseSettings):
         ":(){ :|:& };:",
     ]
 
-    model_config = {"env_prefix": "DEVTEAM_", "env_file": "/opt/myapp/devteam/.env"}
+    # Опциональный путь к claude CLI (если не в PATH)
+    cli_path: str | None = None
 
-    def get_allowed_chat_ids(self) -> list[int]:
-        if not self.allowed_chat_ids:
-            return []
-        return [int(x.strip()) for x in self.allowed_chat_ids.split(",") if x.strip()]
-
-    def specialist_token(self, role: str) -> str:
-        """Токен бота специалиста, fallback на токен Макса."""
-        return {
-            "backend": self.bot_token_backend,
-            "frontend": self.bot_token_frontend,
-            "devops": self.bot_token_devops,
-            "ai_engineer": self.bot_token_ai_engineer,
-            "analyst": self.bot_token_analyst,
-        }.get(role) or self.telegram_bot_token
+    model_config = {"env_prefix": "DEVTEAM_", "env_file": ["/opt/myapp/devteam/.env", "./devteam/.env"]}
 
 
 config = DevTeamConfig()

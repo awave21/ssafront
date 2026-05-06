@@ -659,3 +659,60 @@ export type AnalyticsClientCardResponse = {
   visits: AnalyticsClientCardVisit[]
   payments: AnalyticsClientCardPayment[]
 }
+
+// ---------- motivation ----------
+
+export type MotivationTier = 'low' | 'norm' | 'high' | 'no_primary'
+
+export type MotivationRule = {
+  primary_pct: number
+  repeat_pct_low: number
+  repeat_pct_norm: number
+  repeat_pct_high: number
+  avg_check_low: number
+  avg_check_high: number
+  include_commodities: boolean
+}
+
+export type MotivationMember = {
+  resource_external_id: number
+  full_name: string
+  position: string | null
+  is_fired: boolean
+  visits_total: number
+  arrived_total: number
+  primary_visits: number
+  repeat_visits: number
+  services_revenue: number
+  commodities_revenue: number
+  revenue_total: number
+  bonusable_revenue: number
+  primary_revenue: number
+  repeat_revenue: number
+  primary_avg_check: number
+  repeat_avg_check: number
+  total_avg_check: number
+  tier: MotivationTier
+  applied_repeat_pct: number
+  bonus_primary: number
+  bonus_repeat: number
+  bonus_total: number
+}
+
+export type MotivationTotals = {
+  revenue_total: number
+  services_revenue: number
+  commodities_revenue: number
+  primary_revenue: number
+  repeat_revenue: number
+  bonus_total: number
+}
+
+export type MotivationOverviewResponse = {
+  period_start: string
+  period_end: string
+  timezone: string
+  rule: MotivationRule
+  items: MotivationMember[]
+  totals: MotivationTotals
+}

@@ -6,3 +6,9 @@
 CLAUDE.md
 .DS_Store
 devteam/.env
+node_modules/
+devteam/__pycache__/
+devteam/agents/__pycache__/
+devteam/.venv/
+*.png
+.playwright-mcp/

@@ -1,0 +1,98 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Manrope:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Role color tokens ─────────────────────────────────────────── */
+:root {
+  --c-orchestrator: #c084fc;
+  --c-backend:      #60a5fa;
+  --c-frontend:     #f472b6;
+  --c-devops:       #fb923c;
+  --c-ai_engineer:  #22d3ee;
+  --c-analyst:      #4ade80;
+  --c-user:         #c8f752;
+}
+
+@layer base {
+  *, *::before, *::after {
+    @apply box-border;
+    scrollbar-width: thin;
+    scrollbar-color: #1a1a2a transparent;
+  }
+
+  ::-webkit-scrollbar       { width: 3px; height: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: #1e1e30;
+    border-radius: 99px;
+  }
+
+  body {
+    @apply bg-surface-0 text-white font-sans antialiased;
+    height: 100dvh;
+    overflow: hidden;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  #root { height: 100dvh; }
+}
+
+/* ─── Message enter animation ───────────────────────────────────── */
+.msg-enter {
+  animation: slideUp 0.18s ease-out both;
+}
+
+/* ─── Sidebar section label ─────────────────────────────────────── */
+.section-label {
+  @apply font-mono text-[10px] font-medium tracking-[0.18em] text-muted uppercase;
+}
+
+/* ─── Markdown inside agent messages ────────────────────────────── */
+.agent-prose {
+  --tw-prose-body:     #c4c4d8;
+  --tw-prose-headings: #e8e8f4;
+  --tw-prose-bold:     #e8e8f4;
+  --tw-prose-code:     #c8f752;
+  --tw-prose-links:    #60a5fa;
+  --tw-prose-hr:       #1e1e30;
+  --tw-prose-bullets:  #3a3a52;
+  line-height: 1.65;
+}
+
+.agent-prose p     { margin: 0.35em 0; }
+.agent-prose ul    { padding-left: 1.2em; }
+.agent-prose ol    { padding-left: 1.2em; }
+.agent-prose li    { margin: 0.15em 0; }
+.agent-prose h1, .agent-prose h2, .agent-prose h3 { margin: 0.6em 0 0.3em; font-weight: 600; }
+
+.agent-prose pre {
+  @apply rounded-sm overflow-x-auto;
+  background: #070710;
+  border: 1px solid #1a1a28;
+  padding: 10px 14px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  margin: 0.6em 0;
+}
+
+.agent-prose code:not(pre code) {
+  background: #0f0f1c;
+  border: 1px solid #20203a;
+  color: #c8f752;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.82em;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ─── Grain overlay on sidebar ──────────────────────────────────── */
+.grain::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  border-radius: inherit;
+}

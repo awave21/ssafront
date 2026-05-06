@@ -213,6 +213,49 @@ services:
     mem_limit: "${NETDATA_MEM_LIMIT:-384m}"
     mem_reservation: "${NETDATA_MEM_RESERVATION:-192m}"
 
+  devteam-ui:
+    restart: unless-stopped
+    build:
+      context: ../devteam/ui
+      args:
+        VITE_DEVTEAM_TOKEN: ${DEVTEAM_API_TOKEN:-devteam-secret}
+    expose:
+      - "80"
+    depends_on:
+      - devteam
+    cpus: "${DEVTEAM_UI_CPUS:-0.25}"
+    mem_limit: "${DEVTEAM_UI_MEM_LIMIT:-128m}"
+    mem_reservation: "${DEVTEAM_UI_MEM_RESERVATION:-64m}"
+
+  devteam:
+    restart: unless-stopped
+    build:
+      context: ../devteam
+    env_file:
+      - ./.env
+    environment:
+      DEVTEAM_API_TOKEN: ${DEVTEAM_API_TOKEN:-devteam-secret}
+      DEVTEAM_DEFAULT_CWD: /opt/myapp
+      DEVTEAM_MODEL: ${DEVTEAM_MODEL:-claude-sonnet-4-6}
+    volumes:
+      # OAuth-токен подписки Claude Pro/Max (один раз: claude login на хосте)
+      - ${HOME}/.claude:/root/.claude:ro
+      # Рабочая директория агентов (весь проект)
+      - /opt/myapp:/opt/myapp
+      # SQLite-файл devteam.db
+      - devteam_data:/app/devteam
+    expose:
+      - "8090"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    cpus: "${DEVTEAM_CPUS:-1.0}"
+    mem_limit: "${DEVTEAM_MEM_LIMIT:-512m}"
+    mem_reservation: "${DEVTEAM_MEM_RESERVATION:-256m}"
+
   caddy:
     restart: unless-stopped
     image: caddy:2.10-alpine
@@ -235,6 +278,8 @@ services:
       - frontend
       - landing
       - netdata
+      - devteam
+      - devteam-ui
     healthcheck:
       test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
       interval: 30s
@@ -277,6 +322,7 @@ services:
 volumes:
   postgres_data:
   neo4j_data:
+  devteam_data:
   neo4j_logs:
   pgadmin_data:
   caddy_data:

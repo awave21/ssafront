@@ -27,6 +27,8 @@ import type {
   ManagersTimelineResponse,
   StaffDetailResponse,
   StaffOverviewResponse,
+  MotivationOverviewResponse,
+  MotivationRule,
 } from '~/types/analytics'
 
 type V2QueryInput = {
@@ -391,6 +393,25 @@ export const useAnalyticsApi = () => {
     )
   }
 
+  // ===== Motivation =====
+
+  const getMotivationOverview = async (agentId: string, q: V2QueryInput): Promise<MotivationOverviewResponse> => {
+    return await apiFetch<MotivationOverviewResponse>(`/agents/${agentId}/analytics/motivation/overview`, {
+      query: toV2Query(q),
+    })
+  }
+
+  const getMotivationRule = async (agentId: string): Promise<MotivationRule> => {
+    return await apiFetch<MotivationRule>(`/agents/${agentId}/analytics/motivation/rule`)
+  }
+
+  const updateMotivationRule = async (agentId: string, payload: Partial<MotivationRule>): Promise<MotivationRule> => {
+    return await apiFetch<MotivationRule>(`/agents/${agentId}/analytics/motivation/rule`, {
+      method: 'PUT',
+      body: payload,
+    })
+  }
+
   return {
     getAgentsForFilter,
     getFiltersMeta,
@@ -411,5 +432,8 @@ export const useAnalyticsApi = () => {
     getAiRecommendations,
     getCrossperiodPaymentsTable,
     getClientCard,
+    getMotivationOverview,
+    getMotivationRule,
+    updateMotivationRule,
   }
 }

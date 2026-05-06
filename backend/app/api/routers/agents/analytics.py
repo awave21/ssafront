@@ -43,10 +43,16 @@ from app.schemas.analytics_v2 import (
     StaffDetailResponse,
     StaffOverviewResponse,
 )
+from app.schemas.motivation import (
+    MotivationOverviewResponse,
+    MotivationRuleResponse,
+    MotivationRuleUpdate,
+)
 from app.services.analytics_v2.ai_recommendations import AiRecommendationsService
 from app.services.analytics_v2.bot_health import BotHealthService
 from app.services.analytics_v2.insights import InsightsService
 from app.services.analytics_v2.managers import ManagersAnalyticsService
+from app.services.analytics_v2.motivation import MotivationService
 from app.services.analytics_v2.staff import StaffAnalyticsService
 
 router = APIRouter()
@@ -534,6 +540,53 @@ async def get_insights(
         fallback_timezone=agent.timezone,
     )
     return await InsightsService(db, agent.id, agent.tenant_id).collect(period)
+
+
+# ============================================================================
+# Analytics v2: motivation (bonus calculation for doctors)
+# ============================================================================
+
+
+@router.get("/analytics/motivation/rule", response_model=MotivationRuleResponse)
+async def get_motivation_rule(
+    agent_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> MotivationRuleResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    return await MotivationService(db, agent.id, agent.tenant_id).get_rule()
+
+
+@router.put("/analytics/motivation/rule", response_model=MotivationRuleResponse)
+async def update_motivation_rule(
+    agent_id: UUID,
+    payload: MotivationRuleUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:write")),
+) -> MotivationRuleResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    result = await MotivationService(db, agent.id, agent.tenant_id).update_rule(payload)
+    await db.commit()
+    return result
+
+
+@router.get("/analytics/motivation/overview", response_model=MotivationOverviewResponse)
+async def get_motivation_overview(
+    agent_id: UUID,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    timezone: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("analytics:view")),
+) -> MotivationOverviewResponse:
+    agent = await get_agent_or_404(agent_id, db, user)
+    period = _resolve_period(
+        date_from=date_from,
+        date_to=date_to,
+        timezone_name=timezone,
+        fallback_timezone=agent.timezone,
+    )
+    return await MotivationService(db, agent.id, agent.tenant_id).get_overview(period)
 
 
 @router.post("/analytics/ai-recommendations", response_model=AiRecommendationsResponse)

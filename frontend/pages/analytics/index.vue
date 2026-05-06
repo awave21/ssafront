@@ -95,6 +95,15 @@
             />
           </TabsContent>
 
+          <!-- Мотивация -->
+          <TabsContent value="motivation" class="outline-none">
+            <MotivationTab
+              :overview="motivation.overview.value"
+              :pending="motivation.pending.value"
+              :save-rule="motivation.saveRule"
+            />
+          </TabsContent>
+
           <!-- Каталог -->
           <TabsContent value="catalog" class="outline-none">
             <CatalogTab>
@@ -184,7 +193,7 @@ definePageMeta({
 })
 
 import { computed, onMounted, ref } from 'vue'
-import { LayoutDashboard, Users, MessageSquare, Bot, BookOpen } from 'lucide-vue-next'
+import { LayoutDashboard, Users, MessageSquare, Bot, BookOpen, Award } from 'lucide-vue-next'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '~/components/ui/tabs'
 
 import AnalyticsBreakdown from '~/components/analytics/AnalyticsBreakdown.vue'
@@ -207,11 +216,13 @@ import ManagersTab from '~/components/analytics/v2/ManagersTab.vue'
 import BotTab from '~/components/analytics/v2/BotTab.vue'
 import CatalogTab from '~/components/analytics/v2/CatalogTab.vue'
 import StaffDetailDrawer from '~/components/analytics/v2/StaffDetailDrawer.vue'
+import MotivationTab from '~/components/analytics/v2/MotivationTab.vue'
 
 import { useDashboardData } from '~/composables/useDashboardData'
 import { useCommoditiesAnalyticsTable } from '~/composables/useCommoditiesAnalyticsTable'
 import { useServicesAnalyticsTable } from '~/composables/useServicesAnalyticsTable'
 import { useAnalyticsV2Data } from '~/composables/useAnalyticsV2Data'
+import { useMotivationData } from '~/composables/useMotivationData'
 
 const { pageTitle } = useLayoutState()
 const activeTab = ref('overview')
@@ -222,6 +233,7 @@ const tabs = [
   { key: 'managers', label: 'Менеджеры', icon: MessageSquare },
   { key: 'bot', label: 'Бот', icon: Bot },
   { key: 'catalog', label: 'Каталог', icon: BookOpen },
+  { key: 'motivation', label: 'Мотивация', icon: Award },
 ]
 
 const {
@@ -246,6 +258,7 @@ const {
 const dashboardContentBusy = computed(() => pending.value || isBootstrapping.value)
 
 const v2 = useAnalyticsV2Data(filters)
+const motivation = useMotivationData(filters)
 
 const selectedStaffId = ref<number | null>(null)
 const openStaffDetail = (id: number) => { selectedStaffId.value = id }
@@ -290,7 +303,7 @@ const {
 } = useCommoditiesAnalyticsTable(computed(() => filters.agentId), { syncFromDashboard: filters })
 
 const refreshAll = async () => {
-  await Promise.allSettled([refresh(), v2.fetchAll(), refreshServices(), refreshCommodities()])
+  await Promise.allSettled([refresh(), v2.fetchAll(), motivation.fetchAll(), refreshServices(), refreshCommodities()])
 }
 
 const resetAll = async () => {
