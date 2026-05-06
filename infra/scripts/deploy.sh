@@ -65,6 +65,9 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
+# Права на .env — только владелец может читать
+chmod 600 "$ENV_FILE"
+
 if [[ ! -x "$MIGRATIONS_SCRIPT" ]]; then
   echo "Ошибка: не найден исполняемый скрипт миграций $MIGRATIONS_SCRIPT"
   exit 1

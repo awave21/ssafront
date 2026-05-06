@@ -234,7 +234,7 @@ services:
     env_file:
       - ./.env
     environment:
-      DEVTEAM_API_TOKEN: ${DEVTEAM_API_TOKEN:-devteam-secret}
+      DEVTEAM_API_TOKEN: ${DEVTEAM_API_TOKEN:?DEVTEAM_API_TOKEN must be set in .env}
       DEVTEAM_DEFAULT_CWD: /opt/myapp
       DEVTEAM_MODEL: ${DEVTEAM_MODEL:-claude-sonnet-4-6}
     volumes:
@@ -300,7 +300,7 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     ports:
-      - "5050:80"
+      - "127.0.0.1:5050:80"
     depends_on:
       - db
     cpus: "${PGADMIN_CPUS:-0.10}"

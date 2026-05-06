@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { MessageBubble, ROLE_COLORS } from './MessageBubble'
 import type { DevteamAgent, DevteamChat, DevteamMessage, StreamingMessage } from '@/types/devteam'
 
@@ -14,11 +14,28 @@ interface Props {
 }
 
 export function MessageFeed({ messages, streaming, agents, loading, sending, waitingForAgent, chat, onReply }: Props) {
+  const feedRef   = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const atBottom  = useRef(true)
 
+  const scrollToBottom = useCallback((smooth = true) => {
+    bottomRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' })
+  }, [])
+
+  const onScroll = useCallback(() => {
+    const el = feedRef.current
+    if (!el) return
+    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  }, [])
+
+  // Initial load — instant snap
+  useEffect(() => { scrollToBottom(false) }, [])
+
+  // New message / status change — scroll only if already at bottom
+  // streaming?.content intentionally excluded: don't force-scroll on every chunk
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length, streaming?.content, streaming?.toolCalls.length, sending, waitingForAgent])
+    if (atBottom.current) scrollToBottom()
+  }, [messages.length, streaming?.toolCalls.length, sending, waitingForAgent])
 
   if (loading) {
     return (
@@ -62,7 +79,7 @@ export function MessageFeed({ messages, streaming, agents, loading, sending, wai
   )
 
   return (
-    <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+    <div ref={feedRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
       {messages.map((msg) => (
         <MessageBubble key={msg.id} message={msg} agents={agents} onReply={onReply} />
       ))}

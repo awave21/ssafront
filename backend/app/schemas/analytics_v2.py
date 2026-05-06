@@ -47,7 +47,10 @@ class StaffServiceLine(BaseModel):
     service_external_id: int | None
     service_name: str
     bookings_total: int
+    primary_count: int = 0
+    repeat_count: int = 0
     revenue_total: float
+    avg_price: float = 0.0
 
 
 class StaffSparkPoint(BaseModel):

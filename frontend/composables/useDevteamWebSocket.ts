@@ -19,10 +19,14 @@ export const useDevteamWebSocket = (
   let destroyed = false
 
   function getUrl(): string {
-    const config = useRuntimeConfig()
-    const token = config.public.devteamToken as string
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    return `${proto}://${window.location.host}/api/devteam/chats/${chatId}/ws?token=${token}`
+    // Токен не передаётся в URL — аутентификация первым сообщением в onopen.
+    return `${proto}://${window.location.host}/api/devteam/chats/${chatId}/ws`
+  }
+
+  function getDevteamToken(): string {
+    const config = useRuntimeConfig()
+    return config.public.devteamToken as string
   }
 
   function schedulePing() {
@@ -40,6 +44,11 @@ export const useDevteamWebSocket = (
     ws = new WebSocket(getUrl())
 
     ws.onopen = () => {
+      // First-message auth: передаём токен первым сообщением, не в URL
+      const token = getDevteamToken()
+      if (token) {
+        ws?.send(JSON.stringify({ type: 'auth', token }))
+      }
       state.value = 'connected'
       reconnectAttempts = 0
       schedulePing()

@@ -34,7 +34,11 @@ def encrypt_config(config: dict[str, Any]) -> dict[str, Any]:
         return config
     fernet = _get_fernet()
     if fernet is None:
-        return config
+        # Ключ не задан — отказываем, чтобы секреты не сохранялись открытым текстом
+        raise ValueError(
+            "CREDENTIALS_ENCRYPTION_KEY is not set; cannot store credentials in plaintext. "
+            "Generate a key with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+        )
     payload = json.dumps(config).encode()
     token = fernet.encrypt(payload).decode()
     return {ENCRYPTED_MARKER: True, ENCRYPTED_PAYLOAD: token}

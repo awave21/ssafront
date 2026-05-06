@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,6 +61,10 @@ class ConnectionManager:
 
     async def connect(self, websocket: WebSocket, agent_id: str) -> None:
         await websocket.accept()
+        await self.register(websocket, agent_id)
+
+    async def register(self, websocket: WebSocket, agent_id: str) -> None:
+        """Зарегистрировать уже принятое соединение (без accept)."""
         async with self._lock:
             if agent_id not in self._connections:
                 self._connections[agent_id] = set()
@@ -123,12 +127,15 @@ async def verify_agent_access(
 async def agent_websocket(
     websocket: WebSocket,
     agent_id: UUID,
-    token: str = Query(..., description="JWT токен авторизации"),
 ):
     """
     WebSocket канал для получения событий агента в реальном времени.
 
-    Подключение: ws://host/api/v1/agents/{agent_id}/ws?token=JWT_TOKEN
+    Подключение: ws://host/api/v1/agents/{agent_id}/ws
+
+    После accept клиент должен прислать первым сообщением:
+        {"type": "auth", "token": "<JWT>"}
+    Таймаут ожидания — 10 секунд. При ошибке закрываем с кодом 1008.
 
     Типы входящих событий (от клиента):
     - send_message: отправить сообщение в диалог
@@ -146,15 +153,34 @@ async def agent_websocket(
     - ping: keep-alive
     - error: ошибка обработки
     """
-    # 1. Валидация токена
+    # 1. Принимаем соединение, ждём first-message auth (10 с)
+    await websocket.accept()
+
     try:
-        user = await validate_ws_token(token)
+        raw = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
+    except asyncio.TimeoutError:
+        logger.warning("ws_auth_timeout", agent_id=str(agent_id))
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Auth timeout")
+        return
+    except Exception as e:
+        logger.warning("ws_auth_receive_failed", agent_id=str(agent_id), error=str(e))
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Auth failed")
+        return
+
+    if not isinstance(raw, dict) or raw.get("type") != "auth" or not raw.get("token"):
+        logger.warning("ws_auth_invalid_message", agent_id=str(agent_id))
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid auth message")
+        return
+
+    # 2. Валидация токена
+    try:
+        user = await validate_ws_token(raw["token"])
     except ValueError as e:
         logger.warning("ws_auth_failed", agent_id=str(agent_id), error=str(e))
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
         return
 
-    # 2. Проверка доступа к агенту
+    # 3. Проверка доступа к агенту
     async with async_session_factory() as db:
         agent = await verify_agent_access(db, agent_id, user.tenant_id)
         if not agent:
@@ -184,7 +210,7 @@ async def agent_websocket(
     # endregion agent log
 
     agent_id_str = str(agent_id)
-    await manager.connect(websocket, agent_id_str)
+    await manager.register(websocket, agent_id_str)  # accept уже сделан выше
 
     # 3. Подписываемся на broadcast шину
     queue = await broadcaster.subscribe(agent_id)

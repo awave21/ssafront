@@ -66,12 +66,7 @@
                 <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Визиты</th>
                 <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Первичных</th>
                 <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Услуги</th>
-                <th
-                  class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider"
-                  :class="overview.rule.include_commodities ? 'text-slate-400' : 'text-slate-300'"
-                >
-                  Товары
-                </th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Товары</th>
                 <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Итого выручка</th>
                 <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Ср. чек перв.</th>
                 <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Ср. чек вторич.</th>
@@ -98,12 +93,7 @@
                 <td class="px-3 py-3 text-right font-mono text-slate-600">{{ member.arrived_total }}</td>
                 <td class="px-3 py-3 text-right font-mono text-slate-600">{{ member.primary_visits }}</td>
                 <td class="px-3 py-3 text-right font-mono text-slate-700">{{ formatMoney(member.services_revenue) }}</td>
-                <td
-                  class="px-3 py-3 text-right font-mono"
-                  :class="overview.rule.include_commodities ? 'text-slate-700' : 'text-slate-300'"
-                >
-                  {{ formatMoney(member.commodities_revenue) }}
-                </td>
+                <td class="px-3 py-3 text-right font-mono text-slate-600">{{ formatMoney(member.commodities_revenue) }}</td>
                 <td class="px-3 py-3 text-right font-mono font-semibold text-slate-800">{{ formatMoney(member.revenue_total) }}</td>
                 <td class="px-3 py-3 text-right font-mono text-slate-600">{{ formatMoney(member.primary_avg_check) }}</td>
                 <td class="px-3 py-3 text-right font-mono text-slate-600">{{ formatMoney(member.repeat_avg_check) }}</td>
@@ -130,12 +120,7 @@
                   {{ overview.items.reduce((s, m) => s + m.primary_visits, 0) }}
                 </td>
                 <td class="px-3 py-3 text-right font-mono font-bold text-slate-700">{{ formatMoney(overview.totals.services_revenue) }}</td>
-                <td
-                  class="px-3 py-3 text-right font-mono font-bold"
-                  :class="overview.rule.include_commodities ? 'text-slate-700' : 'text-slate-300'"
-                >
-                  {{ formatMoney(overview.totals.commodities_revenue) }}
-                </td>
+                <td class="px-3 py-3 text-right font-mono font-bold text-slate-600">{{ formatMoney(overview.totals.commodities_revenue) }}</td>
                 <td class="px-3 py-3 text-right font-mono font-bold text-slate-800">{{ formatMoney(overview.totals.revenue_total) }}</td>
                 <td colspan="4"></td>
                 <td></td>

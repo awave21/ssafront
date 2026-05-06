@@ -56,22 +56,42 @@ export const useAgentWebSocket = (
   let pingTimeout: ReturnType<typeof setTimeout> | null = null
 
   /**
-   * Get WebSocket URL with token
+   * Get WebSocket URL (без токена в query-параметре — токен передаётся первым сообщением
+   * после установки соединения, чтобы не попадать в access-логи сервера).
+   *
+   * TODO(security): убедиться что backend-обработчик поддерживает first-message auth
+   * (тип "auth", поле "token") — см. backend/app/api/routers/ws.py
    */
   const getWebSocketUrl = (id: string): string | null => {
     if (typeof window === 'undefined') return null
-
-    const token = getStoredAccessToken()
-    if (!token) {
-      console.error('[WebSocket] No auth token found')
-      return null
-    }
 
     // Determine protocol (ws or wss)
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
 
-    return `${protocol}//${host}/api/v1/agents/${id}/ws?token=${token}`
+    // Токен НЕ передаётся в URL (защита от утечки в server-side logs).
+    // Аутентификация выполняется первым сообщением в sendAuthMessage().
+    return `${protocol}//${host}/api/v1/agents/${id}/ws`
+  }
+
+  /**
+   * Отправить auth-токен первым сообщением после открытия соединения.
+   * Вызывается из ws.onopen до любых других действий.
+   */
+  const sendAuthMessage = (): boolean => {
+    const token = getStoredAccessToken()
+    if (!token) {
+      console.error('[WebSocket] No auth token found for first-message auth')
+      return false
+    }
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false
+    try {
+      ws.send(JSON.stringify({ type: 'auth', token }))
+      return true
+    } catch (err) {
+      console.error('[WebSocket] Failed to send auth message:', err)
+      return false
+    }
   }
 
   /**
@@ -347,6 +367,15 @@ export const useAgentWebSocket = (
       ws = new WebSocket(url)
 
       ws.onopen = () => {
+        // First-message auth: токен не передаётся в URL, только здесь.
+        // Бэкенд должен обработать тип "auth" до начала работы с другими событиями.
+        const authOk = sendAuthMessage()
+        if (!authOk) {
+          console.error('[WebSocket] Auth message failed, closing connection')
+          ws?.close(1008, 'Auth failed')
+          connectionState.value = 'error'
+          return
+        }
         connectionState.value = 'connected'
         reconnectAttempts.value = 0
         resetPingTimeout()

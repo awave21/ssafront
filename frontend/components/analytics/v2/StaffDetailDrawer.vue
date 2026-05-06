@@ -59,21 +59,38 @@
             </span>
           </div>
 
-          <!-- Top services -->
+          <!-- Services table -->
           <div v-if="detail.top_services?.length">
-            <div class="mb-3 text-[10px] font-black uppercase tracking-wider text-slate-400">Топ услуги</div>
-            <div class="space-y-2">
-              <div
-                v-for="svc in detail.top_services"
-                :key="svc.service_name"
-                class="flex items-center justify-between rounded-xl border border-slate-100 bg-white px-3 py-2.5"
-              >
-                <span class="text-sm font-medium text-slate-700 truncate">{{ svc.service_name }}</span>
-                <div class="ml-4 flex shrink-0 items-center gap-3 text-xs">
-                  <span class="tabular-nums text-slate-500">{{ svc.bookings_total }} зап.</span>
-                  <span class="tabular-nums font-bold text-slate-900">{{ formatMoney(svc.revenue_total) }}</span>
-                </div>
-              </div>
+            <div class="mb-3 text-[10px] font-black uppercase tracking-wider text-slate-400">
+              Услуги ({{ detail.top_services.length }})
+            </div>
+            <div class="overflow-x-auto rounded-2xl border border-slate-100">
+              <table class="w-full text-xs">
+                <thead>
+                  <tr class="border-b border-slate-100 bg-slate-50/60">
+                    <th class="px-3 py-2 text-left text-[10px] font-black uppercase tracking-wider text-slate-400">Услуга</th>
+                    <th class="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Всего</th>
+                    <th class="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider text-primary/70">Перв.</th>
+                    <th class="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Вторич.</th>
+                    <th class="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Ср. цена</th>
+                    <th class="px-3 py-2 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Выручка</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="svc in detail.top_services"
+                    :key="svc.service_name"
+                    class="border-b border-slate-50 last:border-0 hover:bg-slate-50/50"
+                  >
+                    <td class="px-3 py-2 font-medium text-slate-700">{{ svc.service_name }}</td>
+                    <td class="px-2 py-2 text-right font-mono text-slate-600">{{ svc.bookings_total }}</td>
+                    <td class="px-2 py-2 text-right font-mono font-semibold text-primary">{{ svc.primary_count }}</td>
+                    <td class="px-2 py-2 text-right font-mono text-slate-500">{{ svc.repeat_count }}</td>
+                    <td class="px-2 py-2 text-right font-mono text-slate-500">{{ formatMoney(svc.avg_price) }}</td>
+                    <td class="px-3 py-2 text-right font-mono font-bold text-slate-800">{{ formatMoney(svc.revenue_total) }}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
 

@@ -195,8 +195,9 @@ class MotivationService:
             commodities_primary = float(row["commodities_primary"] or 0)
 
             revenue_total = services_rev + commodities_rev
-            bonusable = services_rev + (commodities_rev if rule.include_commodities else 0)
-            primary_bonusable = services_primary + (commodities_primary if rule.include_commodities else 0)
+            # бонус считается только от услуг, товары — только для отображения
+            bonusable = services_rev
+            primary_bonusable = services_primary
             repeat_bonusable = bonusable - primary_bonusable
 
             primary_avg = round(primary_bonusable / primary_visits, 2) if primary_visits else 0.0

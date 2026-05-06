@@ -360,7 +360,10 @@ export type StaffServiceLine = {
   service_external_id: number | null
   service_name: string
   bookings_total: number
+  primary_count: number
+  repeat_count: number
   revenue_total: number
+  avg_price: number
 }
 
 export type StaffSparkPoint = {

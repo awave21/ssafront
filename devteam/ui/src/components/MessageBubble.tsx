@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { CornerUpLeft } from 'lucide-react'
+import { CornerUpLeft, ChevronRight, ChevronDown } from 'lucide-react'
 import { ToolCallBlock } from './ToolCallBlock'
 import { extractTouchedFiles } from '@/utils/touchedFiles'
 import type { DevteamAgent, DevteamMessage, DevteamReplyTo, StreamingMessage } from '@/types/devteam'
@@ -28,7 +28,7 @@ interface Props {
 }
 
 export function MessageBubble({ message, agents, onReply }: Props) {
-  const [hovered, setHovered] = useState(false)
+  const [hovered, setHovered]     = useState(false)
   const isUser      = message.author === 'user'
   const agent       = agents.find((a) => a.role === message.author)
   const isStreaming  = (message as any).isStreaming
@@ -37,6 +37,9 @@ export function MessageBubble({ message, agents, onReply }: Props) {
   const name        = isUser ? 'ВЫ' : (agent?.name?.toUpperCase() ?? message.author.toUpperCase())
   const toolCalls   = (message.tool_calls ?? (message as any).toolCalls ?? []) as any[]
   const replyTo     = (message as DevteamMessage).reply_to ?? null
+
+  // Tool calls section: expanded while streaming, collapsed when saved
+  const [toolsOpen, setToolsOpen] = useState<boolean>(() => !!isStreaming)
 
   const canReply = onReply && !isStreaming && (message as DevteamMessage).id != null
 
@@ -152,12 +155,39 @@ export function MessageBubble({ message, agents, onReply }: Props) {
           borderLeft: `2px solid ${roleColor}30`,
         }}
       >
-        {/* Tool calls */}
+        {/* Tool calls — collapsible section */}
         {toolCalls.length > 0 && (
-          <div className="px-4 pt-3 space-y-1">
-            {toolCalls.map((tc, i) => (
-              <ToolCallBlock key={i} toolCall={tc} />
-            ))}
+          <div className="pt-2.5 pb-1">
+            {/* Toggle header */}
+            <button
+              onClick={() => setToolsOpen((v) => !v)}
+              className="flex items-center gap-1.5 px-4 w-full text-left mb-1 group"
+            >
+              <span className="text-muted group-hover:text-white transition-colors">
+                {toolsOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+              </span>
+              <span className="font-mono text-[10px] tracking-widest text-muted group-hover:text-white transition-colors">
+                {toolsOpen ? 'СКРЫТЬ' : `${toolCalls.length} ОПЕРАЦИ${toolCalls.length === 1 ? 'Я' : toolCalls.length < 5 ? 'И' : 'Й'}`}
+              </span>
+              {!toolsOpen && (
+                <span className="ml-2 flex items-center gap-1">
+                  {Array.from(new Set(toolCalls.map((tc: any) => tc.name))).slice(0, 5).map((n: any, i) => (
+                    <span key={i} className="font-mono text-[9px] px-1 py-0.5 rounded-sm" style={{ background: '#1a1228', color: '#c084fc66' }}>
+                      {n}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </button>
+
+            {/* Tool call list */}
+            {toolsOpen && (
+              <div className="px-4 space-y-1">
+                {toolCalls.map((tc: any, i: number) => (
+                  <ToolCallBlock key={i} toolCall={tc} />
+                ))}
+              </div>
+            )}
           </div>
         )}
 

@@ -85,21 +85,6 @@
           </div>
         </div>
 
-        <!-- Товары -->
-        <div class="rounded-2xl bg-slate-50 p-4">
-          <label class="flex cursor-pointer items-start gap-3">
-            <input
-              v-model="form.include_commodities"
-              type="checkbox"
-              class="mt-0.5 h-4 w-4 rounded accent-primary"
-            />
-            <div>
-              <div class="text-sm font-semibold text-slate-700">Учитывать товары в бонусе</div>
-              <div class="mt-0.5 text-xs text-slate-400">Если включено — выручка от продаж товаров прибавляется к расчёту бонуса</div>
-            </div>
-          </label>
-        </div>
-
         <!-- Действия -->
         <div class="flex gap-3 pt-2">
           <button

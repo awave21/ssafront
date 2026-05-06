@@ -199,10 +199,7 @@ class StaffAnalyticsService:
                     """
                     WITH service_items AS (
                       SELECT
-                        v.id AS visit_id,
-                        v.total_price,
-                        v.attendance,
-                        v.deleted,
+                        COALESCE(v.is_primary_per_resource, v.is_primary_visit) AS is_primary,
                         jsonb_array_elements(
                           COALESCE(v.raw_data -> 'services', '[]'::jsonb)
                         ) AS svc
@@ -212,16 +209,18 @@ class StaffAnalyticsService:
                         AND v.visit_datetime >= :start_utc
                         AND v.visit_datetime <  :end_utc
                         AND NOT v.deleted
+                        AND v.attendance IS NOT NULL AND v.attendance > 0
                     )
                     SELECT
                       NULLIF(svc->>'id', '')::bigint AS service_external_id,
                       COALESCE(svc->>'title', svc->>'name', 'Услуга') AS service_name,
                       COUNT(*) AS bookings_total,
+                      COUNT(*) FILTER (WHERE is_primary = true)  AS primary_count,
+                      COUNT(*) FILTER (WHERE is_primary = false) AS repeat_count,
                       COALESCE(SUM(NULLIF(svc->>'totalAmount', '')::numeric), 0) AS revenue_total
                     FROM service_items
                     GROUP BY 1, 2
                     ORDER BY revenue_total DESC NULLS LAST, bookings_total DESC
-                    LIMIT 5
                     """
                 ),
                 {
@@ -234,12 +233,17 @@ class StaffAnalyticsService:
         ).mappings().all()
         top_services: list[StaffServiceLine] = []
         for r in services_rows:
+            cnt = int(r["bookings_total"] or 0)
+            rev = float(r["revenue_total"] or 0)
             top_services.append(
                 StaffServiceLine(
                     service_external_id=int(r["service_external_id"]) if r["service_external_id"] is not None else None,
                     service_name=r["service_name"] or "—",
-                    bookings_total=int(r["bookings_total"] or 0),
-                    revenue_total=float(r["revenue_total"] or 0),
+                    bookings_total=cnt,
+                    primary_count=int(r["primary_count"] or 0),
+                    repeat_count=int(r["repeat_count"] or 0),
+                    revenue_total=rev,
+                    avg_price=round(rev / cnt, 2) if cnt else 0.0,
                 )
             )
 

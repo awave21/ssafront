@@ -416,10 +416,11 @@ async def logout(
     try:
         if refresh_token:
             token_hash = hash_refresh_token(refresh_token, settings.jwt_secret)
+            # FOR UPDATE предотвращает race condition при одновременном logout + refresh
             stmt = select(RefreshToken).where(
                 RefreshToken.token_hash == token_hash,
                 RefreshToken.revoked_at.is_(None),
-            )
+            ).with_for_update(nowait=False)
             db_refresh_token = (await db.execute(stmt)).scalar_one_or_none()
             if db_refresh_token:
                 db_refresh_token.revoked_at = datetime.now(timezone.utc)

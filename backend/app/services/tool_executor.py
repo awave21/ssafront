@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 import base64
+import ipaddress
 import json
 import time
 from urllib.parse import urlparse
@@ -17,6 +18,57 @@ from app.services.secrets import resolve_secret
 from app.utils.idempotency import generate_idempotency_key
 
 logger = structlog.get_logger(__name__)
+
+# Схемы, которые разрешены для HTTP-инструментов
+_ALLOWED_SCHEMES = {"http", "https"}
+
+# Private/loopback диапазоны — блокируем независимо от allowed_domains (SSRF protection)
+_PRIVATE_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),    # loopback
+    ipaddress.ip_network("::1/128"),         # IPv6 loopback
+    ipaddress.ip_network("10.0.0.0/8"),      # RFC-1918
+    ipaddress.ip_network("172.16.0.0/12"),   # RFC-1918
+    ipaddress.ip_network("192.168.0.0/16"),  # RFC-1918
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local / AWS metadata
+    ipaddress.ip_network("fd00::/8"),        # IPv6 ULA
+    ipaddress.ip_network("fe80::/10"),       # IPv6 link-local
+    ipaddress.ip_network("0.0.0.0/8"),       # "this" network
+    ipaddress.ip_network("100.64.0.0/10"),   # CGNAT (shared address space)
+]
+
+
+def _is_private_ip(hostname: str) -> bool:
+    """Возвращает True если hostname — приватный/loopback IP или резолвится в него.
+
+    Проверяем только на уровне парсинга — без DNS-резолва (нет async).
+    Для доменных имён (не IP) возвращаем False (DNS-резолв не делаем).
+    """
+    try:
+        addr = ipaddress.ip_address(hostname)
+        return any(addr in net for net in _PRIVATE_NETWORKS)
+    except ValueError:
+        # hostname — это доменное имя, не IP-литерал; проверить без резолва невозможно
+        # Блокируем очевидные случаи по имени
+        lower = hostname.lower()
+        return lower in {"localhost", "metadata.google.internal"} or lower.endswith(".local")
+
+
+def _check_ssrf(endpoint: str) -> None:
+    """Проверяет endpoint на SSRF: схема, hostname, private IP.
+
+    Raises ToolExecutionError если endpoint небезопасен.
+    """
+    parsed = urlparse(endpoint)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in _ALLOWED_SCHEMES:
+        raise ToolExecutionError(f"Endpoint scheme '{scheme}' is not allowed; use http or https")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise ToolExecutionError("Endpoint URL has no hostname")
+
+    if _is_private_ip(hostname):
+        raise ToolExecutionError(f"Endpoint hostname '{hostname}' resolves to a private/loopback address")
 
 
 class ToolExecutionError(Exception):
@@ -220,11 +272,19 @@ def transform_response(raw: Any, config: dict[str, Any] | None) -> Any:
 
 
 def _ensure_allowed_domain(endpoint: str, allowed_domains: list[str] | None) -> None:
-    if not allowed_domains:
-        return
-    hostname = urlparse(endpoint).hostname
-    if hostname is None or hostname not in allowed_domains:
-        raise ToolExecutionError("Endpoint domain is not allowed")
+    """Проверяет endpoint:
+    1. Схема — только http/https (защита от file://, gopher:// etc.)
+    2. Private/loopback IP — блокируем ВСЕГДА (SSRF-защита)
+    3. Domain whitelist — если задан, hostname должен быть в нём
+    """
+    # Сначала жёсткие проверки (схема + private IP) — независимо от whitelist
+    _check_ssrf(endpoint)
+
+    # Если whitelist задан и не пустой — проверяем по нему
+    if allowed_domains:
+        hostname = urlparse(endpoint).hostname
+        if hostname is None or hostname not in allowed_domains:
+            raise ToolExecutionError("Endpoint domain is not allowed")
 
 
 def _validate_args(schema: dict[str, Any], args: dict[str, Any]) -> None:
