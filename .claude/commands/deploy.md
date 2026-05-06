@@ -4,28 +4,25 @@
 
 1. Проверь незакоммиченные изменения — запусти `git status`. Если есть изменения, сначала выполни /push.
 
-2. Выполни деплой последовательно:
+2. Выведи пользователю следующий блок команд для выполнения на сервере 5.35.90.66:
 
 ```bash
-ssh devuser@5.35.90.66 "cd /opt/myapp/infra && git pull origin main"
+cd /opt/myapp/infra
+git pull origin main
+sudo docker compose exec -T api alembic upgrade head
+./scripts/deploy.sh all
 ```
 
+3. После того как пользователь сообщит что деплой завершён, выведи команды проверки:
+
 ```bash
-ssh devuser@5.35.90.66 "cd /opt/myapp/infra && sudo docker compose exec -T api alembic upgrade head"
+curl -sS https://agentsapp.integration-ai.ru/api/v1/health
+sudo docker compose ps
 ```
 
-```bash
-ssh devuser@5.35.90.66 "cd /opt/myapp/infra && ./scripts/deploy.sh all"
-```
-
-3. Проверь статус:
+4. Если что-то упало — команды для логов:
 
 ```bash
-ssh devuser@5.35.90.66 "curl -sS https://agentsapp.integration-ai.ru/api/v1/health && sudo docker compose -f /opt/myapp/infra/docker-compose.yml ps"
-```
-
-4. Если что-то упало — логи:
-
-```bash
-ssh devuser@5.35.90.66 "cd /opt/myapp/infra && sudo docker compose logs --tail=100 api"
+sudo docker compose logs --tail=100 api
+sudo docker compose logs --tail=100 frontend
 ```
