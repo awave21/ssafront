@@ -2,33 +2,30 @@
 
 ## Шаги
 
-1. Проверь есть ли незакоммиченные изменения (`git status`). Если есть — сначала выполни /push, потом возвращайся к деплою.
+1. Проверь незакоммиченные изменения — запусти `git status`. Если есть изменения, сначала выполни /push.
 
-2. Выведи пользователю команды для выполнения на сервере:
+2. Выполни деплой последовательно:
 
 ```bash
-cd /opt/myapp/infra
-git pull origin main
-sudo docker compose exec api alembic upgrade head
-./scripts/deploy.sh all
+ssh devuser@5.35.90.66 "cd /opt/myapp/infra && git pull origin main"
 ```
 
-3. Если нужен деплой только части:
-   - Только бэкенд: `./scripts/deploy.sh backend`
-   - Только фронтенд: `./scripts/deploy.sh frontend`
-   - Без миграций: `./scripts/deploy.sh backend --no-migrate`
-
-4. После деплоя — проверь что всё работает:
-
 ```bash
-curl -sS https://agentsapp.integration-ai.ru/api/v1/health
-curl -I https://lk.chatmedbot.ru
-sudo docker compose ps
+ssh devuser@5.35.90.66 "cd /opt/myapp/infra && sudo docker compose exec -T api alembic upgrade head"
 ```
 
-5. Если что-то упало — посмотри логи:
+```bash
+ssh devuser@5.35.90.66 "cd /opt/myapp/infra && ./scripts/deploy.sh all"
+```
+
+3. Проверь статус:
 
 ```bash
-sudo docker compose logs --tail=100 api
-sudo docker compose logs --tail=100 frontend
+ssh devuser@5.35.90.66 "curl -sS https://agentsapp.integration-ai.ru/api/v1/health && sudo docker compose -f /opt/myapp/infra/docker-compose.yml ps"
+```
+
+4. Если что-то упало — логи:
+
+```bash
+ssh devuser@5.35.90.66 "cd /opt/myapp/infra && sudo docker compose logs --tail=100 api"
 ```
