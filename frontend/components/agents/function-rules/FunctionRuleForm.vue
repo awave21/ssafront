@@ -101,12 +101,21 @@
             </div>
 
             <div class="space-y-1.5">
-              <label class="text-xs font-semibold text-slate-700">Описание параметра</label>
+              <label class="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                Описание параметра — что модель должна сюда записать
+                <FieldHint
+                  title="Описание видит модель"
+                  text="Это не пометка для вас, а инструкция для модели: по ней она решает, что именно вытащить из сообщения клиента. «Телефон клиента для связи» → из «мой номер 8999…» модель возьмёт номер. Если параметр заполняется не тем — правьте в первую очередь это поле."
+                />
+              </label>
               <Input
                 :model-value="parameter.description"
-                placeholder="Например: Имя клиента для записи"
+                placeholder="Например: телефон клиента для связи, только цифры"
                 @update:model-value="updateParameter(index, 'description', $event)"
               />
+              <p class="text-xs text-slate-500">
+                Пишите так, будто объясняете помощнику. Чем конкретнее — тем реже модель ошибается.
+              </p>
             </div>
 
             <div class="flex items-center justify-between pt-1">
@@ -131,6 +140,19 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- Действия правила -->
+      <div class="space-y-3 rounded-2xl bg-slate-100 p-5">
+        <RuleActionsTable
+          :actions="actions"
+          :can-edit="canEdit"
+          @add="$emit('add-action')"
+          @edit="$emit('edit-action', $event)"
+          @remove="$emit('remove-action', $event)"
+          @move-up="$emit('move-action-up', $event)"
+          @move-down="$emit('move-action-down', $event)"
+        />
       </div>
 
       <!-- Реакция на выполнение -->
@@ -226,19 +248,6 @@
         <div v-if="local.dry_run" class="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-2.5 text-xs text-amber-800">
           Тестовый режим включён: правило пишется в журнал, но реакция и действия не применяются.
         </div>
-      </div>
-
-      <!-- Действия правила -->
-      <div class="space-y-3 rounded-2xl bg-slate-100 p-5">
-        <RuleActionsTable
-          :actions="actions"
-          :can-edit="canEdit"
-          @add="$emit('add-action')"
-          @edit="$emit('edit-action', $event)"
-          @remove="$emit('remove-action', $event)"
-          @move-up="$emit('move-action-up', $event)"
-          @move-down="$emit('move-action-down', $event)"
-        />
       </div>
     </div>
 
