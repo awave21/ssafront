@@ -205,9 +205,20 @@
           </button>
         </div>
 
-        <div v-if="form.actions.length === 0" class="text-center py-8 border-2 border-dashed border-emerald-100 rounded-xl">
-          <p class="text-sm text-slate-400">Действия не добавлены. Сценарий ничего не сделает.</p>
-        </div>
+        <button
+          v-if="form.actions.length === 0"
+          type="button"
+          class="group flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-emerald-100 py-8 text-center transition-all duration-300 hover:border-emerald-300 hover:bg-emerald-50/40"
+          @click="addAction"
+        >
+          <span class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-500 transition-all duration-300 group-hover:scale-110 group-hover:bg-emerald-100">
+            <Plus class="w-4 h-4" />
+          </span>
+          <p class="text-sm font-medium text-slate-500 transition-colors group-hover:text-emerald-700">
+            Добавить первое действие
+          </p>
+          <p class="text-xs text-slate-400">Без действий сценарий ничего не сделает</p>
+        </button>
 
         <div v-else class="space-y-3">
           <div
