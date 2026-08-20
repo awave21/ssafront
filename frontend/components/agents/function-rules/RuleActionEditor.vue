@@ -382,7 +382,7 @@
                 </label>
                 <Input
                   :model-value="writeValues[c.name] ?? ''"
-                  :placeholder="`Пусто — колонка не изменится`"
+                  :placeholder="emptyValueHint"
                   @update:model-value="setWriteValue(c.name, String($event))"
                 />
               </div>
@@ -895,6 +895,14 @@ const findFoundPreview = computed(() => `{{${resolvedPrefix.value}_found}}`)
 
 const writeValues = computed<Record<string, string>>(() =>
   (local.config.values && typeof local.config.values === 'object' ? local.config.values : {}),
+)
+
+// При добавлении пустое поле означает «колонку не заполняем», при обновлении —
+// «не трогаем существующее значение». Разные вещи, поэтому и подсказка разная.
+const emptyValueHint = computed(() =>
+  writeMode.value === 'insert'
+    ? 'Пусто — колонка останется незаполненной'
+    : 'Пусто — колонка не изменится',
 )
 
 const setWriteValue = (column: string, value: string) => {
