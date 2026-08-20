@@ -282,35 +282,15 @@
           class="grid gap-3 rounded-md border border-border bg-muted/20 p-2.5"
         >
           <div class="grid gap-1.5">
-            <div class="flex items-center justify-between gap-2">
-              <label class="text-sm font-medium text-slate-900">Таблица</label>
-              <!-- Открываем в новой вкладке: уход со страницы потерял бы
-                   недосохранённую функцию. Рядом кнопка обновления списка —
-                   создал таблицу в соседней вкладке и подтянул сюда. -->
-              <div class="flex items-center gap-1">
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
-                  :disabled="tablesLoading"
-                  title="Обновить список таблиц"
-                  @click="reloadTables"
-                >
-                  <RefreshCw class="h-3 w-3" :class="tablesLoading ? 'animate-spin' : ''" />
-                  Обновить
-                </button>
-                <a
-                  :href="tablesPageUrl"
-                  target="_blank"
-                  rel="noopener"
-                  class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
-                >
-                  <Plus class="h-3 w-3" />
-                  Создать таблицу
-                </a>
-              </div>
-            </div>
-
-            <Select :model-value="tableId" @update:model-value="onSelectTable(String($event))">
+            <label class="text-sm font-medium text-slate-900">Таблица</label>
+            <!-- Список обновляем при каждом открытии: таблицу могли создать
+                 в соседней вкладке, и возвращаться сюда за кнопкой «обновить»
+                 пользователь не должен. -->
+            <Select
+              :model-value="tableId"
+              @update:model-value="onSelectTable(String($event))"
+              @update:open="$event && reloadTables()"
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Выберите таблицу" />
               </SelectTrigger>
@@ -318,13 +298,11 @@
                 <SelectItem v-for="t in availableTables" :key="t.id" :value="t.id">
                   {{ t.name }} · {{ t.records_count }} строк
                 </SelectItem>
+                <SelectItem :value="CREATE_TABLE_OPTION" class="font-semibold text-primary">
+                  + Создать таблицу
+                </SelectItem>
               </SelectContent>
             </Select>
-
-            <p v-if="!availableTables.length && !tablesLoading" class="text-xs text-muted-foreground">
-              Таблиц пока нет. Нажмите «Создать таблицу» — она откроется в соседней вкладке,
-              а потом вернитесь сюда и нажмите «Обновить».
-            </p>
           </div>
 
           <div v-if="tableId && !tableColumns.length" class="text-xs text-muted-foreground">
@@ -550,7 +528,7 @@ import { Input } from '~/components/ui/input'
 import { Textarea } from '~/components/ui/textarea'
 import { Switch } from '~/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select'
-import { Plus, RefreshCw, X } from 'lucide-vue-next'
+import { X } from 'lucide-vue-next'
 import OptionCardPicker, { type OptionCardItem } from '~/components/agents/function-rules/OptionCardPicker.vue'
 import { useRoute } from 'vue-router'
 import { useApiFetch } from '~/composables/useApiFetch'
@@ -907,7 +885,16 @@ const loadTableColumns = async (id: string) => {
 
 const tableId = computed(() => String(local.config.table_id || ''))
 
+/** Псевдо-значение последнего пункта списка. */
+const CREATE_TABLE_OPTION = '__create_table__'
+
 const onSelectTable = (value: string) => {
+  if (value === CREATE_TABLE_OPTION) {
+    // Новая вкладка, а не переход: уход со страницы потерял бы недосохранённую функцию.
+    window.open(tablesPageUrl.value, '_blank', 'noopener')
+    return
+  }
+
   // Колонки у другой таблицы свои, поэтому старое сопоставление сбрасываем —
   // иначе в values остались бы имена колонок, которых в новой таблице нет.
   local.config = {
