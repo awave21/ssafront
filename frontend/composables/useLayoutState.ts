@@ -129,10 +129,14 @@ export const useLayoutState = () => {
   const knowledgeGraphRebuildLabel = useState<string>('knowledge-graph-rebuild-label', () => 'Пересобрать граф')
 
   // «Новый интерфейс» — единый глобальный режим UX: сгруппированный сайдбар (+ режим разработчика)
-  // и сгруппированный дашборд «База знаний». Выключен по умолчанию = классический вид как раньше.
-  // Кнопка-переключатель живёт в топбаре на дашборде знаний.
+  // и сгруппированный дашборд «База знаний». Включён по умолчанию.
+  //
+  // Явный выбор пользователя сильнее умолчания: DashboardSidebar при монтировании
+  // читает localStorage и применяет сохранённое значение. Поэтому тот, кто сам
+  // переключился на классический вид, останется в нём, а новый пользователь
+  // и тот, кто ни разу не трогал тумблер, увидят новый интерфейс.
   const knowledgeDashboardActive = useState<boolean>('kb-dashboard-active', () => false)
-  const newInterface = useState<boolean>('new-interface', () => false)
+  const newInterface = useState<boolean>('new-interface', () => true)
 
   const resetKnowledgeGraphHeaderState = () => {
     knowledgeGraphRebuildAction.value = null
