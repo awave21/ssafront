@@ -37,6 +37,8 @@ class FunctionPostAction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "unblock_user",
             "resume_dialog",
             "send_delayed",
+            "notify_admin",
+            "handoff_to_operator",
             name="function_post_action_type",
         ),
         nullable=False,

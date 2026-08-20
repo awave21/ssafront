@@ -28,7 +28,7 @@ from app.schemas.auth import AuthContext
 from app.core.config import get_settings
 from app.services.agent_user_state import upsert_agent_user_state
 from app.services.dialog_state import set_dialog_status, upsert_dialog_status_flush_only
-from app.services.ops_alerts import send_manager_pause_alert
+from app.services.ops_alerts import send_admin_notification, send_manager_pause_alert
 from app.services.semantic_matcher import semantic_match_text
 from app.services.tool_executor import _ensure_allowed_domain, execute_tool_call
 from app.utils.idempotency import generate_idempotency_key
@@ -76,6 +76,43 @@ async def _pause_dialog_and_user(
         is_disabled=True,
         changed_by_user_id=user.user_id,
     )
+
+
+async def _resolve_admin_notification_target(
+    db: AsyncSession,
+    *,
+    agent_id: UUID,
+    cfg: dict[str, Any],
+) -> tuple[str | None, str | None, str, str | None]:
+    """Определить бота и чат для уведомления администратора.
+
+    Возвращает (bot_token, chat_id, agent_name, skip_reason). Если skip_reason
+    не None — отправлять не нужно, причина уходит в трейс действия.
+
+    Явно указанная в конфиге пара «токен + чат» имеет приоритет и работает даже
+    при выключенном тумблере `admin_notification_enabled`: это осознанный выбор
+    автора правила, он адресует уведомление в свой чат. Если же реквизиты берутся
+    из настроек агента, выключенный тумблер означает «не слать» — иначе глобальный
+    выключатель в настройках не выключал бы ничего.
+    """
+    agent_obj = await db.get(Agent, agent_id)
+    agent_name = agent_obj.name if agent_obj is not None else ""
+
+    cfg_token = str(cfg.get("bot_token") or "").strip()
+    cfg_chat = str(cfg.get("chat_id") or "").strip()
+    if cfg_token and cfg_chat:
+        return cfg_token, cfg_chat, agent_name, None
+
+    if agent_obj is None:
+        return None, None, agent_name, "agent_not_found"
+    if not getattr(agent_obj, "admin_notification_enabled", False):
+        return None, None, agent_name, "admin_notifications_disabled"
+
+    token = cfg_token or str(agent_obj.admin_notification_bot_token or "").strip()
+    chat = cfg_chat or str(agent_obj.admin_notification_chat_id or "").strip()
+    if not token or not chat:
+        return None, None, agent_name, "missing_bot_token_or_chat_id"
+    return token, chat, agent_name, None
 
 
 @dataclass
@@ -627,6 +664,87 @@ async def execute_post_actions(
                 )
                 output_context["should_pause"] = True
                 results.append(ActionResult(action.id, action.action_type, "success"))
+                continue
+
+            if action.action_type == "notify_admin":
+                bot_token, chat_id, agent_name, skip_reason = await _resolve_admin_notification_target(
+                    db, agent_id=agent_id, cfg=cfg
+                )
+                if skip_reason is not None:
+                    results.append(
+                        ActionResult(action.id, action.action_type, "skipped", {"reason": skip_reason})
+                    )
+                    continue
+                text = str(_render_template(str(cfg.get("message", "")), output_context) or "").strip()
+                include_context = bool(cfg.get("include_context", True))
+                sent = await send_admin_notification(
+                    bot_token=bot_token,
+                    chat_id=chat_id,
+                    agent_name=agent_name,
+                    session_id=session_id,
+                    message=text or None,
+                    last_client_message=(
+                        (str(output_context.get("last_user_message") or "").strip() or None)
+                        if include_context
+                        else None
+                    ),
+                )
+                results.append(
+                    ActionResult(
+                        action.id,
+                        action.action_type,
+                        "success" if sent else "error",
+                        # bot_token в трейс не пишем — это секрет.
+                        {"chat_id": chat_id, "message": text, "delivered": sent},
+                    )
+                )
+                continue
+
+            if action.action_type == "handoff_to_operator":
+                await _pause_dialog_and_user(
+                    db,
+                    tenant_id=tenant_id,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    user=user,
+                )
+                output_context["should_pause"] = True
+                handoff_details: dict[str, Any] = {"paused": True}
+
+                client_message = str(
+                    _render_template(str(cfg.get("client_message", "")), output_context) or ""
+                ).strip()
+                if client_message:
+                    output_context.setdefault("messages_to_send", []).append(client_message)
+                    handoff_details["client_message"] = client_message
+
+                if bool(cfg.get("notify_admin", True)):
+                    bot_token, chat_id, agent_name, skip_reason = await _resolve_admin_notification_target(
+                        db, agent_id=agent_id, cfg=cfg
+                    )
+                    if skip_reason is not None:
+                        handoff_details["notify"] = f"skipped:{skip_reason}"
+                    else:
+                        reason = str(
+                            _render_template(str(cfg.get("reason", "")), output_context) or ""
+                        ).strip()
+                        delivered = await send_manager_pause_alert(
+                            bot_token=bot_token,
+                            chat_id=chat_id,
+                            agent_name=agent_name,
+                            session_id=session_id,
+                            reason=reason or "передача оператору",
+                            last_client_message=(
+                                str(output_context.get("last_user_message") or "").strip() or None
+                            ),
+                        )
+                        handoff_details["notify"] = "sent" if delivered else "failed"
+                else:
+                    handoff_details["notify"] = "disabled"
+
+                results.append(
+                    ActionResult(action.id, action.action_type, "success", handoff_details)
+                )
                 continue
 
             if action.action_type == "send_message":
