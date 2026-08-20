@@ -380,8 +380,15 @@ def _tools(calls: dict) -> service.AssistantTools:
         calls["dialogs"] = limit
         return "### Диалог 1"
 
+    async def read_setup_issues() -> str:
+        calls["checks"] = calls.get("checks", 0) + 1
+        return "## Проверка настроек"
+
     return service.AssistantTools(
-        read_prompt=read_prompt, read_activity=read_activity, read_dialogs=read_dialogs
+        read_prompt=read_prompt,
+        read_activity=read_activity,
+        read_dialogs=read_dialogs,
+        read_setup_issues=read_setup_issues,
     )
 
 
@@ -390,12 +397,13 @@ def test_tools_are_registered_and_callable(monkeypatch) -> None:
     _run_assistant(monkeypatch, tools=_tools(calls))
 
     registered = _FakeAgent.last.registered
-    assert set(registered) == {"get_prompt_text", "get_activity", "get_dialogs"}
+    assert set(registered) == {"get_prompt_text", "get_activity", "get_dialogs", "check_setup"}
 
     assert asyncio.run(registered["get_prompt_text"]()) == "# РОЛЬ\nТы админ клиники"
     assert asyncio.run(registered["get_activity"](7)) == "## Как агент работает"
     assert calls["activity"] == 7
     assert asyncio.run(registered["get_dialogs"]()) == "### Диалог 1"
+    assert asyncio.run(registered["check_setup"]()) == "## Проверка настроек"
     # Значение по умолчанию должно доехать до реализации, а не потеряться.
     assert calls["dialogs"] == 3
 

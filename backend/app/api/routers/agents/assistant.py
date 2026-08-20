@@ -27,6 +27,7 @@ from app.services.agent_assistant import (
     run_assistant,
     sanitize_actions,
 )
+from app.services.agent_assistant.checks import render_checks, run_setup_checks
 from app.services.agent_assistant.dialogs import load_recent_dialogs, render_dialogs
 from app.services.agent_assistant.service import AssistantRunResult, AssistantTools
 from app.services.runtime.model_resolver import provider_prefix_from_model_name
@@ -83,8 +84,18 @@ def _build_tools(db: AsyncSession, agent) -> AssistantTools:
             logger.warning("assistant_tool_dialogs_failed", agent_id=str(agent.id), error=str(exc))
             return "Не удалось получить диалоги агента."
 
+    async def read_setup_issues() -> str:
+        try:
+            return render_checks(await run_setup_checks(db, agent=agent))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("assistant_tool_checks_failed", agent_id=str(agent.id), error=str(exc))
+            return "Не удалось проверить настройки агента."
+
     return AssistantTools(
-        read_prompt=read_prompt, read_activity=read_activity, read_dialogs=read_dialogs
+        read_prompt=read_prompt,
+        read_activity=read_activity,
+        read_dialogs=read_dialogs,
+        read_setup_issues=read_setup_issues,
     )
 
 

@@ -134,6 +134,8 @@ SYSTEM_PROMPT = """Ты — помощник по конструктору AI-а
   заголовки, поэтому «проверь мой промпт» без этого вызова не отработать.
 - `get_activity(days)` — как агент работал: падения, зависшие запуски, вызовы
   инструментов, пустые ответы. Нужен на любой вопрос «почему работает плохо».
+- `check_setup()` — что сохранено, но не заработает: действие без таблицы,
+  условие без слов, непроиндексированный документ, выключенный вебхук.
 - `get_dialogs(limit)` — расшифровки последних диалогов с клиентами.
 
 Если инструмент вернул поломку, скажи о ней, даже когда спросили о другом.
@@ -227,6 +229,7 @@ class AssistantTools:
     read_prompt: Callable[[], Awaitable[str]]
     read_activity: Callable[[int], Awaitable[str]]
     read_dialogs: Callable[[int], Awaitable[str]]
+    read_setup_issues: Callable[[], Awaitable[str]]
 
 
 @dataclass(slots=True)
@@ -378,6 +381,16 @@ async def run_assistant(
             Вызывай на любой вопрос про то, почему агент работает плохо.
             """
             return await tools.read_activity(days)
+
+        @assistant.tool_plain
+        async def check_setup() -> str:
+            """Проверка настроек агента: что сохранено, но работать не будет.
+
+            Вызывай, когда спрашивают «всё ли правильно настроено», жалуются, что
+            что-то не срабатывает, или просят проверить агента. Список считается
+            по базе — бери его как есть, своих догадок не добавляй.
+            """
+            return await tools.read_setup_issues()
 
         @assistant.tool_plain
         async def get_dialogs(limit: int = 3) -> str:
