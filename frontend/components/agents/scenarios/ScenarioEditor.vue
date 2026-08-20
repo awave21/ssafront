@@ -430,6 +430,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/comp
 import KnowledgeSheetShell from '~/components/knowledge/KnowledgeSheetShell.vue'
 import type { Scenario, ScenarioUpsertPayload, ScenarioAction } from '~/types/scenario'
 import { functionRuleActionDescriptions, functionRuleActionLabels } from '~/types/ruleAction'
+import type { ScenarioPreset } from '~/utils/scenarioPresets'
 import { functionRuleActionIcons } from '~/utils/ruleActionIcons'
 import { soonActionItems } from '~/utils/ruleActionSoon'
 import OptionCardPicker, { type OptionCardItem } from '~/components/agents/function-rules/OptionCardPicker.vue'
@@ -440,6 +441,8 @@ const props = withDefaults(
     scenario: Scenario | null
     agentId: string
     saving?: boolean
+    /** Заготовка из каталога: применяется только при создании нового сценария. */
+    preset?: ScenarioPreset | null
   }>(),
   { saving: false }
 )
@@ -633,16 +636,27 @@ watch(
           }
         })
       } else {
+        const preset = props.preset
         form.value = {
-          name: '',
+          name: preset?.name || '',
           enabled: true,
           priority: 100,
-          trigger_mode: 'client_message',
-          condition_type: 'always',
-          condition_config: {},
-          actions: []
+          trigger_mode: preset?.trigger_mode || 'client_message',
+          condition_type: preset?.condition_type || 'always',
+          condition_config: JSON.parse(JSON.stringify(preset?.condition_config || {})),
+          actions: (preset?.actions || []).map((action, index) => ({
+            id: '',
+            rule_id: '',
+            action_type: action.action_type,
+            on_status: 'always',
+            enabled: true,
+            order_index: index,
+            config: { ...(action.config || {}) },
+          })) as any,
         }
-        keywordInput.value = ''
+        // Ключевые слова живут в отдельном инпуте и собираются обратно при сохранении.
+        keywordInput.value = (form.value.condition_config.keywords || []).join(', ')
+        form.value.actions.forEach((action, index) => ensureActionConfig(action, index))
         delayValue.value = {}
         delayUnit.value = {}
         webhookPayloadText.value = {}

@@ -6,6 +6,7 @@
         :loading="isLoading"
         :error="error"
         @create="handleCreateScenario"
+        @open-catalog="openCatalog"
         @select="handleSelectScenario"
         @toggle="toggleScenario"
         @settings="handleSelectScenario"
@@ -19,6 +20,7 @@
       v-if="showEditor"
       :is-open="showEditor"
       :scenario="selectedScenario"
+      :preset="activePreset"
       :agent-id="agentId"
       :saving="saveInProgress"
       @close="showEditor = false"
@@ -29,7 +31,9 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRoute } from '#app'
+import { useRoute, useRouter } from 'vue-router'
+import { findScenarioPreset } from '~/utils/scenarioPresets'
+import type { ScenarioPreset } from '~/utils/scenarioPresets'
 import AgentPageShell from '~/components/agents/AgentPageShell.vue'
 import ScenariosList from '~/components/agents/scenarios/ScenariosList.vue'
 import ScenarioEditor from '~/components/agents/scenarios/ScenarioEditor.vue'
@@ -43,6 +47,7 @@ definePageMeta({
 })
 
 const route = useRoute()
+const router = useRouter()
 const agentId = route.params.id as string
 const { scenarios, isLoading, error, fetchScenarios, createScenario, updateScenario, deleteScenario, toggleScenario } = useScenarios(agentId)
 const { success: toastSuccess, error: toastError } = useToast()
@@ -50,13 +55,20 @@ const { success: toastSuccess, error: toastError } = useToast()
 const showEditor = ref(false)
 const selectedScenario = ref<Scenario | null>(null)
 const saveInProgress = ref(false)
+const activePreset = ref<ScenarioPreset | null>(null)
 
 const handleCreateScenario = () => {
   selectedScenario.value = null
+  activePreset.value = null
   showEditor.value = true
 }
 
+const openCatalog = () => {
+  router.push(`/agents/${agentId}/scenarios/catalog`)
+}
+
 const handleSelectScenario = (scenario: Scenario) => {
+  activePreset.value = null
   selectedScenario.value = scenario
   showEditor.value = true
 }
@@ -93,5 +105,14 @@ const handleSaveScenario = async (payload: ScenarioUpsertPayload) => {
 
 onMounted(() => {
   fetchScenarios()
+  // Пришли из каталога — сразу открываем редактор с заготовкой и убираем
+  // preset из адреса, чтобы обновление страницы не открывало панель снова.
+  const preset = findScenarioPreset(route.query.preset as string | undefined)
+  if (preset) {
+    activePreset.value = preset
+    selectedScenario.value = null
+    showEditor.value = true
+    router.replace(`/agents/${agentId}/scenarios`)
+  }
 })
 </script>
