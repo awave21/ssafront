@@ -25,6 +25,8 @@ def _rerank_direct_question_candidates(
     Гибридный rerank: комбинирует векторный score с лексическим перекрытием по title.
 
     Не требует дополнительных API-вызовов — работает на уже полученных кандидатах.
+    Меняет ТОЛЬКО порядок кандидатов; relevance каждого остаётся косинусом,
+    иначе порог начинает означать не то, что написано в настройке.
     """
     text_weight = 1.0 - vector_weight
     q = query.lower()
@@ -36,10 +38,11 @@ def _rerank_direct_question_candidates(
         scored.append((combined, item))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    reranked = [
-        {**item, "relevance": round(score, 4), "match_percent": round(min(score, 1.0) * 100, 2)}
-        for score, item in scored
-    ]
+    # relevance остаётся косинусом: с ним сравнивается порог и его же человек
+    # видит как процент совпадения. Раньше сюда писался гибрид, и порог 45
+    # означал на самом деле 45/0.65 = 69 по косинусу — недостижимо для
+    # перефразированного вопроса. Гибрид теперь влияет только на порядок.
+    reranked = [{**item, "rerank_score": round(score, 4)} for score, item in scored]
     return reranked[:top_n] if top_n else reranked
 
 

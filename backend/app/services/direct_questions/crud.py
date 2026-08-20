@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -31,30 +31,48 @@ async def list_direct_questions(
     return (await db.execute(stmt)).scalars().all()
 
 
-def _build_embedding_text(title: str) -> str:
+# Сколько символов ответа берём в вектор. Ограничение не про лимит модели
+# (у text-embedding-3-small он 8191 токен), а про смысл: длинный ответ
+# размывает вектор, и карточка начинает находиться на что угодно.
+MAX_EMBEDDING_CONTENT_CHARS = 1500
+
+
+def _build_embedding_text(title: str, content: str = "") -> str:
     """
     Расширяем заголовок до поискового текста.
 
     Одно слово ("Адрес", "Цена", "Режим работы") даёт слабый вектор —
     пользователь спрашивает развёрнутыми фразами. Добавляем вопросительную
     форму, чтобы семантически покрыть типичные запросы.
+
+    Содержимое добавляем следом: ответ лежит именно в нём. Пока искали только
+    по заголовку, карточка «Оборудование для эпиляции» не находилась ни по
+    одному вопросу про саму процедуру — половина смысла карточки в поиске
+    не участвовала.
     """
     title_clean = title.strip().rstrip("?.,!")
-    return f"{title_clean}. {title_clean}?"
+    parts = [f"{title_clean}. {title_clean}?"]
+    body = (content or "").strip()
+    if body:
+        parts.append(body[:MAX_EMBEDDING_CONTENT_CHARS])
+    return "\n".join(parts)
 
 
-async def _embed_title(
+async def _embed_question(
     db: AsyncSession,
     *,
     tenant_id: UUID,
     title: str,
+    content: str = "",
 ) -> tuple[list[float] | None, str, datetime | None, str | None]:
     openai_api_key = await get_decrypted_api_key(db, tenant_id)
-    embedding_text = _build_embedding_text(title)
+    embedding_text = _build_embedding_text(title, content)
     embedding = await create_direct_question_embedding(
         embedding_text,
         db=db,
         tenant_id=tenant_id,
+        # Строку источника списания не трогаем, хотя вектор теперь шире:
+        # это ключ идемпотентности в балансе, а не описание.
         charge_source_type="embedding.direct_question_title",
         openai_api_key=openai_api_key,
     )
@@ -100,10 +118,11 @@ async def create_direct_question(
     agent_id: UUID,
     payload: DirectQuestionCreate,
 ) -> DirectQuestion:
-    embedding, embedding_status, embedding_retry_at, embedding_error = await _embed_title(
+    embedding, embedding_status, embedding_retry_at, embedding_error = await _embed_question(
         db,
         tenant_id=tenant_id,
         title=payload.title,
+        content=payload.content,
     )
 
     question = DirectQuestion(
@@ -149,6 +168,8 @@ async def update_direct_question(
 ) -> DirectQuestion:
     update_data = payload.model_dump(exclude_unset=True)
     title_changed = "title" in update_data and update_data["title"] != question.title
+    # Содержимое теперь тоже в векторе, значит его правка требует пересчёта.
+    content_changed = "content" in update_data and update_data["content"] != question.content
 
     for key, value in update_data.items():
         if key in {"files", "followup"}:
@@ -158,11 +179,12 @@ async def update_direct_question(
     if "followup" in update_data:
         question.followup = payload.followup.model_dump(mode="json") if payload.followup else None
 
-    if title_changed:
-        embedding, status, retry_at, embedding_error = await _embed_title(
+    if title_changed or content_changed:
+        embedding, status, retry_at, embedding_error = await _embed_question(
             db,
             tenant_id=tenant_id,
             title=question.title,
+            content=question.content,
         )
         question.embedding = embedding
         question.embedding_status = status
@@ -216,26 +238,57 @@ async def reembed_agent_direct_questions(
         return {"updated": 0, "failed": 0}
 
     openai_api_key = await get_decrypted_api_key(db, tenant_id)
-    updated = 0
+
+    # Тексты забираем до цикла: списание внутри create_direct_question_embedding
+    # коммитит, инстансы протухают, и обращение к полю в середине цикла поднимает
+    # ленивую загрузку — а вместе с ней автосброс наполовину присвоенных векторов.
+    payloads = [
+        (question.id, _build_embedding_text(question.title, question.content))
+        for question in questions
+    ]
+
+    # Считаем все векторы, ничего не присваивая. Списание за эмбеддинг внутри
+    # коммитит, и висящее в сессии присвоение вектора улетело бы в этот чужой
+    # коммит на протухших инстансах — цикл падал на второй карточке.
+    computed: list[tuple[UUID, list[float]]] = []
     failed = 0
-    for question in questions:
-        embedding_text = _build_embedding_text(question.title)
+    for question_id, embedding_text in payloads:
         new_embedding = await create_direct_question_embedding(
             embedding_text,
             db=db,
             tenant_id=tenant_id,
             charge_source_type="embedding.direct_question_reembed",
-            charge_source_id=str(question.id),
+            charge_source_id=str(question_id),
             openai_api_key=openai_api_key,
         )
         if new_embedding is None:
             failed += 1
             continue
-        question.embedding = new_embedding
-        question.embedding_status = "ready"
-        question.embedding_retry_at = None
-        question.embedding_error = None
-        updated += 1
+        computed.append((question_id, new_embedding))
+
+    # Двойной каст — рабочий приём этого кода (см. retrieval.py): внутренний
+    # AS text заставляет asyncpg считать параметр текстом и не звать кодек
+    # pgvector, который ждёт список; наружный уже средствами Postgres
+    # превращает текст в вектор. Через values(embedding=...) не выходит:
+    # тип SQLAlchemy сериализует вектор в строку, а кодек её отвергает.
+    for question_id, embedding in computed:
+        await db.execute(
+            text(
+                """
+                UPDATE direct_questions
+                SET embedding = CAST(CAST(:embedding AS text) AS vector),
+                    embedding_status = 'ready',
+                    embedding_retry_at = NULL,
+                    embedding_error = NULL,
+                    updated_at = now()
+                WHERE id = :question_id
+                """
+            ),
+            {
+                "embedding": "[" + ",".join(str(float(x)) for x in embedding) + "]",
+                "question_id": question_id,
+            },
+        )
 
     await db.commit()
-    return {"updated": updated, "failed": failed}
+    return {"updated": len(computed), "failed": failed}
