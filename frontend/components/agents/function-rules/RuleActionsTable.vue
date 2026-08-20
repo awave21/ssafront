@@ -19,23 +19,16 @@
       </button>
     </div>
 
-    <!-- Пустой блок сам работает кнопкой: он занимает всю ширину и притягивает
-         взгляд сильнее, чем «+ Добавить действие» в углу заголовка. -->
+    <!-- Тот же вид, что и раньше: текст и цвета не трогаем, блок просто стал
+         кликабельным. На hover только лёгкий подъём — понятно, что элемент
+         живой, но палитра остаётся нейтральной. -->
     <button
       v-if="actions.length === 0 && canEdit"
       type="button"
-      class="group flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-white/60 py-6 text-center text-sm text-slate-400 transition-all duration-300 hover:border-primary/40 hover:bg-primary/[0.03] hover:text-primary"
+      class="w-full rounded-xl border border-dashed border-slate-200 bg-white/60 py-6 text-center text-sm text-slate-400 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-[0_10px_24px_-14px_rgba(0,0,0,0.10)]"
       @click="$emit('add')"
     >
-      <span
-        class="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-400 transition-all duration-300 group-hover:scale-110 group-hover:bg-primary/10 group-hover:text-primary"
-      >
-        <Plus class="h-4 w-4" />
-      </span>
-      <span class="font-medium">Добавить первое действие</span>
-      <span class="text-xs text-slate-400 transition-colors group-hover:text-primary/70">
-        Что платформа сделает, когда правило сработает
-      </span>
+      Действия не добавлены. Нажмите «+ Добавить действие».
     </button>
 
     <div
@@ -120,7 +113,7 @@
 </template>
 
 <script setup lang="ts">
-import { ChevronUp, ChevronDown, Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { ChevronUp, ChevronDown, Pencil, Trash2 } from 'lucide-vue-next'
 import FieldHint from '~/components/agents/settings/FieldHint.vue'
 import {
   functionRuleActionLabels,

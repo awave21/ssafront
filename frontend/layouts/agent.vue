@@ -124,6 +124,17 @@ onMounted(() => {
       <!-- TopBar скрывается в fullscreen режиме -->
       <DashboardTopBar v-if="!isPromptFullscreen && !isEditorFullscreen">
         <template #left>
+          <!-- Бургер живёт слева, рядом с кнопкой сворачивания сайдбара. Раньше
+               он был в правом слоте и на планшете оказывался в самом углу,
+               среди кнопок действий, — читалось как «ещё одно действие». -->
+          <button
+            class="lg:hidden -ml-1 shrink-0 rounded-lg p-2 text-foreground hover:bg-muted"
+            aria-label="Открыть меню"
+            @click="isMobileSidebarOpen = true"
+          >
+            <Menu class="w-5 h-5" />
+          </button>
+
           <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
             <nav
               v-if="layoutBreadcrumbSegments?.length"
@@ -164,14 +175,6 @@ onMounted(() => {
           </div>
         </template>
         <template #right>
-          <!-- Кнопка мобильного меню (только на планшете/мобиле) -->
-          <button
-            class="lg:hidden p-2 rounded-lg text-foreground hover:bg-muted"
-            @click="isMobileSidebarOpen = true"
-          >
-            <Menu class="w-5 h-5" />
-          </button>
-
           <!-- Переключатель вида «База знаний»: новый интерфейс / классический -->
           <button
             v-if="isAgentDetail"
