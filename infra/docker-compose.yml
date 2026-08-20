@@ -117,6 +117,32 @@ services:
     mem_limit: "${SQNS_WORKER_MEM_LIMIT:-512m}"
     mem_reservation: "${SQNS_WORKER_MEM_RESERVATION:-256m}"
 
+  # Отправка отложенных сообщений сценариев. Воркер был написан вместе с
+  # действием «Отложенное сообщение», но в компоуз его не добавили: сообщения
+  # копились в очереди, которую никто не читал.
+  scenario-delayed-worker:
+    restart: unless-stopped
+    build:
+      context: ../backend
+    env_file:
+      - ./.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      REDIS_URL: ${REDIS_URL}
+      PYTHONPATH: /app
+      SKIP_ALEMBIC: "1"
+    command: ["python", "-m", "app.workers.scenario_delayed_dispatch"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/logs
+    cpus: "${SCENARIO_DELAYED_WORKER_CPUS:-0.25}"
+    mem_limit: "${SCENARIO_DELAYED_WORKER_MEM_LIMIT:-384m}"
+    mem_reservation: "${SCENARIO_DELAYED_WORKER_MEM_RESERVATION:-192m}"
+
   script-flow-index-worker:
     restart: unless-stopped
     build:
