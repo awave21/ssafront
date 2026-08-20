@@ -178,7 +178,7 @@
 
 <script setup lang="ts">
 import { nextTick, ref, watch, type Component } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowRight,
   BookOpen,
@@ -200,13 +200,22 @@ import {
   type AssistantSuggestionKind,
 } from '~/composables/useAgentAssistant'
 import { createSafeMarkdownRenderer } from '~/utils/safe-markdown'
+import { useLayoutState } from '~/composables/useLayoutState'
 
 const props = defineProps<{ agentId: string }>()
 
 const router = useRouter()
 const markdown = createSafeMarkdownRenderer()
 
-const { messages, isThinking, isEmpty, ask, clear } = useAgentAssistant(props.agentId)
+const route = useRoute()
+// Заголовок раздела ставит AgentPageShell — берём его, а не свою карту путей:
+// одна копия названий вместо двух.
+const { breadcrumbTitle } = useLayoutState()
+
+const { messages, isThinking, isEmpty, ask, clear } = useAgentAssistant(props.agentId, () => ({
+  title: breadcrumbTitle.value,
+  path: route.path,
+}))
 
 const isOpen = ref(false)
 const draft = ref('')

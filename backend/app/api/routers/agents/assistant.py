@@ -46,6 +46,15 @@ def _normalize_model(model: str | None) -> str | None:
     return normalized
 
 
+def _describe_page(payload: AssistantChatRequest) -> str | None:
+    """Человекочитаемое «где сейчас пользователь» для промпта."""
+    title = (payload.page_title or "").strip()
+    path = (payload.page_path or "").strip()
+    if title and path:
+        return f"«{title}» ({path})"
+    return title or path or None
+
+
 async def _charge_tenant(
     db: AsyncSession,
     *,
@@ -98,7 +107,10 @@ async def assistant_chat(
 ) -> AssistantChatResponse:
     agent = await get_agent_or_404(agent_id, db, user)
 
-    effective_model = _normalize_model(payload.model) or get_settings().pydanticai_default_model
+    settings = get_settings()
+    # Своя настройка, не pydanticai_default_model: та задаёт модель всем агентам
+    # в рантайме, и переключать её ради помощника нельзя.
+    effective_model = _normalize_model(payload.model) or settings.agent_assistant_model
 
     # resolve_model «падает открыто»: без ключа тенанта он вернёт строку, и
     # PydanticAI уедет на переменные окружения платформы. Поэтому ключ
@@ -134,6 +146,8 @@ async def assistant_chat(
             function_presets=payload.function_presets,
             scenario_presets=payload.scenario_presets,
             model_name=effective_model,
+            page=_describe_page(payload),
+            reasoning_effort=settings.agent_assistant_reasoning_effort,
             openai_api_key=openai_api_key,
             anthropic_api_key=anthropic_api_key,
         )

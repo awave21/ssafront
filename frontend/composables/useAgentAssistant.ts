@@ -69,7 +69,12 @@ export const suggestionRoute = (agentId: string, suggestion: AssistantSuggestion
   }
 }
 
-export const useAgentAssistant = (agentId: string) => {
+type PageContext = {
+  title?: string
+  path?: string
+}
+
+export const useAgentAssistant = (agentId: string, page?: () => PageContext) => {
   const apiFetch = useApiFetch()
 
   const messages = ref<AssistantMessage[]>([])
@@ -134,6 +139,10 @@ export const useAgentAssistant = (agentId: string) => {
             actions: buildActionCatalog(),
             function_presets: buildFunctionPresetCatalog(),
             scenario_presets: buildScenarioPresetCatalog(),
+            // Где человек сейчас: без этого «что здесь настроить» не разгадать,
+            // и помощник предлагает перейти туда, где пользователь уже стоит.
+            page_title: page?.().title || undefined,
+            page_path: page?.().path || undefined,
           },
           // Мета-агент отвечает дольше обычного запроса: контекст большой.
           timeout: 120_000,

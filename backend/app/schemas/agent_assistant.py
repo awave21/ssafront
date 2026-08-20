@@ -38,6 +38,14 @@ class AssistantChatRequest(BaseModel):
     function_presets: list[AssistantCatalogItem] = Field(default_factory=list, max_length=40)
     scenario_presets: list[AssistantCatalogItem] = Field(default_factory=list, max_length=40)
     model: str | None = Field(default=None, max_length=200)
+    page_title: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Заголовок раздела, открытого у пользователя прямо сейчас",
+    )
+    page_path: str | None = Field(
+        default=None, max_length=300, description="Путь этого раздела в интерфейсе"
+    )
 
 
 class AssistantSuggestion(BaseModel):

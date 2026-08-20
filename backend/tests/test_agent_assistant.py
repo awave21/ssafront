@@ -269,10 +269,11 @@ class _FakeAgent:
     last: "_FakeAgent | None" = None
     reply: service.AssistantOutput | None = None
 
-    def __init__(self, model, output_type=None, system_prompt=None) -> None:
+    def __init__(self, model, output_type=None, system_prompt=None, model_settings=None) -> None:
         self.model = model
         self.output_type = output_type
         self.system_prompt = system_prompt
+        self.model_settings = model_settings
         self.user_prompt: str | None = None
         _FakeAgent.last = self
 
@@ -305,6 +306,37 @@ def test_run_assistant_puts_question_and_catalogs_into_prompt(monkeypatch) -> No
     assert "`table_write`" in prompt
     assert "`client_to_table`" in prompt
     assert _FakeAgent.last.system_prompt == service.SYSTEM_PROMPT
+
+
+def test_prompt_names_the_open_section(monkeypatch) -> None:
+    _run_assistant(monkeypatch, page="«Функции агента» (/agents/x/functions)")
+
+    prompt = _FakeAgent.last.user_prompt
+    assert "## Открытый раздел" in prompt
+    assert "«Функции агента» (/agents/x/functions)" in prompt
+
+
+def test_prompt_omits_section_block_when_page_unknown(monkeypatch) -> None:
+    # Старый клиент раздел не присылает — пустой заголовок хуже отсутствия.
+    _run_assistant(monkeypatch)
+
+    assert "Открытый раздел" not in _FakeAgent.last.user_prompt
+
+
+def test_describe_page_combines_title_and_path() -> None:
+    request = AssistantChatRequest(
+        message="что тут?", page_title="Функции агента", page_path="/agents/x/functions"
+    )
+
+    assert assistant_router._describe_page(request) == "«Функции агента» (/agents/x/functions)"
+
+
+def test_describe_page_survives_missing_parts() -> None:
+    assert assistant_router._describe_page(AssistantChatRequest(message="q")) is None
+    assert (
+        assistant_router._describe_page(AssistantChatRequest(message="q", page_path="/agents/x"))
+        == "/agents/x"
+    )
 
 
 def test_run_assistant_drops_unknown_preset_id(monkeypatch) -> None:
@@ -361,6 +393,29 @@ def test_run_assistant_caps_suggestions_and_followups(monkeypatch) -> None:
 
     assert len(result.output.suggestions) == 3
     assert result.output.followups == ["a", "b", "c"]
+
+
+def test_build_model_settings_only_for_openai_reasoning() -> None:
+    from app.services.agent_assistant.service import build_model_settings
+
+    settings = build_model_settings("openai:gpt-5-mini", "low")
+    assert settings is not None
+    assert settings["openai_reasoning_effort"] == "low"
+
+    # У Anthropic своего эквивалента нет — настройку не навязываем.
+    assert build_model_settings("anthropic:claude-sonnet-4-5", "low") is None
+    # Пустое значение означает «не трогать».
+    assert build_model_settings("openai:gpt-5-mini", "") is None
+    assert build_model_settings("openai:gpt-5-mini", None) is None
+    # «none» — тоже «не отправлять»: обычные модели отвечают на этот параметр 400.
+    assert build_model_settings("openai:gpt-4.1-mini", "none") is None
+    assert build_model_settings("openai:gpt-4.1-mini", "OFF") is None
+
+
+def test_run_assistant_passes_reasoning_effort_to_agent(monkeypatch) -> None:
+    _run_assistant(monkeypatch, reasoning_effort="minimal")
+
+    assert _FakeAgent.last.model_settings["openai_reasoning_effort"] == "minimal"
 
 
 def test_run_assistant_rejects_blank_model(monkeypatch) -> None:

@@ -22,6 +22,11 @@ try:  # pragma: no cover - в рантайме pydantic-ai всегда есть
 except ImportError:  # pragma: no cover
     PydanticAgent = None
 
+try:  # pragma: no cover
+    from pydantic_ai.models.openai import OpenAIChatModelSettings
+except ImportError:  # pragma: no cover
+    OpenAIChatModelSettings = None
+
 logger = structlog.get_logger(__name__)
 
 MAX_SUGGESTIONS = 3
@@ -110,6 +115,8 @@ SYSTEM_PROMPT = """Ты — помощник по конструктору AI-а
 
 # Как отвечать
 
+- Учитывай открытый раздел: «эта функция», «здесь», «на этом экране» относятся
+  к нему. Не предлагай карточкой перейти туда, где человек уже находится.
 - Коротко: 2–6 предложений. Markdown допустим (списки, **жирный**), заголовки не нужны.
 - Сначала ответ на вопрос, потом следующий шаг.
 - Опирайся на блок «Текущая настройка агента». Если нужное уже настроено — скажи
@@ -175,6 +182,23 @@ class AssistantRunResult:
     model_name: str
 
 
+def build_model_settings(model_name: str, reasoning_effort: str | None) -> Any | None:
+    """model_settings для reasoning-моделей OpenAI.
+
+    Настройка провайдерная: у Anthropic своего эквивалента нет, а «none» для
+    gpt-5.x означает «не думать» и поддерживается не всеми моделями семейства.
+    Поэтому применяем только к openai: и только при осмысленном значении.
+    """
+    effort = (reasoning_effort or "").strip().lower()
+    # «none» — это «не отправлять параметр». Отправленный буквально, он ломает
+    # обычные модели: gpt-4.1-mini на reasoning_effort отвечает 400.
+    if effort in {"", "none", "off"} or OpenAIChatModelSettings is None:
+        return None
+    if not model_name.lower().startswith("openai:"):
+        return None
+    return OpenAIChatModelSettings(openai_reasoning_effort=effort)
+
+
 def _render_history(history: list[AssistantMessage]) -> str:
     if not history:
         return ""
@@ -194,8 +218,14 @@ def build_user_prompt(
     actions: list[AssistantCatalogItem],
     function_presets: list[AssistantCatalogItem],
     scenario_presets: list[AssistantCatalogItem],
+    page: str | None = None,
 ) -> str:
-    blocks = [
+    blocks: list[str] = []
+    if page:
+        # Где человек стоит прямо сейчас: «эта функция» и «здесь» в вопросе
+        # без этого не разгадать.
+        blocks += [f"## Открытый раздел\n{page}", ""]
+    blocks += [
         snapshot_text,
         "",
         render_catalog("Доступные действия", actions),
@@ -243,6 +273,8 @@ async def run_assistant(
     function_presets: list[AssistantCatalogItem],
     scenario_presets: list[AssistantCatalogItem],
     model_name: str,
+    page: str | None = None,
+    reasoning_effort: str | None = None,
     openai_api_key: str | None = None,
     anthropic_api_key: str | None = None,
 ) -> AssistantRunResult:
@@ -260,10 +292,12 @@ async def run_assistant(
         openai_api_key=openai_api_key,
         anthropic_api_key=anthropic_api_key,
     )
+    model_settings = build_model_settings(effective_model, reasoning_effort)
     assistant = PydanticAgent(
         model,
         output_type=AssistantOutput,
         system_prompt=SYSTEM_PROMPT,
+        model_settings=model_settings,
     )
 
     user_prompt = build_user_prompt(
@@ -273,11 +307,13 @@ async def run_assistant(
         actions=actions,
         function_presets=function_presets,
         scenario_presets=scenario_presets,
+        page=page,
     )
 
     logger.info(
         "agent_assistant_asking",
         model=effective_model,
+        reasoning_effort=reasoning_effort,
         history_len=len(history),
         prompt_chars=len(user_prompt),
     )
