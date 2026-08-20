@@ -57,7 +57,7 @@
               v-model="form.trigger_mode"
               class="mt-1.5 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all duration-300 outline-none"
             >
-              <option v-for="(label, mode) in triggerLabels" :key="mode" :value="mode">
+              <option v-for="(label, mode) in selectableTriggerLabels" :key="mode" :value="mode">
                 {{ label }}
               </option>
             </select>
@@ -456,6 +456,18 @@ const emit = defineEmits<{
 const webhookPayloadPlaceholder =
   'Payload JSON (опционально): {"event":"new_dialog","session":"{{session_id}}"}'
 
+/**
+ * События, которые рантайм не вызывает никогда.
+ *
+ * `spend_limit` встречается в коде только в объявлении перечисления — ни одного
+ * запуска правил с этой фазой нет. `pre_run` вызывается лишь из тестового
+ * прогона правил, в живых диалогах этой фазы не существует. Правило с таким
+ * событием сохранялось и молча не срабатывало.
+ *
+ * Подписи оставляем: у ранее сохранённых правил событие должно читаться.
+ */
+const UNSUPPORTED_TRIGGERS = ['spend_limit', 'pre_run'] as const
+
 const triggerLabels = {
   client_message: 'Сообщение клиента',
   agent_message: 'Сообщение агента',
@@ -468,6 +480,14 @@ const triggerLabels = {
   post_run: 'После завершения',
   post_tool: 'После инструмента'
 }
+
+const selectableTriggerLabels = computed(() =>
+  Object.fromEntries(
+    Object.entries(triggerLabels).filter(
+      ([mode]) => !UNSUPPORTED_TRIGGERS.includes(mode as (typeof UNSUPPORTED_TRIGGERS)[number]),
+    ),
+  ),
+)
 
 const triggerHints = {
   client_message: 'Срабатывает, когда клиент присылает сообщение.',
