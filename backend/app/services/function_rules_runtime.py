@@ -593,7 +593,7 @@ async def _execute_rule_tool(
         except Exception:
             pass
         # endregion agent log
-        result_payload = await execute_tool_call(
+        result_payload = await _call_rule_webhook(
             endpoint=tool.endpoint,
             input_schema=tool.input_schema,
             args=args,
@@ -615,13 +615,15 @@ async def _execute_rule_tool(
             "skipped",
             {"reason": "unsupported_tool_execution_type", "tool_id": str(tool.id), "execution_type": tool.execution_type},
         )
+    tool_status, failure_reason = _classify_rule_tool_result(result_payload)
     return (
         result_payload,
         ActionResult(
             None,
             "rule_tool",
-            "success",
+            tool_status,
             {
+                "error": failure_reason,
                 "tool_id": str(tool.id),
                 "tool_name": tool.name,
                 "execution_type": tool.execution_type,
@@ -634,6 +636,36 @@ async def _execute_rule_tool(
             },
         ),
     )
+
+
+async def _call_rule_webhook(**kwargs: Any) -> dict[str, Any]:
+    """Вебхук правила. Исключение превращаем в полезную нагрузку с ошибкой.
+
+    Иначе падение вебхука рвёт весь прогон правил, и действия «При ошибке»
+    не выполняются — до них дело просто не доходит.
+    """
+    try:
+        return await execute_tool_call(**kwargs)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("rule_tool_webhook_failed", error=str(exc))
+        return {"error": str(exc)[:300], "status_code": None}
+
+
+def _classify_rule_tool_result(payload: Any) -> tuple[str, str | None]:
+    """Успех или ошибка вызова тула правила.
+
+    Раньше статус всегда был «успех», поэтому действия с условием «При ошибке»
+    не выполнялись никогда — фильтр в execute_post_actions отбрасывал их все.
+    """
+    if not isinstance(payload, dict):
+        return "success", None
+    error_msg = payload.get("error")
+    if error_msg:
+        return "error", str(error_msg)[:300]
+    status_code = payload.get("status_code")
+    if isinstance(status_code, int) and status_code >= 400:
+        return "error", f"HTTP {status_code}"
+    return "success", None
 
 
 async def execute_post_actions(
@@ -1365,6 +1397,9 @@ async def run_rules_for_phase(
                     if ai_instruction:
                         context_data.setdefault("augment_prompt", []).append(ai_instruction)
 
+                # Объявляем до ветки: иначе при пропуске тула значение либо
+                # не определено, либо протекает от предыдущего правила цикла.
+                rule_tool_trace: ActionResult | None = None
                 if not context_data.get("skip_rule_tool_execution"):
                     tool_result, rule_tool_trace = await _execute_rule_tool(
                         db,
@@ -1378,6 +1413,13 @@ async def run_rules_for_phase(
                     if rule_tool_trace is not None:
                         action_traces.append(rule_tool_trace)
                 context_data["current_rule_id"] = rule.id
+                # Статус берём из вызова тула правила: с константой "success"
+                # действия «При ошибке» не выполнялись никогда.
+                execution_status = (
+                    "error"
+                    if rule_tool_trace is not None and rule_tool_trace.status == "error"
+                    else "success"
+                )
                 post_action_traces, context_data = await execute_post_actions(
                     db,
                     tenant_id=tenant_id,
@@ -1386,7 +1428,7 @@ async def run_rules_for_phase(
                     trace_id=trace_id,
                     user=user,
                     actions=rule.actions,
-                    execution_status="success",
+                    execution_status=execution_status,
                     context=context_data,
                 )
                 action_traces.extend(post_action_traces)
