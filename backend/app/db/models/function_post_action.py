@@ -39,6 +39,7 @@ class FunctionPostAction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "send_delayed",
             "notify_admin",
             "handoff_to_operator",
+            "set_variable",
             name="function_post_action_type",
         ),
         nullable=False,

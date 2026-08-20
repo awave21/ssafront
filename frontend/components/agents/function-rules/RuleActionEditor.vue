@@ -277,6 +277,43 @@
           </p>
         </div>
 
+        <div v-else-if="local.action_type === 'set_variable'" class="grid gap-3 rounded-md border border-border bg-muted/20 p-2.5">
+          <div class="grid gap-2 md:grid-cols-2">
+            <div class="grid gap-1.5">
+              <label class="text-sm font-medium text-slate-900">Имя переменной</label>
+              <Input v-model="variableName" placeholder="client_city" />
+            </div>
+            <div class="grid gap-1.5">
+              <label class="text-sm font-medium text-slate-900">Что сделать</label>
+              <Select :model-value="variableOperation" @update:model-value="variableOperation = String($event)">
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="set">Записать значение</SelectItem>
+                  <SelectItem value="increment">Увеличить на</SelectItem>
+                  <SelectItem value="clear">Очистить</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div v-if="variableOperation !== 'clear'" class="grid gap-1.5">
+            <label class="text-sm font-medium text-slate-900">
+              {{ variableOperation === 'increment' ? 'Шаг' : 'Значение' }}
+            </label>
+            <Input
+              v-model="variableValue"
+              :placeholder="variableOperation === 'increment' ? '1' : 'Москва или {{result}}'"
+            />
+          </div>
+
+          <p class="text-xs text-muted-foreground">
+            Переменная хранится в диалоге и доступна дальше по разговору — в текстах других
+            действий и в вебхуках через подстановку по имени.
+          </p>
+        </div>
+
         <div v-else-if="local.action_type === 'send_delayed'" class="grid gap-3 rounded-md border border-border bg-muted/20 p-2.5">
           <div class="grid gap-1.5">
             <label class="text-sm font-medium text-slate-900">Текст сообщения</label>
@@ -431,6 +468,7 @@ const actionPickerItems = computed<ActionPickerItem[]>(() => [
   fromType('notify_admin'),
   fromType('handoff_to_operator'),
   fromType('set_tag'),
+  fromType('set_variable'),
   fromType('augment_prompt'),
   fromType('set_result'),
   fromType('pause_dialog'),
@@ -661,6 +699,27 @@ const restoreDelay = (raw: unknown) => {
   delayUnit.value = unit || 'seconds'
   delayAmount.value = total / (DELAY_UNITS[delayUnit.value] || 1)
 }
+
+const variableName = computed({
+  get: () => String(local.config.name || ''),
+  set: (value: string) => {
+    local.config = { ...local.config, name: value }
+  },
+})
+
+const variableOperation = computed({
+  get: () => String(local.config.operation || 'set'),
+  set: (value: string) => {
+    local.config = { ...local.config, operation: value }
+  },
+})
+
+const variableValue = computed({
+  get: () => String(local.config.value ?? ''),
+  set: (value: string) => {
+    local.config = { ...local.config, value }
+  },
+})
 
 const delayedText = computed({
   get: () => String(local.config.message || ''),

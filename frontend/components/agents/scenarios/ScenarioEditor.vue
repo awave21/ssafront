@@ -294,6 +294,34 @@
                     Обрывает цепочку: LLM не вызывается, клиент получает этот текст как есть.
                   </p>
                 </div>
+                <div v-else-if="isSetVariableAction(action.action_type)" class="space-y-2">
+                  <div class="grid grid-cols-2 gap-2">
+                    <input
+                      v-model="action.config.name"
+                      type="text"
+                      placeholder="Имя переменной"
+                      class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all"
+                    />
+                    <select
+                      v-model="action.config.operation"
+                      class="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all"
+                    >
+                      <option value="set">Записать значение</option>
+                      <option value="increment">Увеличить на</option>
+                      <option value="clear">Очистить</option>
+                    </select>
+                  </div>
+                  <input
+                    v-if="action.config.operation !== 'clear'"
+                    v-model="action.config.value"
+                    type="text"
+                    placeholder="Значение (можно подставлять переменные)"
+                    class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all"
+                  />
+                  <p class="text-[10px] text-slate-500">
+                    Значение сохраняется в диалоге и доступно дальше по разговору.
+                  </p>
+                </div>
                 <div v-else-if="isNotifyAdminAction(action.action_type)" class="space-y-2">
                   <label class="text-xs font-medium text-slate-500 mb-1 block">Текст уведомления</label>
                   <textarea
@@ -513,6 +541,11 @@ const ensureActionConfig = (action: ScenarioAction, index: number) => {
   }
   if (t === 'set_tag' && typeof cfg.tag !== 'string') cfg.tag = ''
   if (t === 'set_result' && typeof cfg.result !== 'string') cfg.result = ''
+  if (t === 'set_variable') {
+    if (typeof cfg.name !== 'string') cfg.name = ''
+    if (typeof cfg.operation !== 'string') cfg.operation = 'set'
+    if (typeof cfg.value !== 'string') cfg.value = ''
+  }
   if (t === 'notify_admin') {
     if (typeof cfg.message !== 'string') cfg.message = ''
     // Дефолты повторяют раннер: там оба флага читаются как «включено», пока
@@ -695,6 +728,7 @@ const isSetTagAction = (actionType: string): boolean => actionType === 'set_tag'
 const isAugmentPromptAction = (actionType: string): boolean => actionType === 'augment_prompt'
 const isWebhookAction = (actionType: string): boolean => actionType === 'webhook'
 const isSetResultAction = (actionType: string): boolean => actionType === 'set_result'
+const isSetVariableAction = (actionType: string): boolean => actionType === 'set_variable'
 const isNotifyAdminAction = (actionType: string): boolean => actionType === 'notify_admin'
 const isHandoffAction = (actionType: string): boolean => actionType === 'handoff_to_operator'
 </script>

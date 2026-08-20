@@ -11,6 +11,7 @@ export const functionRuleActionTypes = {
   setResult: 'set_result',
   notifyAdmin: 'notify_admin',
   handoffToOperator: 'handoff_to_operator',
+  setVariable: 'set_variable',
   noop: 'noop',
 } as const
 
@@ -36,6 +37,7 @@ export const functionRuleActionLabels: Record<FunctionRuleActionType, string> = 
   send_delayed: 'Отложенное сообщение',
   notify_admin: 'Отправить уведомление админу',
   handoff_to_operator: 'Передать оператору',
+  set_variable: 'Управление переменными',
   set_tag: 'Пометить диалог тегом',
   webhook: 'Отправить вебхук',
   augment_prompt: 'Дополнить промпт',
@@ -58,6 +60,7 @@ export const functionRuleActionDescriptions: Record<FunctionRuleActionType, stri
   send_delayed: 'Отправит сообщение через заданное время',
   notify_admin: 'Сообщение администратору в Telegram',
   handoff_to_operator: 'Ставит диалог на паузу и передаёт человеку',
+  set_variable: 'Запоминает значение на весь диалог',
   set_tag: 'Помечает диалог тегом для фильтров и аналитики',
   webhook: 'HTTP-запрос на ваш URL с данными функции',
   augment_prompt: 'Добавляет инструкцию в промпт перед ответом',

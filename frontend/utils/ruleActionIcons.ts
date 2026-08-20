@@ -1,6 +1,7 @@
 import {
   Ban,
   Bell,
+  Braces,
   CircleSlash,
   CornerDownLeft,
   MessageSquare,
@@ -25,6 +26,7 @@ export const functionRuleActionIcons: Record<FunctionRuleActionType, Component> 
   send_delayed: Timer,
   notify_admin: Bell,
   handoff_to_operator: UserCheck,
+  set_variable: Braces,
   set_tag: Tag,
   webhook: Webhook,
   augment_prompt: Sparkles,

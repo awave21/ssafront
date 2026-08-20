@@ -48,6 +48,7 @@ ActionType = Literal[
     "send_delayed",
     "notify_admin",
     "handoff_to_operator",
+    "set_variable",
 ]
 ActionStatus = Literal["success", "error", "always"]
 

@@ -27,7 +27,12 @@ from app.db.models.tool import Tool
 from app.schemas.auth import AuthContext
 from app.core.config import get_settings
 from app.services.agent_user_state import upsert_agent_user_state
-from app.services.dialog_state import set_dialog_status, upsert_dialog_status_flush_only
+from app.services.dialog_state import (
+    get_dialog_variables,
+    set_dialog_status,
+    set_dialog_variables,
+    upsert_dialog_status_flush_only,
+)
 from app.services.ops_alerts import send_admin_notification, send_manager_pause_alert
 from app.services.semantic_matcher import semantic_match_text
 from app.services.tool_executor import _ensure_allowed_domain, execute_tool_call
@@ -212,6 +217,13 @@ def _render_template(value: Any, context: dict[str, Any]) -> Any:
                 root, *tail = token.split(".")
                 if root in context:
                     return _resolve_path(context[root], tail)
+
+            # Переменные диалога: {{city}} работает наравне с {{variables.city}}.
+            # Ищем до tool-payload'ов — имя переменной человек задал явно, и оно
+            # не должно перекрываться случайным одноимённым полем из ответа тула.
+            dialog_variables = context.get("variables")
+            if isinstance(dialog_variables, dict) and token in dialog_variables:
+                return dialog_variables.get(token)
 
             # Backward compatibility: allow {{field}} to be resolved
             # from tool payload contexts if the key is not top-level.
@@ -762,6 +774,49 @@ async def execute_post_actions(
                 )
                 continue
 
+            if action.action_type == "set_variable":
+                name = str(cfg.get("name", "")).strip()
+                if not name:
+                    results.append(
+                        ActionResult(action.id, action.action_type, "skipped", {"reason": "empty_name"})
+                    )
+                    continue
+                variables = dict(output_context.get("variables") or {})
+                operation = str(cfg.get("operation", "set")).strip().lower()
+
+                if operation == "clear":
+                    variables.pop(name, None)
+                    new_value: Any = None
+                elif operation == "increment":
+                    try:
+                        step = float(_render_template(str(cfg.get("value", "1")), output_context))
+                    except (TypeError, ValueError):
+                        step = 1.0
+                    try:
+                        current = float(variables.get(name, 0) or 0)
+                    except (TypeError, ValueError):
+                        current = 0.0
+                    total = current + step
+                    # Целые держим целыми, иначе счётчики превращаются в 3.0.
+                    new_value = int(total) if float(total).is_integer() else total
+                    variables[name] = new_value
+                else:
+                    operation = "set"
+                    new_value = _render_template(str(cfg.get("value", "")), output_context)
+                    variables[name] = new_value
+
+                output_context["variables"] = variables
+                output_context["variables_dirty"] = True
+                results.append(
+                    ActionResult(
+                        action.id,
+                        action.action_type,
+                        "success",
+                        {"name": name, "operation": operation, "value": new_value},
+                    )
+                )
+                continue
+
             if action.action_type == "augment_prompt":
                 extra = str(cfg.get("instruction", "")).strip()
                 if extra:
@@ -1042,6 +1097,13 @@ async def run_rules_for_phase(
     context_data.setdefault("message", message)
     if not rules_enabled:
         return [], context_data
+    # Переменные диалога кладём в контекст до перебора правил: они доступны
+    # в шаблонах {{...}} всех действий и реакций. Ключ мог прийти снаружи
+    # (тестовый прогон правил) — тогда не перетираем.
+    if "variables" not in context_data:
+        context_data["variables"] = await get_dialog_variables(
+            db, agent_id=agent_id, session_id=session_id
+        )
     stmt = (
         select(FunctionRule)
         .options(selectinload(FunctionRule.actions))
@@ -1264,5 +1326,18 @@ async def run_rules_for_phase(
                 actions=action_traces,
             )
         )
+
+    # Сохраняем переменные один раз в конце, а не после каждого set_variable:
+    # правила в одной фазе видят изменения друг друга через context_data,
+    # а в базу уходит одна запись вместо нескольких.
+    if context_data.get("variables_dirty"):
+        await set_dialog_variables(
+            db,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            variables=dict(context_data.get("variables") or {}),
+        )
+        context_data.pop("variables_dirty", None)
 
     return traces, context_data
