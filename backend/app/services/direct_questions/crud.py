@@ -266,11 +266,10 @@ async def reembed_agent_direct_questions(
             continue
         computed.append((question_id, new_embedding))
 
-    # Двойной каст — рабочий приём этого кода (см. retrieval.py): внутренний
-    # AS text заставляет asyncpg считать параметр текстом и не звать кодек
-    # pgvector, который ждёт список; наружный уже средствами Postgres
-    # превращает текст в вектор. Через values(embedding=...) не выходит:
-    # тип SQLAlchemy сериализует вектор в строку, а кодек её отвергает.
+    # Двойной каст — приём, которым весь этот код обходил конфликт кодека
+    # pgvector с типом SQLAlchemy (см. retrieval.py, hybrid_search.py и др.).
+    # Сам конфликт устранён в app/db/session.py, но запись оставлена такой:
+    # она работает и с кодеком, и без него.
     for question_id, embedding in computed:
         await db.execute(
             text(
