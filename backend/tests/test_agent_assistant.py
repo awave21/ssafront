@@ -337,10 +337,17 @@ class _FakeAgent:
         self.system_prompt = system_prompt
         self.model_settings = model_settings
         self.user_prompt: str | None = None
+        self.registered: dict[str, object] = {}
         _FakeAgent.last = self
 
-    async def run(self, user_prompt: str):
+    def tool_plain(self, func):
+        """Повторяет контракт PydanticAI: декоратор возвращает саму функцию."""
+        self.registered[func.__name__] = func
+        return func
+
+    async def run(self, user_prompt: str, usage_limits=None):
         self.user_prompt = user_prompt
+        self.usage_limits = usage_limits
         return _FakeResult(_FakeAgent.reply or service.AssistantOutput(message="ок"))
 
 
@@ -358,6 +365,53 @@ def _run_assistant(monkeypatch, *, reply=None, **overrides):
     }
     kwargs.update(overrides)
     return asyncio.run(service.run_assistant(**kwargs))
+
+
+def _tools(calls: dict) -> service.AssistantTools:
+    async def read_prompt() -> str:
+        calls["prompt"] = calls.get("prompt", 0) + 1
+        return "# РОЛЬ\nТы админ клиники"
+
+    async def read_activity(days: int = 30) -> str:
+        calls["activity"] = days
+        return "## Как агент работает"
+
+    async def read_dialogs(limit: int = 3) -> str:
+        calls["dialogs"] = limit
+        return "### Диалог 1"
+
+    return service.AssistantTools(
+        read_prompt=read_prompt, read_activity=read_activity, read_dialogs=read_dialogs
+    )
+
+
+def test_tools_are_registered_and_callable(monkeypatch) -> None:
+    calls: dict = {}
+    _run_assistant(monkeypatch, tools=_tools(calls))
+
+    registered = _FakeAgent.last.registered
+    assert set(registered) == {"get_prompt_text", "get_activity", "get_dialogs"}
+
+    assert asyncio.run(registered["get_prompt_text"]()) == "# РОЛЬ\nТы админ клиники"
+    assert asyncio.run(registered["get_activity"](7)) == "## Как агент работает"
+    assert calls["activity"] == 7
+    assert asyncio.run(registered["get_dialogs"]()) == "### Диалог 1"
+    # Значение по умолчанию должно доехать до реализации, а не потеряться.
+    assert calls["dialogs"] == 3
+
+
+def test_no_tools_registered_when_bundle_missing(monkeypatch) -> None:
+    # Тесты и офлайн-прогоны зовут сервис без инструментов — он не должен падать.
+    _run_assistant(monkeypatch)
+
+    assert _FakeAgent.last.registered == {}
+
+
+def test_tool_round_trips_are_capped(monkeypatch) -> None:
+    _run_assistant(monkeypatch, tools=_tools({}))
+
+    limits = _FakeAgent.last.usage_limits
+    assert limits is None or limits.request_limit == service.MAX_TOOL_REQUESTS
 
 
 def test_run_assistant_puts_question_and_catalogs_into_prompt(monkeypatch) -> None:

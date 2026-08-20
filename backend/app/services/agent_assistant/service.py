@@ -6,6 +6,7 @@ monkeypatch'ем и не уходит в сеть. У prompt_trainer импор�
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,7 +28,16 @@ try:  # pragma: no cover
 except ImportError:  # pragma: no cover
     OpenAIChatModelSettings = None
 
+try:  # pragma: no cover
+    from pydantic_ai.usage import UsageLimits
+except ImportError:  # pragma: no cover
+    UsageLimits = None
+
 logger = structlog.get_logger(__name__)
+
+# Каждый вызов инструмента — лишний круг к модели и лишние секунды ожидания
+# в чате. Потолок держим низким осознанно.
+MAX_TOOL_REQUESTS = 5
 
 MAX_SUGGESTIONS = 3
 MAX_FOLLOWUPS = 3
@@ -113,13 +123,22 @@ SYSTEM_PROMPT = """Ты — помощник по конструктору AI-а
 инструментов, Обработка неопределённости, Политика коммуникации). Авторская
 разметка при этом теряется — предупреждай об этом того, кто собрал промпт руками.
 
-# Как агент работает на самом деле
+# Что ты можешь посмотреть сам
 
-В контексте есть блок «Как агент работает» — агрегат за последние 30 дней.
-Используй его, когда спрашивают, почему агент отвечает плохо. Если видишь в нём
-явную поломку, скажи о ней сам, даже если спросили о другом.
+В контексте лежит только сводка. Детали запрашивай инструментами: без данных
+ответ будет гаданием, но и звать их на общий вопрос («чем функция отличается от
+сценария») не нужно. Больше двух-трёх вызовов подряд не делай — человек ждёт
+ответа в чате.
 
-На что смотреть:
+- `get_prompt_text()` — полный текст системного промпта. В контексте есть только
+  заголовки, поэтому «проверь мой промпт» без этого вызова не отработать.
+- `get_activity(days)` — как агент работал: падения, зависшие запуски, вызовы
+  инструментов, пустые ответы. Нужен на любой вопрос «почему работает плохо».
+- `get_dialogs(limit)` — расшифровки последних диалогов с клиентами.
+
+Если инструмент вернул поломку, скажи о ней, даже когда спросили о другом.
+
+На что смотреть в ответе `get_activity`:
 
 - Ошибки запусков. Текст ошибки почти всегда прямо называет причину: модель
   недоступна организации, кончилась квота, упёрлись в лимит вызовов инструментов.
@@ -195,6 +214,19 @@ class AssistantOutput(BaseModel):
     message: str
     suggestions: list[AssistantSuggestion] = Field(default_factory=list)
     followups: list[str] = Field(default_factory=list)
+
+
+@dataclass(slots=True)
+class AssistantTools:
+    """Что помощник может посмотреть сам.
+
+    Не БД и не ORM, а готовые функции: сервис не должен знать про сессии, а тест
+    подставляет заглушки одной строкой.
+    """
+
+    read_prompt: Callable[[], Awaitable[str]]
+    read_activity: Callable[[int], Awaitable[str]]
+    read_dialogs: Callable[[int], Awaitable[str]]
 
 
 @dataclass(slots=True)
@@ -298,6 +330,7 @@ async def run_assistant(
     scenario_presets: list[AssistantCatalogItem],
     model_name: str,
     page: str | None = None,
+    tools: AssistantTools | None = None,
     reasoning_effort: str | None = None,
     openai_api_key: str | None = None,
     anthropic_api_key: str | None = None,
@@ -324,6 +357,37 @@ async def run_assistant(
         model_settings=model_settings,
     )
 
+    if tools is not None:
+        # Докстринги уходят в описание инструмента — модель решает по ним,
+        # звать ли. Пишем их как инструкцию, а не как комментарий к коду.
+        @assistant.tool_plain
+        async def get_prompt_text() -> str:
+            """Полный текст системного промпта агента.
+
+            Вызывай, когда просят проверить, улучшить или объяснить промпт:
+            в контексте есть только его заголовки, самого текста там нет.
+            """
+            return await tools.read_prompt()
+
+        @assistant.tool_plain
+        async def get_activity(days: int = 30) -> str:
+            """Как агент работал за последние `days` дней.
+
+            Запуски, падения с текстом ошибки, зависшие, вызовы каждого
+            инструмента с числом пустых ответов, запуски без единого вызова.
+            Вызывай на любой вопрос про то, почему агент работает плохо.
+            """
+            return await tools.read_activity(days)
+
+        @assistant.tool_plain
+        async def get_dialogs(limit: int = 3) -> str:
+            """Расшифровки последних диалогов агента с клиентами.
+
+            Вызывай, когда спрашивают, как агент разговаривает, почему отвечает
+            не так или теряет клиента.
+            """
+            return await tools.read_dialogs(limit)
+
     user_prompt = build_user_prompt(
         question=question,
         history=history,
@@ -342,7 +406,10 @@ async def run_assistant(
         prompt_chars=len(user_prompt),
     )
 
-    result = await assistant.run(user_prompt)
+    result = await assistant.run(
+        user_prompt,
+        usage_limits=UsageLimits(request_limit=MAX_TOOL_REQUESTS) if UsageLimits else None,
+    )
     output = result.output if hasattr(result, "output") else result.data
     clamped = _clamp(
         output,

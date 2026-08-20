@@ -27,13 +27,18 @@ from app.services.agent_assistant import (
     run_assistant,
     sanitize_actions,
 )
-from app.services.agent_assistant.service import AssistantRunResult
+from app.services.agent_assistant.dialogs import load_recent_dialogs, render_dialogs
+from app.services.agent_assistant.service import AssistantRunResult, AssistantTools
 from app.services.runtime.model_resolver import provider_prefix_from_model_name
 from app.services.tenant_balance import apply_balance_charge
 from app.services.tenant_llm_config import get_decrypted_api_key
 from app.services.token_costing import apply_fallback_costs
 
 logger = structlog.get_logger(__name__)
+
+# Промпты бывают на десять тысяч символов — в ответ инструмента отдаём
+# ограниченный кусок, иначе один вызов съест весь контекст.
+PROMPT_TEXT_LIMIT = 12000
 
 router = APIRouter()
 
@@ -46,6 +51,41 @@ def _normalize_model(model: str | None) -> str | None:
     if not normalized or normalized == "string":
         return None
     return normalized
+
+
+def _build_tools(db: AsyncSession, agent) -> AssistantTools:
+    """Инструменты помощника, привязанные к текущему агенту.
+
+    Сессия живёт до конца запроса, а инструменты вызываются внутри него —
+    закрывать её вручную не нужно. Ошибку каждого инструмента возвращаем
+    текстом: упавший инструмент не должен ронять весь ответ.
+    """
+
+    async def read_prompt() -> str:
+        text = (agent.system_prompt or "").strip()
+        if not text:
+            return "Системный промпт пуст."
+        return text[:PROMPT_TEXT_LIMIT]
+
+    async def read_activity(days: int = 30) -> str:
+        try:
+            snapshot = await build_activity_snapshot(db, agent=agent, days=max(1, min(days, 90)))
+            return render_activity(snapshot)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("assistant_tool_activity_failed", agent_id=str(agent.id), error=str(exc))
+            return "Не удалось получить статистику работы агента."
+
+    async def read_dialogs(limit: int = 3) -> str:
+        try:
+            dialogs = await load_recent_dialogs(db, agent=agent, limit=limit)
+            return render_dialogs(dialogs)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("assistant_tool_dialogs_failed", agent_id=str(agent.id), error=str(exc))
+            return "Не удалось получить диалоги агента."
+
+    return AssistantTools(
+        read_prompt=read_prompt, read_activity=read_activity, read_dialogs=read_dialogs
+    )
 
 
 def _describe_page(payload: AssistantChatRequest) -> str | None:
@@ -140,16 +180,6 @@ async def assistant_chat(
     snapshot = await build_agent_snapshot(db, agent=agent)
     snapshot_text = render_snapshot(snapshot)
 
-    # Агрегат по запускам — сырой SQL, и падать из-за него целиком незачем:
-    # без него помощник просто вернётся к советам по настройкам.
-    try:
-        activity = await build_activity_snapshot(db, agent=agent)
-        snapshot_text = f"{snapshot_text}\n\n{render_activity(activity)}"
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "agent_assistant_activity_failed", agent_id=str(agent.id), error=str(exc)
-        )
-
     try:
         result = await run_assistant(
             question=payload.message,
@@ -160,6 +190,7 @@ async def assistant_chat(
             scenario_presets=payload.scenario_presets,
             model_name=effective_model,
             page=_describe_page(payload),
+            tools=_build_tools(db, agent),
             reasoning_effort=settings.agent_assistant_reasoning_effort,
             openai_api_key=openai_api_key,
             anthropic_api_key=anthropic_api_key,
