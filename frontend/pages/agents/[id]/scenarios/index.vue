@@ -26,6 +26,15 @@
       @close="showEditor = false"
       @save="handleSaveScenario"
     />
+
+    <ConfirmDialog
+      :open="Boolean(scenarioPendingDelete)"
+      :title="`Удалить сценарий «${scenarioPendingDelete?.name || 'Без названия'}»?`"
+      description="Сценарий и его действия будут удалены безвозвратно."
+      :busy="deleteInProgress"
+      @update:open="!$event && (scenarioPendingDelete = null)"
+      @confirm="confirmDeleteScenario"
+    />
   </AgentPageShell>
 </template>
 
@@ -37,6 +46,7 @@ import type { ScenarioPreset } from '~/utils/scenarioPresets'
 import AgentPageShell from '~/components/agents/AgentPageShell.vue'
 import ScenariosList from '~/components/agents/scenarios/ScenariosList.vue'
 import ScenarioEditor from '~/components/agents/scenarios/ScenarioEditor.vue'
+import ConfirmDialog from '~/components/common/ConfirmDialog.vue'
 import { useScenarios } from '~/composables/useScenarios'
 import { useToast } from '~/composables/useToast'
 import type { Scenario, ScenarioUpsertPayload } from '~/types/scenario'
@@ -56,6 +66,8 @@ const showEditor = ref(false)
 const selectedScenario = ref<Scenario | null>(null)
 const saveInProgress = ref(false)
 const activePreset = ref<ScenarioPreset | null>(null)
+const scenarioPendingDelete = ref<Scenario | null>(null)
+const deleteInProgress = ref(false)
 
 const handleCreateScenario = () => {
   selectedScenario.value = null
@@ -73,13 +85,30 @@ const handleSelectScenario = (scenario: Scenario) => {
   showEditor.value = true
 }
 
-const handleDeleteScenario = async (scenario: Scenario) => {
-  if (!confirm(`Вы уверены, что хотите удалить сценарий «${scenario.name}»?`)) return
+const handleDeleteScenario = (scenario: Scenario) => {
+  scenarioPendingDelete.value = scenario
+}
+
+const confirmDeleteScenario = async () => {
+  const scenario = scenarioPendingDelete.value
+  if (!scenario || deleteInProgress.value) return
+
+  // Убираем карточку сразу: пустая пауза до ответа сервера читается как
+  // «кнопка не сработала». При ошибке возвращаем на прежнее место.
+  const index = scenarios.value.findIndex((item) => item.id === scenario.id)
+  const snapshot = index >= 0 ? scenarios.value[index] : null
+  if (index >= 0) scenarios.value.splice(index, 1)
+
+  scenarioPendingDelete.value = null
+  deleteInProgress.value = true
   try {
     await deleteScenario(scenario.id)
-    toastSuccess('Сценарий удален')
+    toastSuccess('Сценарий удалён', scenario.name)
   } catch (err: any) {
-    toastError(err.message || 'Не удалось удалить сценарий')
+    if (snapshot) scenarios.value.splice(index, 0, snapshot)
+    toastError('Не удалось удалить сценарий', err?.message || '')
+  } finally {
+    deleteInProgress.value = false
   }
 }
 
