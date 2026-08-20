@@ -55,7 +55,7 @@
       <RulesKillSwitchCard :loading="rulesLoading || rulesSaving" :can-edit="canEditAgents" @kill-switch="runKillSwitch" />
     </div>
 
-    <RuleActionFormDialog
+    <RuleActionEditor
       :open="isActionDialogOpen"
       :model="editingAction"
       @update:open="isActionDialogOpen = $event"
@@ -78,7 +78,7 @@ import FunctionRuleForm from '~/components/agents/function-rules/FunctionRuleFor
 import FunctionRuleTestPanel from '~/components/agents/function-rules/FunctionRuleTestPanel.vue'
 import DialogTagsPanel from '~/components/agents/function-rules/DialogTagsPanel.vue'
 import RulesKillSwitchCard from '~/components/agents/function-rules/RulesKillSwitchCard.vue'
-import RuleActionFormDialog from '~/components/agents/function-rules/RuleActionFormDialog.vue'
+import RuleActionEditor from '~/components/agents/function-rules/RuleActionEditor.vue'
 import type { Tool } from '~/types/tool'
 import type { FunctionRule } from '~/types/functionRule'
 import type { FunctionRuleTestRequest } from '~/types/functionRuleTest'

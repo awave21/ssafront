@@ -49,6 +49,8 @@ export const scenarioActionTypes = {
   setResult: 'set_result',
   noop: 'noop',
   sendDelayed: 'send_delayed',
+  notifyAdmin: 'notify_admin',
+  handoffToOperator: 'handoff_to_operator',
 } as const
 
 export type ScenarioActionType = (typeof scenarioActionTypes)[keyof typeof scenarioActionTypes]

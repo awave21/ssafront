@@ -1,58 +1,32 @@
 <template>
-  <Sheet :open="open" @update:open="$emit('update:open', $event)">
-    <SheetContent side="right" class-name="w-full sm:max-w-[760px] flex flex-col">
-      <SheetHeader>
-        <div class="flex items-center justify-between">
-          <SheetTitle>{{ model?.id ? 'Редактировать действие' : 'Новое действие' }}</SheetTitle>
-          <SheetClose />
+  <div v-if="open" class="rounded-2xl border border-slate-100 bg-slate-100 p-5">
+    <div class="mb-4 flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <div class="text-sm font-semibold text-slate-900">
+          {{ model?.id ? 'Редактирование действия' : 'Новое действие' }}
         </div>
-        <SheetDescription>
-          Настройте действие, условия его выполнения и необходимые параметры.
-        </SheetDescription>
-      </SheetHeader>
+        <div class="mt-0.5 text-xs text-slate-500">
+          Выберите действие и настройте параметры — они сохранятся вместе с функцией.
+        </div>
+      </div>
+      <button
+        type="button"
+        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
+        title="Закрыть"
+        @click="$emit('update:open', false)"
+      >
+        <X class="h-4 w-4" />
+      </button>
+    </div>
 
-      <div class="flex flex-col gap-3 py-3 px-6 flex-1 overflow-y-auto">
-        <div class="grid gap-1.5">
+      <div class="flex flex-col gap-3">
+        <div class="grid gap-2">
           <label class="text-sm font-medium text-slate-900">Действие</label>
-          <Select :model-value="actionPreset" @update:model-value="onSelectPreset">
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="webhook_api_call">API вызов (Webhook)</SelectItem>
-              <SelectItem value="webhook_delayed_message" disabled>Отправить отложенное сообщение (скоро)</SelectItem>
-              <SelectItem value="webhook_admin_message" disabled>Отправить сообщение админу в мессенджер (скоро)</SelectItem>
-              <SelectItem value="set_tag" disabled>Установить тег (скоро)</SelectItem>
-              <SelectItem value="send_message" disabled>Отправить сообщение (скоро)</SelectItem>
-              <SelectItem value="set_result" disabled>Задать результат функции (скоро)</SelectItem>
-              <SelectItem value="noop">Ничего не делать</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div class="grid gap-2 md:grid-cols-2">
-          <div class="grid gap-1.5">
-            <label class="text-sm font-medium text-slate-900">Когда выполнять</label>
-            <Select :model-value="local.on_status" @update:model-value="local.on_status = $event as any">
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="success">При успехе</SelectItem>
-                <SelectItem value="error">При ошибке</SelectItem>
-                <SelectItem value="always">Всегда</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="grid gap-1.5">
-            <label class="text-sm font-medium text-slate-900">Порядок выполнения</label>
-            <Input v-model.number="local.order_index" type="number" min="1" />
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2">
-          <div class="text-sm text-slate-700">Включено</div>
-          <Switch :model-value="local.enabled" @update:model-value="local.enabled = !!$event" />
+          <ActionTypePicker
+            :items="actionPickerItems"
+            :model-value="actionPreset"
+            @update:model-value="onSelectPreset"
+          />
         </div>
 
         <div v-if="local.action_type === 'send_message'" class="grid gap-1.5">
@@ -68,6 +42,66 @@
           <div class="grid gap-1.5">
             <label class="text-sm font-medium text-slate-900">Уверенность (опц.)</label>
             <Input v-model.number="tagConfidence" type="number" min="0" max="1" step="0.01" />
+          </div>
+        </div>
+
+        <div v-else-if="local.action_type === 'notify_admin'" class="grid gap-3 rounded-md border border-border bg-muted/20 p-2.5">
+          <div class="grid gap-1.5">
+            <label class="text-sm font-medium text-slate-900">Текст уведомления</label>
+            <Textarea
+              v-model="adminMessage"
+              placeholder="Например: клиент запросил счёт — нужен менеджер"
+            />
+            <p v-pre class="text-xs text-muted-foreground">
+              Можно подставлять значения из контекста: <code class="rounded bg-slate-100 px-1">{{result}}</code>,
+              <code class="rounded bg-slate-100 px-1">{{last_user_message}}</code> и параметры функции.
+            </p>
+          </div>
+
+          <div class="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2">
+            <div class="text-sm text-slate-700">Приложить последнее сообщение клиента</div>
+            <Switch :model-value="adminIncludeContext" @update:model-value="adminIncludeContext = !!$event" />
+          </div>
+
+          <div class="grid gap-2 md:grid-cols-2">
+            <div class="grid gap-1.5">
+              <label class="text-sm font-medium text-slate-900">Chat ID (опц.)</label>
+              <Input v-model="adminChatId" placeholder="из настроек агента" />
+            </div>
+            <div class="grid gap-1.5">
+              <label class="text-sm font-medium text-slate-900">Токен бота (опц.)</label>
+              <Input v-model="adminBotToken" placeholder="из настроек агента" />
+            </div>
+          </div>
+
+          <p class="text-xs text-muted-foreground">
+            Если оба поля пустые — берутся уведомления из настроек агента, и они должны быть включены.
+            Заполненная пара «Chat ID + токен» отправит сообщение в свой чат даже при выключенном общем тумблере.
+          </p>
+        </div>
+
+        <div v-else-if="local.action_type === 'handoff_to_operator'" class="grid gap-3 rounded-md border border-border bg-muted/20 p-2.5">
+          <p class="text-xs text-muted-foreground">
+            Ставит диалог на паузу, чтобы агент перестал отвечать, и передаёт разговор человеку.
+            Снять паузу можно из карточки диалога или действием «Возобновить диалог».
+          </p>
+
+          <div class="grid gap-1.5">
+            <label class="text-sm font-medium text-slate-900">Сообщение клиенту (опц.)</label>
+            <Textarea
+              v-model="handoffClientMessage"
+              placeholder="Например: передаю вас администратору, он ответит в ближайшее время"
+            />
+          </div>
+
+          <div class="grid gap-1.5">
+            <label class="text-sm font-medium text-slate-900">Причина для администратора</label>
+            <Input v-model="handoffReason" placeholder="Например: запрос на возврат средств" />
+          </div>
+
+          <div class="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2">
+            <div class="text-sm text-slate-700">Уведомить администратора в Telegram</div>
+            <Switch :model-value="handoffNotifyAdmin" @update:model-value="handoffNotifyAdmin = !!$event" />
           </div>
         </div>
 
@@ -235,24 +269,95 @@
           <Textarea v-model="promptText" placeholder="Что добавить в промпт..." />
         </div>
 
-        <div v-else-if="local.action_type === 'set_result'" class="grid gap-2 md:grid-cols-2">
+        <div v-else-if="local.action_type === 'set_result'" class="grid gap-1.5">
+          <label class="text-sm font-medium text-slate-900">Готовый ответ</label>
+          <Textarea v-model="resultValue" placeholder="Текст, который уйдёт клиенту вместо ответа модели" />
+          <p class="text-xs text-muted-foreground">
+            Обрывает цепочку: модель не вызывается, клиент получает этот текст как есть.
+          </p>
+        </div>
+
+        <div v-else-if="local.action_type === 'send_delayed'" class="grid gap-3 rounded-md border border-border bg-muted/20 p-2.5">
           <div class="grid gap-1.5">
-            <label class="text-sm font-medium text-slate-900">Ключ</label>
-            <Input v-model="resultKey" placeholder="result_key" />
+            <label class="text-sm font-medium text-slate-900">Текст сообщения</label>
+            <Textarea v-model="delayedText" placeholder="Например: напоминаем о вашей записи завтра в 15:00" />
           </div>
-          <div class="grid gap-1.5">
-            <label class="text-sm font-medium text-slate-900">Значение</label>
-            <Input v-model="resultValue" placeholder="value" />
+          <div class="grid gap-2 md:grid-cols-2">
+            <div class="grid gap-1.5">
+              <label class="text-sm font-medium text-slate-900">Через</label>
+              <Input
+                :model-value="delayAmount"
+                type="number"
+                min="1"
+                @update:model-value="delayAmount = Number($event); syncDelay()"
+              />
+            </div>
+            <div class="grid gap-1.5">
+              <label class="text-sm font-medium text-slate-900">Единица</label>
+              <Select :model-value="delayUnit" @update:model-value="delayUnit = String($event); syncDelay()">
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="seconds">секунд</SelectItem>
+                  <SelectItem value="minutes">минут</SelectItem>
+                  <SelectItem value="hours">часов</SelectItem>
+                  <SelectItem value="days">дней</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            Сообщение поставится в очередь и уйдёт отдельно, без участия модели. Максимум — 7 дней.
+          </p>
+        </div>
+
+        <div
+          v-else-if="noConfigHint"
+          class="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground"
+        >
+          {{ noConfigHint }}
+        </div>
+
+        <!-- Общие поля идут после параметров действия: сначала «что делаем»
+             и чем это настраивается, потом «когда и в каком порядке». -->
+        <div v-if="actionPreset" class="grid gap-3 border-t border-slate-200 pt-4">
+          <div class="text-[9px] font-black uppercase tracking-wider text-slate-400">
+            Условия выполнения
+          </div>
+
+          <div class="grid gap-2 md:grid-cols-2">
+            <div class="grid gap-1.5">
+              <label class="text-sm font-medium text-slate-900">Когда выполнять</label>
+              <Select :model-value="local.on_status" @update:model-value="local.on_status = $event as any">
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="success">При успехе</SelectItem>
+                  <SelectItem value="error">При ошибке</SelectItem>
+                  <SelectItem value="always">Всегда</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="grid gap-1.5">
+              <label class="text-sm font-medium text-slate-900">Порядок выполнения</label>
+              <Input v-model.number="local.order_index" type="number" min="1" />
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2">
+            <div class="text-sm text-slate-700">Включено</div>
+            <Switch :model-value="local.enabled" @update:model-value="local.enabled = !!$event" />
           </div>
         </div>
-      </div>
 
-      <SheetFooter class-name="mt-2 flex justify-end gap-2">
-        <Button variant="outline" @click="$emit('update:open', false)">Отмена</Button>
-        <Button @click="submitAction">Сохранить</Button>
-      </SheetFooter>
-    </SheetContent>
-  </Sheet>
+        <div class="mt-2 flex justify-end gap-2 border-t border-slate-200 pt-4">
+          <Button variant="outline" @click="$emit('update:open', false)">Отмена</Button>
+          <Button :disabled="!actionPreset" @click="submitAction">Сохранить действие</Button>
+        </div>
+      </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -262,8 +367,14 @@ import { Input } from '~/components/ui/input'
 import { Textarea } from '~/components/ui/textarea'
 import { Switch } from '~/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select'
-import { Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '~/components/ui/sheet'
-import type { FunctionRuleAction } from '~/types/ruleAction'
+import { X } from 'lucide-vue-next'
+import ActionTypePicker, { type ActionPickerItem } from '~/components/agents/function-rules/ActionTypePicker.vue'
+import {
+  functionRuleActionDescriptions,
+  functionRuleActionLabels,
+  type FunctionRuleAction,
+} from '~/types/ruleAction'
+import { functionRuleActionIcons } from '~/utils/ruleActionIcons'
 import type { Tool } from '~/types/tool'
 
 const props = defineProps<{
@@ -288,7 +399,61 @@ const local = reactive<FunctionRuleAction>({
   order_index: 1,
   config: {},
 })
-const actionPreset = ref<string>('noop')
+// Пусто = действие ещё не выбрано. Раньше по умолчанию стоял noop, и можно было
+// случайно сохранить пустышку, ничего не нажав.
+const actionPreset = ref<string>('')
+
+/** Карточка для действия, у которого есть готовые подпись, описание и иконка. */
+const fromType = (
+  type: keyof typeof functionRuleActionLabels,
+  extra: Partial<ActionPickerItem> = {},
+): ActionPickerItem => ({
+  value: type,
+  label: functionRuleActionLabels[type],
+  description: functionRuleActionDescriptions[type],
+  icon: functionRuleActionIcons[type],
+  ...extra,
+})
+
+// Пресет `webhook_api_call` — не тип действия, а вариант действия webhook: он
+// раскладывается в action_type='webhook' + config.action_kind (см. onSelectPreset).
+// Остальные карточки — обычные типы действий, все поддержаны раннером.
+// Порядок: сначала то, что шлёт сообщения, потом контекст, потом управление диалогом.
+const actionPickerItems = computed<ActionPickerItem[]>(() => [
+  {
+    value: 'webhook_api_call',
+    label: 'API вызов (Webhook)',
+    description: functionRuleActionDescriptions.webhook,
+    icon: functionRuleActionIcons.webhook,
+  },
+  fromType('send_message'),
+  fromType('send_delayed'),
+  fromType('notify_admin'),
+  fromType('handoff_to_operator'),
+  fromType('set_tag'),
+  fromType('augment_prompt'),
+  fromType('set_result'),
+  fromType('pause_dialog'),
+  fromType('resume_dialog'),
+  fromType('block_user'),
+  fromType('unblock_user'),
+  fromType('noop'),
+])
+
+/** Действия без параметров — показываем пояснение вместо пустого блока. */
+const NO_CONFIG_HINTS: Record<string, string> = {
+  pause_dialog: 'Агент перестанет отвечать в этом диалоге. Снять паузу можно из карточки диалога или действием «Возобновить диалог».',
+  resume_dialog: 'Диалог вернётся в работу, агент снова начнёт отвечать.',
+  block_user: 'Агент будет отключён для этого пользователя во всех его диалогах, пока блокировку не снимут.',
+  unblock_user: 'Снимает блокировку — агент снова обслуживает пользователя.',
+  noop: 'Действие ничего не делает. Используется как отметка в журнале выполнения правила.',
+}
+
+// Пока действие не выбрано, local.action_type ещё держит стартовый 'noop' —
+// без этой проверки подсказка про «ничего не делает» показывалась бы сразу.
+const noConfigHint = computed(() =>
+  actionPreset.value ? NO_CONFIG_HINTS[local.action_type] || '' : '',
+)
 
 const availableWebhookTools = computed(() =>
   (props.tools || []).filter(
@@ -369,6 +534,57 @@ const tagConfidence = computed({
   },
 })
 
+const adminMessage = computed({
+  get: () => String(local.config.message || ''),
+  set: (value: string) => {
+    local.config = { ...local.config, message: value }
+  },
+})
+
+// include_context по умолчанию true — как и в раннере, чтобы галка в UI
+// совпадала с фактическим поведением у действий, созданных до этого поля.
+const adminIncludeContext = computed({
+  get: () => local.config.include_context !== false,
+  set: (value: boolean) => {
+    local.config = { ...local.config, include_context: value }
+  },
+})
+
+const adminChatId = computed({
+  get: () => String(local.config.chat_id || ''),
+  set: (value: string) => {
+    local.config = { ...local.config, chat_id: value }
+  },
+})
+
+const adminBotToken = computed({
+  get: () => String(local.config.bot_token || ''),
+  set: (value: string) => {
+    local.config = { ...local.config, bot_token: value }
+  },
+})
+
+const handoffClientMessage = computed({
+  get: () => String(local.config.client_message || ''),
+  set: (value: string) => {
+    local.config = { ...local.config, client_message: value }
+  },
+})
+
+const handoffReason = computed({
+  get: () => String(local.config.reason || ''),
+  set: (value: string) => {
+    local.config = { ...local.config, reason: value }
+  },
+})
+
+const handoffNotifyAdmin = computed({
+  get: () => local.config.notify_admin !== false,
+  set: (value: boolean) => {
+    local.config = { ...local.config, notify_admin: value }
+  },
+})
+
 const webhookUrl = computed({
   get: () => String(local.config.url || ''),
   set: (value: string) => {
@@ -420,10 +636,36 @@ const promptText = computed({
   },
 })
 
-const resultKey = computed({
-  get: () => String(local.config.key || ''),
+const DELAY_UNITS: Record<string, number> = { seconds: 1, minutes: 60, hours: 3600, days: 86400 }
+const delayAmount = ref(5)
+const delayUnit = ref<string>('minutes')
+
+/** Записывает delay_seconds из пары «число + единица». Раннер клампит 1 сек…7 дней. */
+const syncDelay = () => {
+  const factor = DELAY_UNITS[delayUnit.value] || 1
+  const seconds = Math.round((Number(delayAmount.value) || 0) * factor)
+  local.config = { ...local.config, delay_seconds: Math.min(Math.max(seconds, 1), 86400 * 7) }
+}
+
+/** Раскладывает сохранённые секунды обратно в удобную единицу. */
+const restoreDelay = (raw: unknown) => {
+  const total = Number(raw || 0)
+  if (!total) {
+    delayAmount.value = 5
+    delayUnit.value = 'minutes'
+    return
+  }
+  const unit = (['days', 'hours', 'minutes'] as const).find(
+    (u) => total % DELAY_UNITS[u] === 0,
+  )
+  delayUnit.value = unit || 'seconds'
+  delayAmount.value = total / (DELAY_UNITS[delayUnit.value] || 1)
+}
+
+const delayedText = computed({
+  get: () => String(local.config.message || ''),
   set: (value: string) => {
-    local.config = { ...local.config, key: value }
+    local.config = { ...local.config, message: value }
   },
 })
 
@@ -447,7 +689,7 @@ watch(
         order_index: 1,
         config: {},
       })
-      actionPreset.value = 'noop'
+      actionPreset.value = ''
       return
     }
     Object.assign(local, {
@@ -459,6 +701,7 @@ watch(
     } else {
       actionPreset.value = model.action_type
     }
+    if (model.action_type === 'send_delayed') restoreDelay(model.config?.delay_seconds)
   },
   { immediate: true },
 )
@@ -472,6 +715,7 @@ const onSelectPreset = (value: string) => {
   }
   local.action_type = value as FunctionRuleAction['action_type']
   local.config = {}
+  if (value === 'send_delayed') syncDelay()
 }
 
 const onSelectTool = (value: string) => {

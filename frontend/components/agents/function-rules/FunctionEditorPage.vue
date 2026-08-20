@@ -75,20 +75,22 @@
       Функция не найдена
     </div>
 
-    <RuleActionFormDialog
-      :open="isActionDialogOpen"
-      :model="editingAction"
-      :tools="tools"
-      :rule-variables="ruleVariables"
-      @update:open="isActionDialogOpen = $event"
-      @add-rule-variable="onAddRuleVariable"
-      @submit="saveAction"
-    />
+    <div ref="actionEditorEl">
+      <RuleActionEditor
+        :open="isActionDialogOpen"
+        :model="editingAction"
+        :tools="tools"
+        :rule-variables="ruleVariables"
+        @update:open="isActionDialogOpen = $event"
+        @add-rule-variable="onAddRuleVariable"
+        @submit="saveAction"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, watchEffect } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, watchEffect } from 'vue'
 import { ChevronLeft, Loader2, Zap, BookOpen } from 'lucide-vue-next'
 import { useApiFetch } from '~/composables/useApiFetch'
 import { useFunctionRules } from '~/composables/useFunctionRules'
@@ -99,7 +101,7 @@ import { useLayoutState } from '~/composables/useLayoutState'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import { getReadableErrorMessage } from '~/utils/api-errors'
 import FunctionRuleForm from '~/components/agents/function-rules/FunctionRuleForm.vue'
-import RuleActionFormDialog from '~/components/agents/function-rules/RuleActionFormDialog.vue'
+import RuleActionEditor from '~/components/agents/function-rules/RuleActionEditor.vue'
 import type { Tool } from '~/types/tool'
 import type { FunctionRule } from '~/types/functionRule'
 import type { FunctionRuleAction } from '~/types/ruleAction'
@@ -157,6 +159,7 @@ const editingRule = ref<FunctionRule | null>(null)
 const editingActions = ref<FunctionRuleAction[]>([])
 const editingAction = ref<FunctionRuleAction | null>(null)
 const isActionDialogOpen = ref(false)
+const actionEditorEl = ref<HTMLElement | null>(null)
 const helpOpen = ref(false)
 
 const loading = computed(() => rulesLoading.value)
@@ -410,6 +413,12 @@ const onRuleModelUpdate = (payload: FunctionRule) => {
 const openActionDialog = (action: FunctionRuleAction | null) => {
   editingAction.value = action
   isActionDialogOpen.value = true
+  // Редактор действия раскрывается ниже формы, за пределами экрана — доводим
+  // его до видимой области, иначе клик по «+ Добавить действие» выглядит как
+  // будто ничего не произошло.
+  nextTick(() => {
+    actionEditorEl.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  })
 }
 
 const openActionDialogById = (actionId: string) => {
