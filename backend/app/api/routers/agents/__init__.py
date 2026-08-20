@@ -8,6 +8,7 @@ from app.api.routers.agents.sqns import _build_sqns_client, router as sqns_route
 from app.api.routers.agents.dialogs import router as dialogs_router
 from app.api.routers.agents.messages import router as messages_router
 from app.api.routers.agents.prompt_history import router as prompt_history_router
+from app.api.routers.agents.assistant import router as assistant_router
 from app.api.routers.agents.prompt_training import router as prompt_training_router
 from app.api.routers.agents.function_rules import router as function_rules_router
 from app.api.routers.agents.script_flows import router as script_flows_router
@@ -35,6 +36,7 @@ router.include_router(dialogs_router, prefix="/{agent_id}/dialogs", tags=["dialo
 router.include_router(messages_router, prefix="/{agent_id}/dialogs", tags=["messages"])
 router.include_router(prompt_history_router, prefix="/{agent_id}", tags=["prompt-history"])
 router.include_router(prompt_training_router, prefix="/{agent_id}", tags=["prompt-training"])
+router.include_router(assistant_router, prefix="/{agent_id}", tags=["agent-assistant"])
 router.include_router(function_rules_router, prefix="/{agent_id}", tags=["function-rules"])
 router.include_router(script_flows_router, prefix="/{agent_id}", tags=["script-flows"])
 router.include_router(expert_skills_router, prefix="/{agent_id}", tags=["expert-skills"])

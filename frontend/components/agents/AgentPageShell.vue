@@ -70,6 +70,12 @@
         && isSystemPromptPage
       "
     />
+    <!-- Помощник по конструктору — на всех страницах агента: вопрос «что здесь
+         настроить» возникает в любом разделе, а не только в промпте. -->
+    <AgentAssistantWidget
+      v-if="isAuthenticated && activeAgentId"
+      :agent-id="activeAgentId"
+    />
     </div>
   </div>
 </template>
@@ -85,6 +91,7 @@ import { usePermissions } from '~/composables/usePermissions'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import AuthModal from '~/components/AuthModal.vue'
 import AgentTestChatWidget from '~/components/agents/AgentTestChatWidget.vue'
+import AgentAssistantWidget from '~/components/agents/assistant/AgentAssistantWidget.vue'
 import AgentTabsNav from '~/components/agents/AgentTabsNav.vue'
 
 type Props = {
