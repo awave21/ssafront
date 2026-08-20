@@ -236,9 +236,7 @@ const navigateToCreate = async () => {
 }
 
 const openTemplatesDialog = () => {
-  // Каталог готовых функций пока не реализован — ведём на форму создания.
-  // Когда появится галерея шаблонов, здесь откроется диалог выбора.
-  navigateToCreate()
+  router.push(`/agents/${agentId.value}/functions/catalog`)
 }
 
 const navigateToEdit = (ruleId: string) => {

@@ -91,6 +91,8 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, watchEffect } from 'vue'
+import { useRoute } from 'vue-router'
+import { buildPresetArgsSchema, findFunctionPreset } from '~/utils/functionPresets'
 import { ChevronLeft, Loader2, Zap, BookOpen } from 'lucide-vue-next'
 import { useApiFetch } from '~/composables/useApiFetch'
 import { useFunctionRules } from '~/composables/useFunctionRules'
@@ -115,6 +117,7 @@ const emit = defineEmits<{
   back: []
 }>()
 
+const route = useRoute()
 const apiFetch = useApiFetch()
 const store = useAgentEditorStore()
 const { canEditAgents } = usePermissions()
@@ -382,8 +385,39 @@ const ensureToolForRule = async (rule: FunctionRule): Promise<string | null> => 
 }
 
 const startCreateRule = () => {
-  editingRule.value = createEmptyRule()
-  editingActions.value = []
+  const rule = createEmptyRule()
+  const preset = findFunctionPreset(route.query.preset as string | undefined)
+
+  if (!preset) {
+    editingRule.value = rule
+    editingActions.value = []
+    return
+  }
+
+  rule.name = preset.name
+  rule.condition_config = {
+    ...rule.condition_config,
+    // Форма читает описание из function_description (см. FunctionRuleForm).
+    function_description: preset.functionDescription,
+    tool_args_schema: buildPresetArgsSchema(preset.parameters),
+  }
+  if (preset.reaction_mode) rule.reaction_mode = preset.reaction_mode
+  if (preset.reaction_message) rule.reaction_message = preset.reaction_message
+  if (preset.reaction_instruction) rule.reaction_instruction = preset.reaction_instruction
+  if (preset.post_scenario) rule.post_scenario = preset.post_scenario
+  if (preset.post_scenario_prompt) rule.post_scenario_prompt = preset.post_scenario_prompt
+
+  editingRule.value = rule
+  // Локальные id: действия ещё не сохранены, saveRule отличает их по префиксу.
+  editingActions.value = (preset.actions || []).map((action, index) => ({
+    id: `local_${index}_${Date.now()}`,
+    rule_id: rule.id,
+    action_type: action.action_type,
+    on_status: 'always',
+    enabled: true,
+    order_index: index + 1,
+    config: { ...(action.config || {}) },
+  }))
 }
 
 const startEditRule = async (ruleId: string) => {
