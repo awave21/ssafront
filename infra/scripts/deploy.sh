@@ -72,6 +72,17 @@ fi
 
 cd "$INFRA_DIR"
 
+# Беспарольный sudo: если в .env задан непустой DEPLOY_SUDO_PASSWORD, подключаем
+# askpass-хелпер, и sudo берёт пароль через него (sudo -A) вместо запроса в терминале.
+# Пароль живёт только в infra/.env (вне git, права 600). Явно заданный снаружи
+# SUDO_ASKPASS не перетираем.
+ASKPASS_HELPER="$SCRIPT_DIR/sudo-askpass.sh"
+if [[ -z "${SUDO_ASKPASS:-}" ]] \
+  && [[ -x "$ASKPASS_HELPER" ]] \
+  && grep -qE '^DEPLOY_SUDO_PASSWORD=.+' "$ENV_FILE"; then
+  export SUDO_ASKPASS="$ASKPASS_HELPER"
+fi
+
 _sudo() { if [[ -n "${SUDO_ASKPASS:-}" ]]; then sudo -A "$@"; else sudo "$@"; fi; }
 
 if docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
