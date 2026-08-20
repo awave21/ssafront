@@ -277,6 +277,123 @@
           </p>
         </div>
 
+        <div
+          v-else-if="local.action_type === 'table_find' || local.action_type === 'table_write'"
+          class="grid gap-3 rounded-md border border-border bg-muted/20 p-2.5"
+        >
+          <div class="grid gap-1.5">
+            <label class="text-sm font-medium text-slate-900">Таблица</label>
+            <Select :model-value="tableId" @update:model-value="onSelectTable(String($event))">
+              <SelectTrigger>
+                <SelectValue placeholder="Выберите таблицу" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="t in availableTables" :key="t.id" :value="t.id">
+                  {{ t.name }} · {{ t.records_count }} строк
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p v-if="!availableTables.length" class="text-xs text-muted-foreground">
+              Таблиц пока нет — создайте её в разделе «База знаний → Таблицы».
+            </p>
+          </div>
+
+          <div v-if="tableId && !tableColumns.length" class="text-xs text-muted-foreground">
+            У таблицы нет колонок — добавьте их, чтобы настроить действие.
+          </div>
+
+          <!-- Поиск строки -->
+          <template v-if="local.action_type === 'table_find' && tableColumns.length">
+            <div class="grid gap-2 md:grid-cols-2">
+              <div class="grid gap-1.5">
+                <label class="text-sm font-medium text-slate-900">Искать по колонке</label>
+                <Select :model-value="findColumn" @update:model-value="findColumn = String($event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Колонка" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="c in tableColumns" :key="c.name" :value="c.name">
+                      {{ c.label || c.name }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="grid gap-1.5">
+                <label class="text-sm font-medium text-slate-900">Значение</label>
+                <Input v-model="findValue" placeholder="Например {{client_phone}}" />
+              </div>
+            </div>
+            <div class="grid gap-1.5">
+              <label class="text-sm font-medium text-slate-900">Префикс переменных</label>
+              <Input v-model="findPrefix" placeholder="row" />
+              <p class="text-xs text-muted-foreground">
+                Поля найденной строки лягут в переменные вида
+                <code class="rounded bg-slate-100 px-1">{{ findPrefixPreview }}</code>.
+                Плюс флаг
+                <code class="rounded bg-slate-100 px-1">{{ findFoundPreview }}</code>,
+                по которому можно ветвить дальнейшие действия.
+              </p>
+            </div>
+          </template>
+
+          <!-- Запись строки -->
+          <template v-if="local.action_type === 'table_write' && tableColumns.length">
+            <div class="grid gap-1.5">
+              <label class="text-sm font-medium text-slate-900">Что делать</label>
+              <Select :model-value="writeMode" @update:model-value="writeMode = String($event)">
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="insert">Добавить строку</SelectItem>
+                  <SelectItem value="update">Обновить существующую</SelectItem>
+                  <SelectItem value="upsert">Обновить, а если нет — добавить</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div v-if="writeMode !== 'insert'" class="grid gap-2 md:grid-cols-2">
+              <div class="grid gap-1.5">
+                <label class="text-sm font-medium text-slate-900">Искать строку по колонке</label>
+                <Select :model-value="matchColumn" @update:model-value="matchColumn = String($event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Колонка" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="c in tableColumns" :key="c.name" :value="c.name">
+                      {{ c.label || c.name }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="grid gap-1.5">
+                <label class="text-sm font-medium text-slate-900">Значение для поиска</label>
+                <Input v-model="matchValue" placeholder="Например {{client_phone}}" />
+              </div>
+            </div>
+
+            <div class="grid gap-2 rounded-md border border-border bg-background p-2.5">
+              <div class="text-sm font-medium text-slate-900">Значения колонок</div>
+              <div v-for="c in tableColumns" :key="c.name" class="grid gap-1 md:grid-cols-[180px_1fr] md:items-center">
+                <label class="text-xs font-medium text-slate-600">
+                  {{ c.label || c.name }}
+                  <span v-if="c.is_required" class="text-red-500">*</span>
+                  <span class="ml-1 text-[10px] text-slate-400">{{ c.attribute_type }}</span>
+                </label>
+                <Input
+                  :model-value="writeValues[c.name] ?? ''"
+                  :placeholder="`Пусто — колонка не изменится`"
+                  @update:model-value="setWriteValue(c.name, String($event))"
+                />
+              </div>
+              <p class="text-xs text-muted-foreground">
+                В значениях работают подстановки: параметры функции, переменные диалога
+                и результат вызова.
+              </p>
+            </div>
+          </template>
+        </div>
+
         <div v-else-if="local.action_type === 'set_variable'" class="grid gap-3 rounded-md border border-border bg-muted/20 p-2.5">
           <div class="grid gap-2 md:grid-cols-2">
             <div class="grid gap-1.5">
@@ -406,6 +523,7 @@ import { Switch } from '~/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select'
 import { X } from 'lucide-vue-next'
 import ActionTypePicker, { type ActionPickerItem } from '~/components/agents/function-rules/ActionTypePicker.vue'
+import { useApiFetch } from '~/composables/useApiFetch'
 import {
   functionRuleActionDescriptions,
   functionRuleActionLabels,
@@ -469,6 +587,8 @@ const actionPickerItems = computed<ActionPickerItem[]>(() => [
   fromType('handoff_to_operator'),
   fromType('set_tag'),
   fromType('set_variable'),
+  fromType('table_find'),
+  fromType('table_write'),
   fromType('augment_prompt'),
   fromType('set_result'),
   fromType('pause_dialog'),
@@ -700,6 +820,92 @@ const restoreDelay = (raw: unknown) => {
   delayAmount.value = total / (DELAY_UNITS[delayUnit.value] || 1)
 }
 
+type TableListItem = { id: string; name: string; records_count: number }
+type TableColumn = {
+  name: string
+  label: string
+  attribute_type: string
+  is_required: boolean
+}
+
+const apiFetch = useApiFetch()
+const availableTables = ref<TableListItem[]>([])
+const tableColumns = ref<TableColumn[]>([])
+
+/** Список таблиц тянем один раз при открытии редактора — он общий на тенант. */
+const loadTables = async () => {
+  if (availableTables.value.length) return
+  try {
+    availableTables.value = await apiFetch<TableListItem[]>('/tables')
+  } catch (err) {
+    console.warn('Не удалось загрузить список таблиц', err)
+    availableTables.value = []
+  }
+}
+
+const loadTableColumns = async (id: string) => {
+  if (!id) {
+    tableColumns.value = []
+    return
+  }
+  try {
+    tableColumns.value = await apiFetch<TableColumn[]>(`/tables/${id}/attributes`)
+  } catch (err) {
+    console.warn('Не удалось загрузить колонки таблицы', err)
+    tableColumns.value = []
+  }
+}
+
+const tableId = computed(() => String(local.config.table_id || ''))
+
+const onSelectTable = (value: string) => {
+  // Колонки у другой таблицы свои, поэтому старое сопоставление сбрасываем —
+  // иначе в values остались бы имена колонок, которых в новой таблице нет.
+  local.config = {
+    ...local.config,
+    table_id: value,
+    values: {},
+    column: '',
+    match_column: '',
+  }
+  loadTableColumns(value)
+}
+
+const cfgField = (key: string, fallback = '') =>
+  computed({
+    get: () => String(local.config[key] ?? fallback),
+    set: (value: string) => {
+      local.config = { ...local.config, [key]: value }
+    },
+  })
+
+const findColumn = cfgField('column')
+const findValue = cfgField('value')
+const findPrefix = cfgField('store_prefix', 'row')
+const writeMode = cfgField('mode', 'insert')
+const matchColumn = cfgField('match_column')
+const matchValue = cfgField('match_value')
+
+const resolvedPrefix = computed(() => findPrefix.value.trim() || 'row')
+const findPrefixPreview = computed(() => {
+  const column = tableColumns.value[0]?.name || 'колонка'
+  return `{{${resolvedPrefix.value}_${column}}}`
+})
+const findFoundPreview = computed(() => `{{${resolvedPrefix.value}_found}}`)
+
+const writeValues = computed<Record<string, string>>(() =>
+  (local.config.values && typeof local.config.values === 'object' ? local.config.values : {}),
+)
+
+const setWriteValue = (column: string, value: string) => {
+  const next = { ...writeValues.value }
+  // Пустое поле означает «не трогать колонку», поэтому ключ убираем совсем,
+  // а не пишем пустую строку — иначе update затёр бы значение.
+  if (value.trim()) next[column] = value
+  else delete next[column]
+  local.config = { ...local.config, values: next }
+}
+
 const variableName = computed({
   get: () => String(local.config.name || ''),
   set: (value: string) => {
@@ -761,6 +967,19 @@ watch(
       actionPreset.value = model.action_type
     }
     if (model.action_type === 'send_delayed') restoreDelay(model.config?.delay_seconds)
+    if (model.action_type === 'table_find' || model.action_type === 'table_write') {
+      loadTableColumns(String(model.config?.table_id || ''))
+    }
+  },
+  { immediate: true },
+)
+
+// Список таблиц нужен обеим табличным карточкам, поэтому тянем его при
+// открытии редактора, а не по клику — иначе селект пустой первую секунду.
+watch(
+  () => props.open,
+  (open) => {
+    if (open) loadTables()
   },
   { immediate: true },
 )

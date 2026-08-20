@@ -40,6 +40,8 @@ class FunctionPostAction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "notify_admin",
             "handoff_to_operator",
             "set_variable",
+            "table_find",
+            "table_write",
             name="function_post_action_type",
         ),
         nullable=False,

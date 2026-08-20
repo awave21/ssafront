@@ -36,6 +36,12 @@ from app.services.dialog_state import (
 from app.services.ops_alerts import send_admin_notification, send_manager_pause_alert
 from app.services.semantic_matcher import semantic_match_text
 from app.services.tool_executor import _ensure_allowed_domain, execute_tool_call
+from app.services.user_table.runtime import (
+    find_record,
+    insert_record,
+    load_table,
+    update_record,
+)
 from app.utils.idempotency import generate_idempotency_key
 
 logger = structlog.get_logger(__name__)
@@ -813,6 +819,96 @@ async def execute_post_actions(
                         action.action_type,
                         "success",
                         {"name": name, "operation": operation, "value": new_value},
+                    )
+                )
+                continue
+
+            if action.action_type in ("table_find", "table_write"):
+                table = await load_table(
+                    db, tenant_id=tenant_id, table_id=cfg.get("table_id")
+                )
+
+            if action.action_type == "table_find":
+                column = str(cfg.get("column", "")).strip()
+                lookup = _render_template(str(cfg.get("value", "")), output_context)
+                prefix = str(cfg.get("store_prefix", "") or "row").strip() or "row"
+
+                record = await find_record(
+                    db, tenant_id=tenant_id, table=table, column=column, value=lookup
+                )
+                variables = dict(output_context.get("variables") or {})
+                variables[f"{prefix}_found"] = record is not None
+                if record is not None:
+                    # Раскладываем найденную строку по переменным: дальше по цепочке
+                    # к ним обращаются как {{row_phone}}, без знания про таблицы.
+                    for key, val in (record.data or {}).items():
+                        variables[f"{prefix}_{key}"] = val
+                output_context["variables"] = variables
+                output_context["variables_dirty"] = True
+
+                results.append(
+                    ActionResult(
+                        action.id,
+                        action.action_type,
+                        "success",
+                        {
+                            "table": table.name,
+                            "column": column,
+                            "value": lookup,
+                            "found": record is not None,
+                            "prefix": prefix,
+                        },
+                    )
+                )
+                continue
+
+            if action.action_type == "table_write":
+                mode = str(cfg.get("mode", "insert")).strip().lower()
+                if mode not in ("insert", "update", "upsert"):
+                    mode = "insert"
+                raw_values = cfg.get("values")
+                values = _render_template(raw_values, output_context) if isinstance(raw_values, dict) else {}
+                if not isinstance(values, dict) or not values:
+                    results.append(
+                        ActionResult(action.id, action.action_type, "skipped", {"reason": "empty_values"})
+                    )
+                    continue
+
+                existing = None
+                if mode in ("update", "upsert"):
+                    match_column = str(cfg.get("match_column", "")).strip()
+                    match_value = _render_template(str(cfg.get("match_value", "")), output_context)
+                    existing = await find_record(
+                        db,
+                        tenant_id=tenant_id,
+                        table=table,
+                        column=match_column,
+                        value=match_value,
+                    )
+
+                if existing is not None:
+                    written = await update_record(
+                        db, tenant_id=tenant_id, table=table, record=existing, values=values
+                    )
+                    outcome = "updated"
+                elif mode == "update":
+                    # Обновление без найденной строки — не ошибка, а «нечего обновлять».
+                    results.append(
+                        ActionResult(action.id, action.action_type, "skipped", {"reason": "record_not_found"})
+                    )
+                    continue
+                else:
+                    written = await insert_record(
+                        db, tenant_id=tenant_id, table=table, values=values
+                    )
+                    outcome = "inserted"
+
+                results.append(
+                    ActionResult(
+                        action.id,
+                        action.action_type,
+                        "success",
+                        {"table": table.name, "mode": mode, "outcome": outcome, "data": _truncate_for_trace(written)},
                     )
                 )
                 continue

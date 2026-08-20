@@ -9,6 +9,12 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models.user_table import UserTable, UserTableAttribute, UserTableRecord
 
+# Системные колонки, которые платформа проставляет сама. Жили в роутере
+# tables.py; вынесены сюда, чтобы ими могли пользоваться и рантайм-правила.
+SYSTEM_ID_FIELD_NAME = "id"
+SYSTEM_CREATED_AT_FIELD_NAME = "created_at"
+SYSTEM_FIELD_NAMES = {SYSTEM_ID_FIELD_NAME, SYSTEM_CREATED_AT_FIELD_NAME}
+
 
 def _coerce_int(value: Any) -> bool:
     try:

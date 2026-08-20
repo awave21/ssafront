@@ -12,6 +12,8 @@ export const functionRuleActionTypes = {
   notifyAdmin: 'notify_admin',
   handoffToOperator: 'handoff_to_operator',
   setVariable: 'set_variable',
+  tableFind: 'table_find',
+  tableWrite: 'table_write',
   noop: 'noop',
 } as const
 
@@ -38,6 +40,8 @@ export const functionRuleActionLabels: Record<FunctionRuleActionType, string> = 
   notify_admin: 'Отправить уведомление админу',
   handoff_to_operator: 'Передать оператору',
   set_variable: 'Управление переменными',
+  table_find: 'Поиск в таблице',
+  table_write: 'Запись в таблицу',
   set_tag: 'Пометить диалог тегом',
   webhook: 'Отправить вебхук',
   augment_prompt: 'Дополнить промпт',
@@ -61,6 +65,8 @@ export const functionRuleActionDescriptions: Record<FunctionRuleActionType, stri
   notify_admin: 'Сообщение администратору в Telegram',
   handoff_to_operator: 'Ставит диалог на паузу и передаёт человеку',
   set_variable: 'Запоминает значение на весь диалог',
+  table_find: 'Находит строку и кладёт её в переменные',
+  table_write: 'Добавляет строку или обновляет существующую',
   set_tag: 'Помечает диалог тегом для фильтров и аналитики',
   webhook: 'HTTP-запрос на ваш URL с данными функции',
   augment_prompt: 'Добавляет инструкцию в промпт перед ответом',

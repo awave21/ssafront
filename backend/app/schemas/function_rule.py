@@ -49,6 +49,8 @@ ActionType = Literal[
     "notify_admin",
     "handoff_to_operator",
     "set_variable",
+    "table_find",
+    "table_write",
 ]
 ActionStatus = Literal["success", "error", "always"]
 
