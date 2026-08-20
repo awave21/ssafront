@@ -426,6 +426,7 @@ import KnowledgeSheetShell from '~/components/knowledge/KnowledgeSheetShell.vue'
 import type { Scenario, ScenarioUpsertPayload, ScenarioAction } from '~/types/scenario'
 import { functionRuleActionDescriptions, functionRuleActionLabels } from '~/types/ruleAction'
 import { functionRuleActionIcons } from '~/utils/ruleActionIcons'
+import { soonActionItems } from '~/utils/ruleActionSoon'
 import ActionTypePicker, { type ActionPickerItem } from '~/components/agents/function-rules/ActionTypePicker.vue'
 
 const props = withDefaults(
@@ -492,14 +493,17 @@ const conditionLabels = {
 // в functionRuleActionLabels.
 // В сценарии доступны все типы действий: ограничений на уровне бэкенда нет,
 // правило сценария отличается от правила функции только отсутствием tool_id.
-const scenarioActionItems: ActionPickerItem[] = (
-  Object.keys(functionRuleActionLabels) as Array<keyof typeof functionRuleActionLabels>
-).map((type) => ({
-  value: type,
-  label: functionRuleActionLabels[type],
-  description: functionRuleActionDescriptions[type],
-  icon: functionRuleActionIcons[type],
-}))
+const scenarioActionItems: ActionPickerItem[] = [
+  ...(
+    Object.keys(functionRuleActionLabels) as Array<keyof typeof functionRuleActionLabels>
+  ).map((type) => ({
+    value: type,
+    label: functionRuleActionLabels[type],
+    description: functionRuleActionDescriptions[type],
+    icon: functionRuleActionIcons[type],
+  })),
+  ...soonActionItems,
+]
 
 const changeActionType = (action: ScenarioAction, index: number, value: string) => {
   action.action_type = value as ScenarioAction['action_type']

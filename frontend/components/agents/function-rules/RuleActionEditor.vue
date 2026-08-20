@@ -524,6 +524,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~
 import { X } from 'lucide-vue-next'
 import ActionTypePicker, { type ActionPickerItem } from '~/components/agents/function-rules/ActionTypePicker.vue'
 import { useApiFetch } from '~/composables/useApiFetch'
+import { soonActionItems } from '~/utils/ruleActionSoon'
 import {
   functionRuleActionDescriptions,
   functionRuleActionLabels,
@@ -596,6 +597,7 @@ const actionPickerItems = computed<ActionPickerItem[]>(() => [
   fromType('block_user'),
   fromType('unblock_user'),
   fromType('noop'),
+  ...soonActionItems,
 ])
 
 /** Действия без параметров — показываем пояснение вместо пустого блока. */
