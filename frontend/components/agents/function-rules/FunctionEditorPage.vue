@@ -68,23 +68,25 @@
         @remove-action="removeAction"
         @move-action-up="moveActionUp"
         @move-action-down="moveActionDown"
-      />
+      >
+        <template #action-editor>
+          <div ref="actionEditorEl">
+            <RuleActionEditor
+              :open="isActionDialogOpen"
+              :model="editingAction"
+              :tools="tools"
+              :rule-variables="ruleVariables"
+              @update:open="isActionDialogOpen = $event"
+              @add-rule-variable="onAddRuleVariable"
+              @submit="saveAction"
+            />
+          </div>
+        </template>
+      </FunctionRuleForm>
     </div>
 
     <div v-else class="rounded-2xl border border-slate-100 bg-white p-8 text-center text-slate-500 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]">
       Функция не найдена
-    </div>
-
-    <div ref="actionEditorEl">
-      <RuleActionEditor
-        :open="isActionDialogOpen"
-        :model="editingAction"
-        :tools="tools"
-        :rule-variables="ruleVariables"
-        @update:open="isActionDialogOpen = $event"
-        @add-rule-variable="onAddRuleVariable"
-        @submit="saveAction"
-      />
     </div>
   </div>
 </template>
