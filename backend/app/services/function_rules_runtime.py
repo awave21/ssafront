@@ -317,9 +317,31 @@ def _parse_hhmm(s: str) -> tuple[int, int]:
         return 0, 0
 
 
+def _first_present(cfg: dict[str, Any], *keys: str) -> Any:
+    """Первое непустое значение из перечисленных ключей.
+
+    Редактор сценария пишет start_time/end_time и weekdays, а раннер исторически
+    читал start/end и days — правило по времени срабатывало круглосуточно, а по
+    дням недели не срабатывало никогда. Принимаем оба написания, как это уже
+    сделано для platforms/platform ниже.
+    """
+    for key in keys:
+        value = cfg.get(key)
+        if value not in (None, "", []):
+            return value
+    return None
+
+
 def _evaluate_schedule_time(cfg: dict[str, Any], context: dict[str, Any]) -> ConditionResult:
-    start_s = str(cfg.get("start", "00:00"))
-    end_s = str(cfg.get("end", "23:59"))
+    start_raw = _first_present(cfg, "start", "start_time")
+    end_raw = _first_present(cfg, "end", "end_time")
+    if start_raw is None or end_raw is None:
+        # Раньше пустое окно подставляло 00:00–23:59, то есть правило
+        # срабатывало всегда — ровно наоборот тому, чего ждёт человек,
+        # настроивший ночной автоответ.
+        return ConditionResult(matched=False, reason="schedule_time missing window")
+    start_s = str(start_raw)
+    end_s = str(end_raw)
     tz_name = str(context.get("agent_timezone") or "UTC").strip() or "UTC"
     try:
         tz = ZoneInfo(tz_name)
@@ -343,7 +365,7 @@ def _evaluate_schedule_time(cfg: dict[str, Any], context: dict[str, Any]) -> Con
 
 
 def _evaluate_schedule_weekday(cfg: dict[str, Any], context: dict[str, Any]) -> ConditionResult:
-    days_raw = cfg.get("days")
+    days_raw = _first_present(cfg, "days", "weekdays")
     if not isinstance(days_raw, list) or not days_raw:
         return ConditionResult(matched=False, reason="schedule_weekday missing days")
     tz_name = str(context.get("agent_timezone") or "UTC").strip() or "UTC"
