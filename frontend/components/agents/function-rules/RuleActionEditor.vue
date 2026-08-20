@@ -390,13 +390,27 @@
                 <Input
                   :model-value="writeValues[c.name] ?? ''"
                   :placeholder="emptyValueHint"
+                  @focus="focusedColumn = c.name"
                   @update:model-value="setWriteValue(c.name, String($event))"
                 />
               </div>
-              <p class="text-xs text-muted-foreground">
-                В значениях работают подстановки: параметры функции, переменные диалога
-                и результат вызова.
-              </p>
+
+              <div v-if="placeholders.length" class="border-t border-slate-100 pt-2.5">
+                <div class="mb-1.5 text-xs text-slate-500">
+                  Поставьте курсор в нужную колонку и нажмите подстановку:
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                  <button
+                    v-for="item in placeholders"
+                    :key="item.token"
+                    type="button"
+                    class="rounded-lg bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-600 transition-colors hover:bg-primary/10 hover:text-primary"
+                    :title="item.hint"
+                    @mousedown.prevent
+                    @click="insertPlaceholder(item.token)"
+                  >{{ item.token }}</button>
+                </div>
+              </div>
             </div>
           </template>
         </div>
@@ -870,13 +884,20 @@ const loadTables = async () => {
 /** Принудительное обновление — после того как таблицу создали в соседней вкладке. */
 const reloadTables = () => fetchTables()
 
+// id и created_at платформа проставляет сама при вставке строки (см.
+// user_table/runtime.insert_record). Предлагать их для заполнения нельзя:
+// значение всё равно будет перезаписано, а обязательная звёздочка рядом
+// заставляет думать, что поле нужно заполнить руками.
+const SYSTEM_COLUMNS = new Set(['id', 'created_at'])
+
 const loadTableColumns = async (id: string) => {
   if (!id) {
     tableColumns.value = []
     return
   }
   try {
-    tableColumns.value = await apiFetch<TableColumn[]>(`/tables/${id}/attributes`)
+    const columns = await apiFetch<TableColumn[]>(`/tables/${id}/attributes`)
+    tableColumns.value = columns.filter((column) => !SYSTEM_COLUMNS.has(column.name))
   } catch (err) {
     console.warn('Не удалось загрузить колонки таблицы', err)
     tableColumns.value = []
@@ -940,6 +961,29 @@ const emptyValueHint = computed(() =>
     ? 'Пусто — колонка останется незаполненной'
     : 'Пусто — колонка не изменится',
 )
+
+const focusedColumn = ref('')
+
+/**
+ * Что можно подставить в значение колонки: параметры самой функции плюс
+ * стандартные ключи контекста. Раньше об этом сообщал только текст «работают
+ * подстановки» — какие именно, приходилось угадывать.
+ */
+const placeholders = computed(() => [
+  ...(props.ruleVariables || [])
+    .map((v) => String(v.name || '').trim())
+    .filter(Boolean)
+    .map((name) => ({ token: `{{${name}}}`, hint: 'параметр функции' })),
+  { token: '{{result}}', hint: 'результат выполнения функции' },
+  { token: '{{last_user_message}}', hint: 'последнее сообщение клиента' },
+])
+
+/** Дописывает подстановку в колонку, на которой стоял курсор. */
+const insertPlaceholder = (token: string) => {
+  const column = focusedColumn.value || tableColumns.value[0]?.name
+  if (!column) return
+  setWriteValue(column, `${writeValues.value[column] || ''}${token}`)
+}
 
 const setWriteValue = (column: string, value: string) => {
   const next = { ...writeValues.value }
