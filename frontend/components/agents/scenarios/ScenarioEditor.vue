@@ -230,7 +230,7 @@
             <div class="space-y-4">
               <div>
                 <label class="text-xs font-medium text-slate-500 mb-1.5 block">Тип действия</label>
-                <ActionTypePicker
+                <OptionCardPicker
                   :items="scenarioActionItems"
                   :model-value="action.action_type"
                   @update:model-value="changeActionType(action, index, $event)"
@@ -432,7 +432,7 @@ import type { Scenario, ScenarioUpsertPayload, ScenarioAction } from '~/types/sc
 import { functionRuleActionDescriptions, functionRuleActionLabels } from '~/types/ruleAction'
 import { functionRuleActionIcons } from '~/utils/ruleActionIcons'
 import { soonActionItems } from '~/utils/ruleActionSoon'
-import ActionTypePicker, { type ActionPickerItem } from '~/components/agents/function-rules/ActionTypePicker.vue'
+import OptionCardPicker, { type OptionCardItem } from '~/components/agents/function-rules/OptionCardPicker.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -498,7 +498,7 @@ const conditionLabels = {
 // в functionRuleActionLabels.
 // В сценарии доступны все типы действий: ограничений на уровне бэкенда нет,
 // правило сценария отличается от правила функции только отсутствием tool_id.
-const scenarioActionItems: ActionPickerItem[] = [
+const scenarioActionItems: OptionCardItem[] = [
   ...(
     Object.keys(functionRuleActionLabels) as Array<keyof typeof functionRuleActionLabels>
   ).map((type) => ({

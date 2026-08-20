@@ -134,19 +134,13 @@
             text="Что бот сделает после успешного выполнения функции. «AI ответит сам» — модель сформулирует ответ по данным функции. «Отправить сообщение» — фиксированный текст. «Инструкция для AI» — подсказка модели, как ответить. «Промолчать» — только тихое действие без сообщения клиенту."
           />
         </div>
-        <div class="grid gap-3 sm:grid-cols-[minmax(220px,280px)_1fr]">
-          <Select :model-value="local.reaction_mode" @update:model-value="local.reaction_mode = $event as any">
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="item in reactionOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <div class="rounded-xl border border-emerald-200 bg-emerald-50/40 px-4 py-2.5 text-sm text-slate-700">
-            {{ reactionDescription }}
-          </div>
-        </div>
+        <OptionCardPicker
+          :items="reactionCards"
+          :model-value="local.reaction_mode"
+          :disabled="!canEdit"
+          :columns="4"
+          @update:model-value="local.reaction_mode = $event as any"
+        />
         <div v-if="local.reaction_mode === 'send_message'" class="space-y-1.5">
           <label class="text-xs font-semibold text-slate-700">Текст сообщения</label>
           <Textarea v-model="local.reaction_message" class="bg-white" />
@@ -166,19 +160,12 @@
             text="«Продолжить» — обычная работа бота. «Пауза» — бот замолкает, ждёт сотрудника или события возобновления. «Дополнить промпт» — к системному промпту на СЛЕДУЮЩИЙ ход подмешивается указанный текст (не сохраняется навсегда)."
           />
         </div>
-        <div class="grid gap-3 sm:grid-cols-[minmax(220px,280px)_1fr]">
-          <Select :model-value="local.post_scenario" @update:model-value="local.post_scenario = $event as any">
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="item in postScenarioOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <div class="rounded-xl border border-emerald-200 bg-emerald-50/40 px-4 py-2.5 text-sm text-slate-700">
-            {{ postScenarioDescription }}
-          </div>
-        </div>
+        <OptionCardPicker
+          :items="postScenarioCards"
+          :model-value="local.post_scenario"
+          :disabled="!canEdit"
+          @update:model-value="local.post_scenario = $event as any"
+        />
         <div v-if="local.post_scenario === 'augment_prompt'" class="space-y-1.5">
           <label class="text-xs font-semibold text-slate-700">Что добавить в промпт</label>
           <Textarea v-model="local.post_scenario_prompt" class="bg-white" />
@@ -255,13 +242,15 @@
 
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { X } from 'lucide-vue-next'
+import type { Component } from 'vue'
+import { ArrowRight, Bot, FileText, MessageSquare, Pause, Sparkles, VolumeX, X } from 'lucide-vue-next'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select'
 import { Switch } from '~/components/ui/switch'
 import { Textarea } from '~/components/ui/textarea'
 import RuleActionsTable from '~/components/agents/function-rules/RuleActionsTable.vue'
+import OptionCardPicker, { type OptionCardItem } from '~/components/agents/function-rules/OptionCardPicker.vue'
 import FieldHint from '~/components/agents/settings/FieldHint.vue'
 import type { Tool } from '~/types/tool'
 import type { FunctionRule } from '~/types/functionRule'
@@ -310,11 +299,25 @@ const postScenarioOptions = [
   { value: 'augment_prompt', label: 'Дополнить промпт', description: 'К системному промпту добавится дополнительный текст на следующий ход.' },
 ]
 
-const reactionDescription = computed(
-  () => reactionOptions.find((o) => o.value === local.reaction_mode)?.description || '',
+// Описания переехали внутрь карточек, поэтому отдельная зелёная плашка с текстом
+// выбранного варианта больше не нужна — теперь видно все варианты сразу.
+const REACTION_ICONS: Record<string, Component> = {
+  send_message: MessageSquare,
+  ai_instruction: Sparkles,
+  ai_self_reply: Bot,
+  silent: VolumeX,
+}
+const POST_SCENARIO_ICONS: Record<string, Component> = {
+  continue: ArrowRight,
+  pause: Pause,
+  augment_prompt: FileText,
+}
+
+const reactionCards = computed<OptionCardItem[]>(() =>
+  reactionOptions.map((o) => ({ ...o, icon: REACTION_ICONS[o.value] || Bot })),
 )
-const postScenarioDescription = computed(
-  () => postScenarioOptions.find((o) => o.value === local.post_scenario)?.description || '',
+const postScenarioCards = computed<OptionCardItem[]>(() =>
+  postScenarioOptions.map((o) => ({ ...o, icon: POST_SCENARIO_ICONS[o.value] || ArrowRight })),
 )
 
 type FunctionParameterUi = {

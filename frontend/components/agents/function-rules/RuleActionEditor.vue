@@ -22,7 +22,7 @@
       <div class="flex flex-col gap-3">
         <div class="grid gap-2">
           <label class="text-sm font-medium text-slate-900">Действие</label>
-          <ActionTypePicker
+          <OptionCardPicker
             :items="actionPickerItems"
             :model-value="actionPreset"
             @update:model-value="onSelectPreset"
@@ -522,7 +522,7 @@ import { Textarea } from '~/components/ui/textarea'
 import { Switch } from '~/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select'
 import { X } from 'lucide-vue-next'
-import ActionTypePicker, { type ActionPickerItem } from '~/components/agents/function-rules/ActionTypePicker.vue'
+import OptionCardPicker, { type OptionCardItem } from '~/components/agents/function-rules/OptionCardPicker.vue'
 import { useApiFetch } from '~/composables/useApiFetch'
 import { soonActionItems } from '~/utils/ruleActionSoon'
 import {
@@ -562,8 +562,8 @@ const actionPreset = ref<string>('')
 /** Карточка для действия, у которого есть готовые подпись, описание и иконка. */
 const fromType = (
   type: keyof typeof functionRuleActionLabels,
-  extra: Partial<ActionPickerItem> = {},
-): ActionPickerItem => ({
+  extra: Partial<OptionCardItem> = {},
+): OptionCardItem => ({
   value: type,
   label: functionRuleActionLabels[type],
   description: functionRuleActionDescriptions[type],
@@ -575,7 +575,7 @@ const fromType = (
 // раскладывается в action_type='webhook' + config.action_kind (см. onSelectPreset).
 // Остальные карточки — обычные типы действий, все поддержаны раннером.
 // Порядок: сначала то, что шлёт сообщения, потом контекст, потом управление диалогом.
-const actionPickerItems = computed<ActionPickerItem[]>(() => [
+const actionPickerItems = computed<OptionCardItem[]>(() => [
   {
     value: 'webhook_api_call',
     label: 'API вызов (Webhook)',

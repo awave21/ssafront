@@ -1,5 +1,5 @@
 import { ArrowLeftRight, Building2, Contact, CreditCard } from 'lucide-vue-next'
-import type { ActionPickerItem } from '~/components/agents/function-rules/ActionTypePicker.vue'
+import type { OptionCardItem } from '~/components/agents/function-rules/OptionCardPicker.vue'
 
 /**
  * Действия из роадмапа, которых пока нет в бэкенде.
@@ -11,7 +11,7 @@ import type { ActionPickerItem } from '~/components/agents/function-rules/Action
  * Показываем их сознательно — иначе пользователь ищет интеграцию с CRM,
  * не находит и решает, что её не будет.
  */
-export const soonActionItems: ActionPickerItem[] = [
+export const soonActionItems: OptionCardItem[] = [
   {
     value: 'soon_bitrix24',
     label: 'Отправка в Битрикс24',

@@ -1,5 +1,5 @@
 <template>
-  <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+  <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-2" :class="wideClass">
     <button
       v-for="item in items"
       :key="item.value"
@@ -38,9 +38,10 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Component } from 'vue'
 
-export type ActionPickerItem = {
+export type OptionCardItem = {
   /** Значение, которое уйдёт наверх: тип действия или пресет (webhook_api_call). */
   value: string
   label: string
@@ -53,17 +54,27 @@ export type ActionPickerItem = {
 }
 
 const props = defineProps<{
-  items: ActionPickerItem[]
+  items: OptionCardItem[]
   modelValue: string
   /** Общая блокировка — например, нет прав на редактирование. */
   disabled?: boolean
+  /** Сколько колонок на широком экране. По умолчанию три. */
+  columns?: 2 | 3 | 4
 }>()
+
+// Классы перечислены целиком, а не собраны из кусков: Tailwind вычищает всё,
+// чего нет в исходниках дословно, и `lg:grid-cols-${n}` просто не попал бы в сборку.
+const wideClass = computed(() => {
+  if (props.columns === 2) return ''
+  if (props.columns === 4) return 'lg:grid-cols-4'
+  return 'lg:grid-cols-3'
+})
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
-const select = (item: ActionPickerItem) => {
+const select = (item: OptionCardItem) => {
   if (props.disabled || item.disabled || item.value === props.modelValue) return
   emit('update:modelValue', item.value)
 }
