@@ -22,6 +22,7 @@ from app.schemas.agent_assistant import (
     AssistantSuggestion,
 )
 from app.schemas.auth import AuthContext
+from app.services.agent_assistant.activity import render_activity
 from app.services.agent_assistant.catalog import known_preset_ids, sanitize_actions
 from app.services.agent_assistant.context import (
     _prompt_headings,
@@ -250,6 +251,67 @@ def test_render_snapshot_refuses_to_judge_prompt_without_headings() -> None:
 
     assert "состав блоков по нему определить нельзя" in text
     assert "Не утверждай, что каких-то блоков не хватает." in text
+
+
+# --- как агент работает ----------------------------------------------------
+
+
+def _activity(**overrides) -> dict:
+    base = {
+        "detectable": True,
+        "days": 30,
+        "kpi": {
+            "runs": 64,
+            "failed": 7,
+            "stuck": 0,
+            "dialogs": 37,
+            "channel_dialogs": 0,
+            "avg_prompt": 13565,
+            "avg_completion": 116,
+            "last_run": "2026-08-15",
+        },
+        "errors": [
+            {"message": "Runtime error: 404 model gpt-5-mini", "times": 7, "last_seen": "2026-08-15"}
+        ],
+        "tools": [
+            {
+                "tool_name": "search_direct_questions",
+                "calls": 22,
+                "empty_or_error": 20,
+                "last_call": "2026-08-15",
+            },
+            {"tool_name": "get_contacts", "calls": 4, "empty_or_error": 0, "last_call": "2026-08-15"},
+        ],
+        "runs_without_tools": 25,
+        "unused_tools": ["sqns_create_visit"],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_render_activity_shows_errors_and_empty_tool_answers() -> None:
+    text = render_activity(_activity())
+
+    assert "Запусков: 64, из них с ошибкой: 7" in text
+    assert "Runtime error: 404 model gpt-5-mini — 7 раз" in text
+    assert "search_direct_questions: 22 вызовов, из них пустых или с отказом: 20" in text
+    # У исправного тула лишнего хвоста быть не должно.
+    assert "get_contacts: 4 вызовов, последний" in text
+    assert "Подключены, но ни разу не вызывались: sqns_create_visit" in text
+    assert "не вызвала ни одного инструмента: 25" in text
+
+
+def test_render_activity_warns_against_percentages() -> None:
+    # На десятке запусков доля — случайность; модель обязана это видеть.
+    assert "не считай по ним проценты" in render_activity(_activity()).lower()
+
+
+def test_render_activity_admits_absence_of_data() -> None:
+    text = render_activity({"detectable": False, "days": 30})
+
+    assert "не было ни одного запуска" in text
+    assert "Данных о работе нет" in text
+    assert "Запусков:" not in text
 
 
 # --- мета-агент ------------------------------------------------------------

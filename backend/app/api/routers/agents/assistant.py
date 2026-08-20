@@ -20,7 +20,9 @@ from app.db.session import get_db
 from app.schemas.agent_assistant import AssistantChatRequest, AssistantChatResponse
 from app.schemas.auth import AuthContext
 from app.services.agent_assistant import (
+    build_activity_snapshot,
     build_agent_snapshot,
+    render_activity,
     render_snapshot,
     run_assistant,
     sanitize_actions,
@@ -136,12 +138,23 @@ async def assistant_chat(
         )
 
     snapshot = await build_agent_snapshot(db, agent=agent)
+    snapshot_text = render_snapshot(snapshot)
+
+    # Агрегат по запускам — сырой SQL, и падать из-за него целиком незачем:
+    # без него помощник просто вернётся к советам по настройкам.
+    try:
+        activity = await build_activity_snapshot(db, agent=agent)
+        snapshot_text = f"{snapshot_text}\n\n{render_activity(activity)}"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "agent_assistant_activity_failed", agent_id=str(agent.id), error=str(exc)
+        )
 
     try:
         result = await run_assistant(
             question=payload.message,
             history=payload.history,
-            snapshot_text=render_snapshot(snapshot),
+            snapshot_text=snapshot_text,
             actions=sanitize_actions(payload.actions),
             function_presets=payload.function_presets,
             scenario_presets=payload.scenario_presets,
