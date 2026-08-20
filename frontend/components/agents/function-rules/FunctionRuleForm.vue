@@ -59,9 +59,17 @@
           </button>
         </div>
 
-        <div v-if="functionParameters.length === 0" class="py-4 text-center text-sm text-slate-400">
+        <!-- Тот же приём, что и у пустого блока действий: текст прежний, блок
+             стал кликабельным. Рамка добавлена, чтобы два пустых состояния в
+             одной форме выглядели одинаково. -->
+        <button
+          v-if="functionParameters.length === 0"
+          type="button"
+          class="w-full rounded-xl border border-dashed border-slate-200 bg-white/60 py-6 text-center text-sm text-slate-400 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-[0_10px_24px_-14px_rgba(0,0,0,0.10)]"
+          @click="addParameter"
+        >
           Параметров пока нет. Нажмите «+ Добавить параметр».
-        </div>
+        </button>
 
         <div v-else class="space-y-3">
           <div
