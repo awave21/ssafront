@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import UUID
 
@@ -28,6 +29,12 @@ MAX_RULES = 40
 MAX_TABLES = 20
 MAX_COLUMNS = 20
 MAX_TITLES = 8
+MAX_HEADINGS = 20
+
+# Заголовки промпта — строки, начинающиеся с одной-трёх решёток. Живые промпты
+# пишут `# РОЛЬ` (H1), мета-агент обучения требует `## Роль и цель` (H2) —
+# собираем оба уровня, иначе половина промптов покажется бесструктурной.
+_HEADING_RE = re.compile(r"^\s{0,3}(#{1,3})\s+(.+?)\s*$")
 
 # Функции и сценарии лежат в одной таблице function_rules и различаются только
 # триггером: форма функции всегда пишет post_tool (правило срабатывает после
@@ -37,6 +44,60 @@ FUNCTION_TRIGGER = "post_tool"
 # Действия, которые ссылаются на таблицу — по ним понимаем, какие из
 # тенантных таблиц этот агент реально трогает.
 TABLE_ACTION_TYPES = frozenset({"table_find", "table_write"})
+
+
+# Блоки, из которых собирают системный промпт, и слова, по которым их узнают
+# в заголовке. Разбор считаем кодом: слабая модель, сравнивая список блоков
+# со списком заголовков, регулярно объявляет отсутствующим то, что есть.
+PROMPT_BLOCKS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Роль и личность", ("роль", "личност", "персона", "кто ты")),
+    ("Цель", ("цель", "задача", "objective")),
+    ("Зона ответственности и границы", ("границ", "ответственност", "scope", "аудитор", "компетенц")),
+    ("Источники фактов", ("источник", "факт", "данные", "база знаний", "знани")),
+    ("Приветствие", ("приветств", "здоровай", "первое сообщение")),
+    ("Логика и приоритеты", ("логика", "приоритет", "сценари", "поведени", "ведения диалога")),
+    ("Правила инструментов", ("инструмент", "функци", "тул", "tool")),
+    ("Стиль и формат ответов", ("стиль", "тон", "формат", "типографик", "оформлени")),
+    ("Запреты", ("запрет", "ограничен", "нельзя")),
+    ("Эскалация и фолбэк", ("эскалац", "фолбэк", "fallback", "ошибк", "неопредел", "непонятн")),
+    ("Примеры реплик", ("пример", "типовые фраз", "шаблон")),
+)
+
+
+def analyze_prompt_blocks(headings: list[str]) -> dict[str, Any]:
+    """Какие блоки видно в заголовках промпта, а каких нет.
+
+    Без заголовков разбор невозможен: промпт может быть отличным и сплошным
+    текстом (так написан флагманский агент). Тогда честнее сказать «не видно»,
+    чем объявить, что не хватает всего сразу.
+    """
+    if not headings:
+        return {"detectable": False, "present": [], "missing": []}
+
+    lowered = [heading.lower() for heading in headings]
+    present: list[str] = []
+    missing: list[str] = []
+    for name, keywords in PROMPT_BLOCKS:
+        found = any(keyword in heading for heading in lowered for keyword in keywords)
+        (present if found else missing).append(name)
+    return {"detectable": True, "present": present, "missing": missing}
+
+
+def _prompt_headings(system_prompt: str | None) -> list[str]:
+    """Заголовки системного промпта — по ним видно, каких блоков не хватает.
+
+    Сам текст в снимок не кладём: промпт бывает на десять тысяч символов и
+    вытеснит из контекста всё остальное вместе с вопросом человека.
+    """
+    headings: list[str] = []
+    for line in (system_prompt or "").splitlines():
+        match = _HEADING_RE.match(line)
+        if not match:
+            continue
+        headings.append(f"{match.group(1)} {match.group(2)}"[:120])
+        if len(headings) >= MAX_HEADINGS:
+            break
+    return headings
 
 
 def _rule_kind(rule: FunctionRule) -> str:
@@ -176,9 +237,9 @@ async def build_agent_snapshot(db: AsyncSession, *, agent: Agent) -> dict[str, A
             "name": agent.name,
             "model": agent.model,
             "prompt_chars": len(agent.system_prompt or ""),
+            "prompt_headings": _prompt_headings(agent.system_prompt),
             "is_disabled": bool(agent.is_disabled),
             "function_rules_enabled": bool(agent.function_rules_enabled),
-            "runtime_bridges_mode": agent.runtime_bridges_mode,
             "sqns_enabled": bool(agent.sqns_enabled),
             "graphrag_enabled": bool(agent.microsoft_graphrag_enabled),
         },
@@ -254,11 +315,39 @@ def render_snapshot(snapshot: dict[str, Any]) -> str:
         f"Имя: {agent['name']}",
         f"Модель: {agent['model']}",
         f"Системный промпт: {agent['prompt_chars']} символов",
+        # runtime_bridges_mode сюда не кладём: поле есть в модели, но рантайм
+        # его не читает — советовать по нему было бы враньём.
         f"Функции и сценарии включены: {'да' if agent['function_rules_enabled'] else 'нет'}",
-        f"Автоблоки в промпте (runtime_bridges_mode): {agent['runtime_bridges_mode']}",
         f"CRM SQNS: {'подключена' if agent['sqns_enabled'] else 'нет'}",
         f"GraphRAG: {'включён' if agent['graphrag_enabled'] else 'нет'}",
         f"Каналы: {', '.join(snapshot['channels']) or 'ни одного'}",
+        "",
+        "## Разбор системного промпта",
+    ]
+
+    headings = agent["prompt_headings"]
+    blocks = analyze_prompt_blocks(headings)
+    if not blocks["detectable"]:
+        lines.append(
+            "Промпт написан сплошным текстом без заголовков — состав блоков по нему "
+            "определить нельзя. Не утверждай, что каких-то блоков не хватает."
+        )
+    else:
+        lines.append("Заголовки:")
+        lines.extend(f"- {heading}" for heading in headings)
+        lines.append(
+            "Блоки, которые видно в заголовках: " + (", ".join(blocks["present"]) or "ни одного")
+        )
+        lines.append(
+            "Отдельного заголовка нет под блоки: " + (", ".join(blocks["missing"]) or "нет таких")
+        )
+        lines.append(
+            "Этот разбор посчитан по заголовкам и уже готов — не пересчитывай его сам. "
+            "Тема может быть раскрыта внутри соседнего раздела, поэтому говори "
+            "«отдельного блока не видно», а не «блока нет»."
+        )
+
+    lines += [
         "",
         "## Функции и сценарии",
     ]

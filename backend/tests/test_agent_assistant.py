@@ -23,7 +23,11 @@ from app.schemas.agent_assistant import (
 )
 from app.schemas.auth import AuthContext
 from app.services.agent_assistant.catalog import known_preset_ids, sanitize_actions
-from app.services.agent_assistant.context import render_snapshot
+from app.services.agent_assistant.context import (
+    _prompt_headings,
+    analyze_prompt_blocks,
+    render_snapshot,
+)
 
 
 def _item(value: str, label: str = "Подпись", description: str = "") -> AssistantCatalogItem:
@@ -100,9 +104,9 @@ def _snapshot(**overrides) -> dict:
             "name": "Стилия",
             "model": "openai:gpt-4.1-mini",
             "prompt_chars": 1200,
+            "prompt_headings": [],
             "is_disabled": False,
             "function_rules_enabled": True,
-            "runtime_bridges_mode": "manual",
             "sqns_enabled": True,
             "graphrag_enabled": False,
         },
@@ -165,6 +169,87 @@ def test_render_snapshot_states_emptiness_explicitly() -> None:
     assert "Ни одного правила." in text
     assert "Ни одной таблицы." in text
     assert "Каналы: ни одного" in text
+
+
+def test_prompt_headings_collects_h1_h2_h3() -> None:
+    # Живые промпты пишут `# РОЛЬ`, мета-агент обучения — `## Роль и цель`.
+    # Собирать надо оба, иначе половина промптов покажется бесструктурной.
+    headings = _prompt_headings("# РОЛЬ\nТы админ\n\n## Цель\nЗаписать\n### Детали\nтекст")
+
+    assert headings == ["# РОЛЬ", "## Цель", "### Детали"]
+
+
+def test_prompt_headings_ignores_hashes_inside_text() -> None:
+    headings = _prompt_headings("Тариф #3 действует\n#безпробела\n# РОЛЬ")
+
+    assert headings == ["# РОЛЬ"]
+
+
+def test_prompt_headings_are_capped() -> None:
+    from app.services.agent_assistant.context import MAX_HEADINGS
+
+    text = "\n".join(f"# Раздел {i}" for i in range(MAX_HEADINGS + 10))
+
+    assert len(_prompt_headings(text)) == MAX_HEADINGS
+
+
+def test_analyze_prompt_blocks_recognises_real_headings() -> None:
+    # Заголовки живого агента «Консультант». Модель раз за разом объявляла
+    # эти блоки недостающими — поэтому разбор считает код, а не она.
+    blocks = analyze_prompt_blocks(
+        [
+            "# ЛИЧНОСТЬ",
+            "# ПРАВИЛА ПРИВЕТСТВИЯ",
+            "# ЗОНА ОТВЕТСТВЕННОСТИ",
+            "# ИСТОЧНИКИ ФАКТОВ",
+            "# ЛОГИКА ДИАЛОГА",
+            "# СТИЛЬ ОТВЕТОВ",
+            "# ПРАВИЛА ИНСТРУМЕНТОВ",
+            "# ПРИМЕРЫ",
+        ]
+    )
+
+    assert blocks["detectable"] is True
+    for present in (
+        "Роль и личность",
+        "Приветствие",
+        "Зона ответственности и границы",
+        "Источники фактов",
+        "Логика и приоритеты",
+        "Стиль и формат ответов",
+        "Правила инструментов",
+        "Примеры реплик",
+    ):
+        assert present in blocks["present"], present
+    assert "Эскалация и фолбэк" in blocks["missing"]
+
+
+def test_analyze_prompt_blocks_gives_up_without_headings() -> None:
+    # Флагманский агент написан сплошной прозой осознанно. Объявить, что в нём
+    # нет ни одного блока, было бы неправдой.
+    blocks = analyze_prompt_blocks([])
+
+    assert blocks == {"detectable": False, "present": [], "missing": []}
+
+
+def test_render_snapshot_lists_headings_and_computed_gaps() -> None:
+    snapshot = _snapshot()
+    snapshot["agent"]["prompt_headings"] = ["# РОЛЬ", "# ЦЕЛЬ"]
+
+    text = render_snapshot(snapshot)
+
+    assert "## Разбор системного промпта" in text
+    assert "- # РОЛЬ\n- # ЦЕЛЬ" in text
+    assert "Блоки, которые видно в заголовках: Роль и личность, Цель" in text
+    assert "Отдельного заголовка нет под блоки: " in text
+    assert "Приветствие" in text.split("Отдельного заголовка нет под блоки: ")[1]
+
+
+def test_render_snapshot_refuses_to_judge_prompt_without_headings() -> None:
+    text = render_snapshot(_snapshot())
+
+    assert "состав блоков по нему определить нельзя" in text
+    assert "Не утверждай, что каких-то блоков не хватает." in text
 
 
 # --- мета-агент ------------------------------------------------------------
