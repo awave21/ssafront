@@ -282,7 +282,34 @@
           class="grid gap-3 rounded-md border border-border bg-muted/20 p-2.5"
         >
           <div class="grid gap-1.5">
-            <label class="text-sm font-medium text-slate-900">Таблица</label>
+            <div class="flex items-center justify-between gap-2">
+              <label class="text-sm font-medium text-slate-900">Таблица</label>
+              <!-- Открываем в новой вкладке: уход со страницы потерял бы
+                   недосохранённую функцию. Рядом кнопка обновления списка —
+                   создал таблицу в соседней вкладке и подтянул сюда. -->
+              <div class="flex items-center gap-1">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                  :disabled="tablesLoading"
+                  title="Обновить список таблиц"
+                  @click="reloadTables"
+                >
+                  <RefreshCw class="h-3 w-3" :class="tablesLoading ? 'animate-spin' : ''" />
+                  Обновить
+                </button>
+                <a
+                  :href="tablesPageUrl"
+                  target="_blank"
+                  rel="noopener"
+                  class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
+                >
+                  <Plus class="h-3 w-3" />
+                  Создать таблицу
+                </a>
+              </div>
+            </div>
+
             <Select :model-value="tableId" @update:model-value="onSelectTable(String($event))">
               <SelectTrigger>
                 <SelectValue placeholder="Выберите таблицу" />
@@ -293,8 +320,10 @@
                 </SelectItem>
               </SelectContent>
             </Select>
-            <p v-if="!availableTables.length" class="text-xs text-muted-foreground">
-              Таблиц пока нет — создайте её в разделе «База знаний → Таблицы».
+
+            <p v-if="!availableTables.length && !tablesLoading" class="text-xs text-muted-foreground">
+              Таблиц пока нет. Нажмите «Создать таблицу» — она откроется в соседней вкладке,
+              а потом вернитесь сюда и нажмите «Обновить».
             </p>
           </div>
 
@@ -521,8 +550,9 @@ import { Input } from '~/components/ui/input'
 import { Textarea } from '~/components/ui/textarea'
 import { Switch } from '~/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select'
-import { X } from 'lucide-vue-next'
+import { Plus, RefreshCw, X } from 'lucide-vue-next'
 import OptionCardPicker, { type OptionCardItem } from '~/components/agents/function-rules/OptionCardPicker.vue'
+import { useRoute } from 'vue-router'
 import { useApiFetch } from '~/composables/useApiFetch'
 import { soonActionItems } from '~/utils/ruleActionSoon'
 import {
@@ -831,19 +861,36 @@ type TableColumn = {
 }
 
 const apiFetch = useApiFetch()
+const route = useRoute()
 const availableTables = ref<TableListItem[]>([])
 const tableColumns = ref<TableColumn[]>([])
+const tablesLoading = ref(false)
 
-/** Список таблиц тянем один раз при открытии редактора — он общий на тенант. */
-const loadTables = async () => {
-  if (availableTables.value.length) return
+/** Раздел «База знаний → Таблицы» того же агента. */
+const tablesPageUrl = computed(
+  () => `/agents/${route.params.id}/knowledge?knowledgeTab=tables`,
+)
+
+const fetchTables = async () => {
+  tablesLoading.value = true
   try {
     availableTables.value = await apiFetch<TableListItem[]>('/tables')
   } catch (err) {
     console.warn('Не удалось загрузить список таблиц', err)
     availableTables.value = []
+  } finally {
+    tablesLoading.value = false
   }
 }
+
+/** Список таблиц тянем один раз при открытии редактора — он общий на тенант. */
+const loadTables = async () => {
+  if (availableTables.value.length) return
+  await fetchTables()
+}
+
+/** Принудительное обновление — после того как таблицу создали в соседней вкладке. */
+const reloadTables = () => fetchTables()
 
 const loadTableColumns = async (id: string) => {
   if (!id) {
