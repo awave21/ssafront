@@ -1,14 +1,17 @@
 <template>
-  <FunctionEditorPage
-    :agent-id="agentId"
-    :rule-id="null"
-    @back="navigateBack"
-  />
+  <AgentPageShell title="Функции" :hide-actions="true">
+    <FunctionEditorPage
+      :agent-id="agentId"
+      :rule-id="null"
+      @back="navigateBack"
+    />
+  </AgentPageShell>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import AgentPageShell from '~/components/agents/AgentPageShell.vue'
 import FunctionEditorPage from '~/components/agents/function-rules/FunctionEditorPage.vue'
 
 const route = useRoute()

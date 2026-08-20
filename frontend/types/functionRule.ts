@@ -216,6 +216,22 @@ const normalizeConditionConfigToBackend = (
     }
   }
 
+  // Чистим ключи условий, которые не соответствуют выбранному condition_type,
+  // чтобы старые значения не накапливались в JSONB при переключении типа.
+  if (payload.condition_type !== 'keywords') {
+    delete normalized.keywords
+  }
+  if (payload.condition_type !== 'regex') {
+    delete normalized.pattern
+    delete normalized.patterns
+  }
+  if (payload.condition_type !== 'semantic') {
+    delete normalized.intent
+    delete normalized.intents
+    delete normalized.examples
+    delete normalized.semantic_threshold
+  }
+
   if (payload.reaction_mode === 'send_message') {
     normalized.reaction_message = String(payload.reaction_message || '').trim()
     delete normalized.ai_instruction
@@ -233,6 +249,10 @@ const normalizeConditionConfigToBackend = (
 
   if (payload.post_scenario === 'augment_prompt') {
     normalized.augment_prompt = String(payload.post_scenario_prompt || '').trim()
+  } else {
+    // При смене режима на continue/pause старый augment_prompt удаляется,
+    // чтобы не оставался в JSONB как неактивный «мусор».
+    delete normalized.augment_prompt
   }
 
   return normalized

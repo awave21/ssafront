@@ -4,6 +4,10 @@
 
 chatmedbot.ru {
 	encode zstd gzip
+
+	@lkPaths path /login /login/* /dashboard /dashboard/* /agents /agents/* /settings /settings/*
+	redir @lkPaths https://lk.chatmedbot.ru{uri} permanent
+
 	handle {
 		reverse_proxy landing:80
 	}
@@ -20,35 +24,30 @@ api.chatmedbot.ru {
 	reverse_proxy api:8000
 }
 
-devteam.chatmedbot.ru {
-	encode zstd gzip
-
-	@devteamApi path /api/devteam/*
-	handle @devteamApi {
-		reverse_proxy devteam:8090
-	}
-
-	handle {
-		reverse_proxy devteam-ui:80
-	}
-}
-
 lk.chatmedbot.ru {
-	encode zstd gzip
-
 	handle_path {$MONITOR_PATH}* {
 		basic_auth {
 			{$MONITOR_AUTH_USER} {$MONITOR_AUTH_HASH}
 		}
+		encode zstd gzip
 		reverse_proxy netdata:19999
+	}
+
+	# SSE-стрим (чат навыка) — БЕЗ сжатия, иначе Caddy буферизует поток
+	# и дельты приходят пачкой в конце вместо реального времени.
+	@sse path */skill-chat/stream
+	handle @sse {
+		reverse_proxy api:8000
 	}
 
 	@apiPath path /api/v1/*
 	handle @apiPath {
+		encode zstd gzip
 		reverse_proxy api:8000
 	}
 
 	handle {
+		encode zstd gzip
 		reverse_proxy frontend:80
 	}
 }

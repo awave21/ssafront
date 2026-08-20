@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.db.models.agent import Agent
+from app.db.models.script_flow import ScriptFlow
 from app.db.models.unified_graph_rebuild_job import UnifiedGraphRebuildJob
 from app.db.session import async_session_factory
 from app.services.agent_unified_graph import (
@@ -17,7 +18,10 @@ from app.services.agent_unified_graph import (
     enrich_semantic_relations,
     materialize_unified_graph,
 )
-from app.services.graphrag_export.corpus_dispatch import dispatch_microsoft_graphrag_corpus
+from app.services.graphrag_export.corpus_dispatch import dispatch_graphrag_corpus
+from app.services.graph.sqns_neo4j_sync import sync_sqns_to_neo4j
+from app.services.tenant_llm_config import get_decrypted_api_key
+from sqlalchemy import func, update
 
 logger = structlog.get_logger(__name__)
 
@@ -146,7 +150,52 @@ async def _mark_job_failed(db: AsyncSession, *, job_id: UUID, error: str) -> Non
     await db.commit()
 
 
+async def _count_pending_flows(agent_id: UUID) -> tuple[int, int]:
+    """Returns (pending+indexing, total_published) для прогресса."""
+    async with async_session_factory() as db:
+        pending = await db.scalar(
+            select(func.count(ScriptFlow.id)).where(
+                ScriptFlow.agent_id == agent_id,
+                ScriptFlow.published_version.isnot(None),
+                ScriptFlow.published_version > 0,
+                ScriptFlow.index_status.in_(["pending", "indexing"]),
+            )
+        )
+        total = await db.scalar(
+            select(func.count(ScriptFlow.id)).where(
+                ScriptFlow.agent_id == agent_id,
+                ScriptFlow.published_version.isnot(None),
+                ScriptFlow.published_version > 0,
+            )
+        )
+        return int(pending or 0), int(total or 0)
+
+
+async def _update_job(job_id: UUID, **fields) -> None:
+    async with async_session_factory() as db:
+        job = await db.get(UnifiedGraphRebuildJob, job_id)
+        if job is None:
+            return
+        for k, v in fields.items():
+            setattr(job, k, v)
+        await db.commit()
+
+
 async def _process_unified_graph_rebuild_job(job_id: UUID) -> None:
+    """Полный sweep по агенту: SQNS + переиндексация скрипт-флоу + повторный SQNS.
+
+    Порядок важен: :Service/:Specialist должны быть в Neo4j ДО индексации flows,
+    чтобы fuzzy-match создавал рёбра :COVERS_SERVICE/:HAS_SPECIALIST. После
+    flows прогоняем SQNS повторно — теперь :Service embedding обогащается
+    контекстом канвас-нод (через новые рёбра).
+
+    Stages:
+      1. SQNS sync — pre-flow (creates :Service/:Specialist) (5→15%)
+      2. mark all published flows as pending (15%)
+      3. poll until all flows reach 'indexed' (15→75%)
+      4. SQNS sync — post-flow (refresh embeddings with flow context) (75→95%)
+      5. done (100%)
+    """
     async with async_session_factory() as db:
         job = await db.get(UnifiedGraphRebuildJob, job_id)
         if job is None:
@@ -158,106 +207,129 @@ async def _process_unified_graph_rebuild_job(job_id: UUID) -> None:
             await _mark_job_failed(db, job_id=job_id, error="agent_not_found")
             return
 
-        settings = get_settings()
-        ws_root = (settings.microsoft_graphrag_workspace_root or "").strip()
+        agent_id = job.agent_id
+        tenant_id = job.tenant_id
+
         job.status = "running"
-        job.stage = "materializing"
+        job.stage = "syncing_sqns_pre"
         job.progress_pct = 5
-        job.message = None
+        job.message = "Синхронизация SQNS услуг/специалистов в Neo4j (pre-flow)…"
         job.error_message = None
         job.started_at = _utcnow()
         await db.commit()
 
-        # Слой 1 — структурный материализатор (быстро, без LLM).
-        # Граф визуализации сразу становится корректным. GraphRAG-индексация
-        # запускается следом для рантайм-инструмента query_microsoft_graphrag.
+        # Stage 1: SQNS sync FIRST — creates :Service/:Specialist nodes
+        # so that fuzzy-match in flow indexing can write COVERS_SERVICE edges.
         try:
-            mat = await materialize_unified_graph(
-                db, tenant_id=job.tenant_id, agent_id=job.agent_id
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "unified_graph_materialize_failed",
-                job_id=str(job_id),
-                agent_id=str(job.agent_id),
-                error=str(exc),
-            )
-            await _mark_job_failed(db, job_id=job_id, error=f"materialize: {exc}"[:4000])
-            return
-
-        # Слой 1.5 — эмбеддинги для узлов (нужны cosine-обогащению).
-        # Считаются только для узлов с устаревшим хешем контента.
-        try:
-            emb = await compute_node_embeddings(
-                db, tenant_id=job.tenant_id, agent_id=job.agent_id
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "unified_graph_embeddings_failed",
-                job_id=str(job_id),
-                agent_id=str(job.agent_id),
-                error=str(exc),
-            )
-            emb = None
-
-        # Слой 2 — семантическое обогащение (keyword + cosine, без новых узлов).
-        try:
-            enrich = await enrich_semantic_relations(
-                db, tenant_id=job.tenant_id, agent_id=job.agent_id
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "unified_graph_enrich_failed",
-                job_id=str(job_id),
-                agent_id=str(job.agent_id),
-                error=str(exc),
-            )
-            # Не валим весь rebuild — структурный слой уже на месте.
-            enrich = None
-
-        job.stage = "indexing" if ws_root else "dispatching"
-        job.progress_pct = 30
-        enrich_part = (
-            f", +{enrich.relations} семантических связей" if enrich else ""
-        )
-        job.message = (
-            f"Структура: {mat.nodes} узлов, {mat.relations} связей{enrich_part}. "
-            "Индексация GraphRAG…"
-        )
-        await db.commit()
-
-        try:
-            ok, message = await dispatch_microsoft_graphrag_corpus(
+            openai_api_key = await get_decrypted_api_key(db, tenant_id)
+            await sync_sqns_to_neo4j(
                 db=db,
-                agent=agent,
-                settings=settings,
-                active_sqns_only=bool(job.active_sqns_only),
+                agent_id=agent_id,
+                tenant_id=tenant_id,
+                openai_api_key=openai_api_key,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
-                "unified_graph_rebuild_job_failed",
+                "unified_graph_rebuild_sqns_pre_failed",
                 job_id=str(job_id),
-                agent_id=str(job.agent_id),
-                tenant_id=str(job.tenant_id),
+                agent_id=str(agent_id),
                 error=str(exc),
             )
-            await _mark_job_failed(db, job_id=job_id, error=str(exc) or exc.__class__.__name__)
+            await _mark_job_failed(db, job_id=job_id, error=f"sqns_sync_pre: {exc}"[:4000])
             return
 
-        if not ok:
-            job.status = "failed"
-            job.stage = "failed"
-            job.progress_pct = 100
-            job.message = None
-            job.error_message = (message or "rebuild_failed")[:4000]
-            job.finished_at = _utcnow()
+        await _update_job(
+            job_id,
+            stage="reindexing_flows",
+            progress_pct=15,
+            message="Постановка опубликованных потоков в очередь индексации…",
+        )
+
+        # Stage 2: re-queue all published flows.
+        try:
+            await db.execute(
+                update(ScriptFlow)
+                .where(
+                    ScriptFlow.agent_id == agent_id,
+                    ScriptFlow.published_version.isnot(None),
+                    ScriptFlow.published_version > 0,
+                )
+                .values(index_status="pending", index_retry_count=0, index_error=None)
+            )
             await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "unified_graph_rebuild_requeue_failed",
+                job_id=str(job_id),
+                agent_id=str(agent_id),
+                error=str(exc),
+            )
+            await _mark_job_failed(db, job_id=job_id, error=f"requeue: {exc}"[:4000])
             return
 
-        job.status = "succeeded"
-        job.stage = "done"
-        job.progress_pct = 100
-        job.message = (message or "ok")[:4000]
-        job.error_message = None
-        job.finished_at = _utcnow()
-        await db.commit()
+    # Stage 3: poll until all flows are indexed (worker processes them in parallel).
+    max_wait_seconds = 1200  # 20 minutes hard limit
+    poll_interval = 5
+    waited = 0
+    initial_pending, total_flows = await _count_pending_flows(agent_id)
+    while waited < max_wait_seconds:
+        pending, _ = await _count_pending_flows(agent_id)
+        if pending == 0:
+            break
+        # progress: 15% → 75% линейно по доле обработанных
+        if total_flows > 0:
+            done_ratio = max(0.0, (total_flows - pending) / total_flows)
+        else:
+            done_ratio = 0.0
+        pct = int(15 + done_ratio * 60)
+        await _update_job(
+            job_id,
+            stage="reindexing_flows",
+            progress_pct=pct,
+            message=f"Индексация потоков: {total_flows - pending}/{total_flows}",
+        )
+        await asyncio.sleep(poll_interval)
+        waited += poll_interval
+    else:
+        async with async_session_factory() as db:
+            await _mark_job_failed(db, job_id=job_id, error="reindex_timeout")
+        return
+
+    # Stage 4: SQNS sync POST-flow — обогащает :Service/:Specialist embedding'и
+    # контекстом канвас-нод через новосозданные рёбра :COVERS_SERVICE/:HAS_SPECIALIST.
+    await _update_job(
+        job_id,
+        stage="syncing_sqns_post",
+        progress_pct=75,
+        message="Обновление embedding'ов услуг и специалистов с контекстом скриптов…",
+    )
+    try:
+        async with async_session_factory() as db:
+            openai_api_key = await get_decrypted_api_key(db, tenant_id)
+            await sync_sqns_to_neo4j(
+                db=db,
+                agent_id=agent_id,
+                tenant_id=tenant_id,
+                openai_api_key=openai_api_key,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "unified_graph_rebuild_sqns_post_failed",
+            job_id=str(job_id),
+            agent_id=str(agent_id),
+            error=str(exc),
+        )
+        async with async_session_factory() as db:
+            await _mark_job_failed(db, job_id=job_id, error=f"sqns_sync_post: {exc}"[:4000])
+        return
+
+    # Stage 5: done.
+    await _update_job(
+        job_id,
+        status="succeeded",
+        stage="done",
+        progress_pct=100,
+        message=f"Готово. Реиндексировано потоков: {total_flows}.",
+        error_message=None,
+        finished_at=_utcnow(),
+    )

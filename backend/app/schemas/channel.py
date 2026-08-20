@@ -24,7 +24,7 @@ class WidgetSettings(BaseModel):
 
 
 class ChannelBase(BaseModel):
-    type: Literal["telegram", "telegram_phone", "whatsapp", "max", "web_widget"] = Field(..., description="Тип канала")
+    type: Literal["telegram", "telegram_phone", "whatsapp", "max", "web_widget", "jivo"] = Field(..., description="Тип канала")
     telegram_bot_token: str | None = Field(None, description="Токен Telegram-бота")
     telegram_webhook_enabled: bool = Field(False, description="Активен ли webhook")
     telegram_webhook_endpoint: str | None = Field(None, description="Webhook endpoint для Telegram")
@@ -42,7 +42,7 @@ class ChannelCreate(ChannelBase):
 
 
 class ChannelUpdate(BaseModel):
-    type: Literal["telegram", "telegram_phone", "whatsapp", "max", "web_widget"] | None = Field(None, description="Тип канала")
+    type: Literal["telegram", "telegram_phone", "whatsapp", "max", "web_widget", "jivo"] | None = Field(None, description="Тип канала")
     telegram_bot_token: str | None = Field(None, description="Токен Telegram-бота")
     telegram_webhook_enabled: bool | None = Field(None, description="Активен ли webhook")
     telegram_webhook_endpoint: str | None = Field(None, description="Webhook endpoint для Telegram")
@@ -66,7 +66,7 @@ class TelegramBotTokenUpdate(BaseModel):
         return v
 
 
-PublicChannelType = Literal["Telegram_Bot", "Telegram_Phone", "Whatsapp_Phone", "Max_Phone", "Web_Widget"]
+PublicChannelType = Literal["Telegram_Bot", "Telegram_Phone", "Whatsapp_Phone", "Max_Phone", "Web_Widget", "Jivo"]
 
 
 class ChannelConnectionPayload(BaseModel):
@@ -76,6 +76,8 @@ class ChannelConnectionPayload(BaseModel):
     max_bot_id: str | None = Field(None, max_length=64, description="ID бота Wappi MAX (query bot_id при отправке)")
     widget_settings: WidgetSettings | None = Field(None, description="Настройки виджета")
     widget_allowed_origins: list[str] | None = Field(None, description="Разрешённые домены (пусто = все)")
+    jivo_provider_id: str | None = Field(None, max_length=120, description="ID провайдера Jivo (из кабинета)")
+    jivo_reply_base_url: str | None = Field(None, max_length=500, description="Путь к ответу Jivo (из кабинета)")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -102,6 +104,8 @@ class ChannelConnectionPayload(BaseModel):
             raise ValueError("whatsapp_phone is only allowed for Whatsapp_Phone")
         if self.type != "Max_Phone" and self.max_bot_id:
             raise ValueError("max_bot_id is only allowed for Max_Phone")
+        if self.type != "Jivo" and (self.jivo_provider_id or self.jivo_reply_base_url):
+            raise ValueError("jivo fields are only allowed for Jivo")
         return self
 
 
@@ -126,10 +130,24 @@ class ChannelRead(ChannelBase):
     widget_allowed_origins: list[str] | None = None
     widget_api_key_last4: str | None = None
 
+    # Jivo fields
+    jivo_provider_id: str | None = None
+    jivo_reply_base_url: str | None = None
+    jivo_provider_token: str | None = None
+
 
 class ChannelConnectRead(ChannelRead):
     """Returned only on connect — includes one-time raw API key."""
     raw_api_key: str | None = None
+
+
+class JivoPrepareRead(BaseModel):
+    """Ответ на подготовку канала Jivo: даёт webhook-URL и токен для инструкции."""
+
+    webhook_url: str = Field(..., description="Полный URL для вставки в кабинет Jivo")
+    provider_token: str = Field(..., description="Наш токен (сегмент URL, аутентификация)")
+    provider_id: str | None = Field(None, description="ID провайдера (если уже введён)")
+    reply_base_url: str | None = Field(None, description="Путь к ответу (если уже введён)")
 
 
 class ChannelAuthQrRead(BaseModel):

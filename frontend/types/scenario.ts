@@ -59,6 +59,12 @@ export type ScenarioAction = FunctionRuleAction & {
   action_type: ScenarioActionType
 }
 
+// Reaction/Behavior — эти два поля backend требует у каждого правила.
+// В UI сейчас не редактируются, но должны round-trip'иться без потерь,
+// иначе PUT затирает значения, установленные через API/SQL (например `pause`).
+export type ScenarioReactionMode = 'send_message' | 'ai_instruction' | 'ai_self_reply' | 'silent'
+export type ScenarioPostBehavior = 'continue' | 'pause' | 'augment_prompt'
+
 export type Scenario = {
   id: string
   agent_id: string
@@ -68,6 +74,8 @@ export type Scenario = {
   trigger_mode: ScenarioTriggerMode
   condition_type: ScenarioConditionType
   condition_config: ScenarioConditionConfig
+  reaction_to_execution?: ScenarioReactionMode
+  behavior_after_execution?: ScenarioPostBehavior
   actions: ScenarioAction[]
   created_at?: string
   updated_at?: string
@@ -88,6 +96,8 @@ export type BackendScenario = {
   trigger_mode: ScenarioTriggerMode
   condition_type: ScenarioConditionType
   condition_config: Record<string, any>
+  reaction_to_execution?: ScenarioReactionMode
+  behavior_after_execution?: ScenarioPostBehavior
   actions: BackendFunctionRuleAction[]
   created_at?: string
   updated_at?: string | null
@@ -103,6 +113,8 @@ export const mapScenarioFromBackend = (backend: BackendScenario): Scenario => {
     trigger_mode: backend.trigger_mode,
     condition_type: backend.condition_type,
     condition_config: backend.condition_config || {},
+    reaction_to_execution: backend.reaction_to_execution,
+    behavior_after_execution: backend.behavior_after_execution,
     actions: (backend.actions || []).map(mapRuleActionFromBackend) as ScenarioAction[],
     created_at: backend.created_at,
     updated_at: backend.updated_at || undefined,

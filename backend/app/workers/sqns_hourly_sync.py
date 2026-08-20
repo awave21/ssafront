@@ -15,6 +15,8 @@ from app.services.sqns.client_factory import SqnsClientConfigurationError, build
 from app.services.sqns.sync import sync_sqns_entities
 from app.services.sqns.sync_locks import sqns_agent_lock
 from app.services.graphrag_export.corpus_dispatch import maybe_auto_dispatch_graphrag_corpus
+from app.services.graph.sqns_neo4j_sync import sync_sqns_to_neo4j
+from app.services.tenant_llm_config import get_decrypted_api_key
 
 logger = structlog.get_logger(__name__)
 
@@ -79,6 +81,38 @@ async def _sync_agent(agent_id: UUID) -> None:
                 agent.sqns_last_activity_at = datetime.utcnow()
             await db.commit()
             if result.success:
+                # Sync SQNS data to Neo4j with embeddings
+                openai_api_key = await get_decrypted_api_key(db, agent.tenant_id)
+                try:
+                    await sync_sqns_to_neo4j(
+                        db=db,
+                        agent_id=agent.id,
+                        tenant_id=agent.tenant_id,
+                        openai_api_key=openai_api_key,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "sqns_worker_neo4j_sync_failed",
+                        agent_id=str(agent.id),
+                        error=str(exc),
+                    )
+                # Пересчёт pgvector-эмбеддингов услуг/специалистов для гибридного поиска
+                # (хеш-гейт: эмбеддит только изменившиеся строки — дёшево каждый час).
+                try:
+                    from app.services.sqns.hybrid_search import compute_sqns_embeddings
+
+                    await compute_sqns_embeddings(
+                        db=db,
+                        agent_id=agent.id,
+                        tenant_id=agent.tenant_id,
+                        openai_api_key=openai_api_key,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "sqns_worker_embeddings_failed",
+                        agent_id=str(agent.id),
+                        error=str(exc),
+                    )
                 await maybe_auto_dispatch_graphrag_corpus(agent.id, agent.tenant_id)
 
 

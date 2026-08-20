@@ -53,8 +53,40 @@
           </TooltipRoot>
         </li>
 
-        <li v-for="item in currentMenuItems" :key="item.name">
-          <TooltipRoot :disabled="!isCollapsed">
+        <li v-for="item in currentMenuItems" :key="item.id || item.name || item.path">
+          <!-- Тумблер «Режим разработчика» -->
+          <TooltipRoot v-if="item.type === 'dev-toggle'" :disabled="!isCollapsed">
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                :aria-pressed="devMode"
+                @click="devMode = !devMode"
+                class="flex w-full items-center text-sm font-medium rounded-md transition-colors text-sidebar-foreground hover:bg-muted"
+                :class="[isCollapsed ? 'mt-2 h-10 w-10 justify-center' : 'mt-1 border-t border-border px-3 pb-2 pt-3 gap-3']"
+              >
+                <Wrench class="w-5 h-5 shrink-0" :class="devMode ? 'text-primary' : ''" />
+                <span v-show="!isCollapsed" class="whitespace-nowrap flex-1 text-left">Режим разработчика</span>
+                <span
+                  v-show="!isCollapsed"
+                  class="relative mr-3 inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors"
+                  :class="devMode ? 'bg-primary' : 'bg-slate-200'"
+                >
+                  <span
+                    class="inline-block h-3 w-3 rounded-full bg-white transition-transform"
+                    :class="devMode ? 'translate-x-3.5' : 'translate-x-0.5'"
+                  />
+                </span>
+              </button>
+            </TooltipTrigger>
+            <TooltipPortal>
+              <TooltipContent side="right" :side-offset="12" class="z-[9999] rounded-md bg-foreground px-2.5 py-1.5 text-xs text-background shadow-md">
+                Режим разработчика
+              </TooltipContent>
+            </TooltipPortal>
+          </TooltipRoot>
+
+          <!-- Обычный пункт меню -->
+          <TooltipRoot v-else :disabled="!isCollapsed">
             <TooltipTrigger as-child>
               <NuxtLink
                 :to="item.path"
@@ -156,7 +188,7 @@ defineOptions({
   inheritAttrs: false
 })
 
-import { computed } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   LayoutDashboard,
@@ -183,6 +215,8 @@ import {
   UsersRound,
   ListTree,
   GitBranch,
+  Award,
+  Wrench,
 } from 'lucide-vue-next'
 import {
   TooltipRoot,
@@ -197,6 +231,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from 'radix-vue'
+import { useLocalStorage } from '@vueuse/core'
 import { useAuth } from '../composables/useAuth'
 import { usePermissions } from '~/composables/usePermissions'
 import { useLayoutState } from '~/composables/useLayoutState'
@@ -207,8 +242,22 @@ const route = useRoute()
 const router = useRouter()
 
 // Use shared layout state
-const { isCollapsed } = useLayoutState()
+const { isCollapsed, newInterface } = useLayoutState()
 const { hasScope } = usePermissions()
+
+// Режим разработчика: прячет технические разделы за тумблером (доступен только в «Новом интерфейсе»).
+const devMode = useLocalStorage('agent-sidebar-dev-mode', false)
+
+// Persist глобального режима «Новый интерфейс». Сайдбар смонтирован всегда, поэтому храним здесь.
+onMounted(() => {
+  if (import.meta.client) {
+    const saved = localStorage.getItem('new-interface')
+    if (saved === 'true' || saved === 'false') newInterface.value = saved === 'true'
+  }
+})
+watch(newInterface, (v) => {
+  if (import.meta.client) localStorage.setItem('new-interface', String(v))
+})
 
 const emit = defineEmits<{
   close: []
@@ -266,6 +315,11 @@ const menuItems = [
     icon: Activity
   },
   {
+    name: 'Мотивация',
+    path: '/motivation',
+    icon: Award
+  },
+  {
     name: 'История',
     path: '/tool-calls-history',
     icon: History
@@ -289,48 +343,59 @@ const menuItems = [
   }
 ]
 
+// Порядок — как в классическом виде. group: 'dev' → в «Новом интерфейсе» прячется за тумблером
+// «Режим разработчика»; в классике всё отображается плоским списком в этом же порядке.
 const agentMenuItems = [
   { id: 'prompt', name: 'Системный промпт', icon: Sparkles, path: (id: string) => `/agents/${id}/prompt` },
   { id: 'channels', name: 'Каналы', icon: Radio, path: (id: string) => `/agents/${id}/channels` },
   { id: 'connections', name: 'Интеграции', icon: Link, path: (id: string) => `/agents/${id}/connections` },
   { id: 'knowledge', name: 'База знаний', icon: Database, path: (id: string) => `/agents/${id}/knowledge` },
-  { id: 'knowledge-graph', name: 'Граф знаний', icon: GitBranch, path: (id: string) => `/agents/${id}/knowledge/graph` },
-  { id: 'scenarios', name: 'Сценарии', icon: ListTree, path: (id: string) => `/agents/${id}/scenarios` },
+  { id: 'knowledge-graph', name: 'Граф знаний', icon: GitBranch, path: (id: string) => `/agents/${id}/knowledge/graph`, group: 'dev' },
+  { id: 'scenarios', name: 'Сценарии', icon: ListTree, path: (id: string) => `/agents/${id}/scenarios`, group: 'dev' },
   { id: 'script-flows', name: 'Потоки эксперта', icon: GitBranch, path: (id: string) => `/agents/${id}/scripts` },
-  { id: 'functions', name: 'Функции', icon: Code, path: (id: string) => `/agents/${id}/functions` },
-  { id: 'webhook', name: 'Webhook', icon: Webhook, path: (id: string) => `/agents/${id}/webhook` },
-  { id: 'model', name: 'Модель', icon: Cpu, path: (id: string) => `/agents/${id}/model` },
-  { id: 'analysis', name: 'Анализ', icon: Activity, path: (id: string) => `/agents/${id}/analysis` },
+  { id: 'skills', name: 'Навыки', icon: GraduationCap, path: (id: string) => `/agents/${id}/skills` },
+  { id: 'functions', name: 'Функции', icon: Code, path: (id: string) => `/agents/${id}/functions`, group: 'dev' },
+  { id: 'webhook', name: 'Webhook', icon: Webhook, path: (id: string) => `/agents/${id}/webhook`, group: 'dev' },
+  { id: 'model', name: 'Модель', icon: Cpu, path: (id: string) => `/agents/${id}/model`, group: 'dev' },
+  { id: 'analysis', name: 'Анализ', icon: Activity, path: (id: string) => `/agents/${id}/analysis`, group: 'dev' },
   { id: 'chat', name: 'Чат', icon: MessageSquare, path: (id: string) => `/agents/${id}/chat` },
-  { id: 'api-keys', name: 'API-ключи', icon: KeyRound, path: (id: string) => `/agents/${id}/api-keys`, requiresScope: 'settings:write' },
-  {
-    id: 'settings',
-    name: 'Настройки',
-    icon: Settings,
-    path: (id: string) => `/agents/${id}/settings`,
-    requiresScope: 'agents:write',
-  },
-]
+  { id: 'api-keys', name: 'API-ключи', icon: KeyRound, path: (id: string) => `/agents/${id}/api-keys`, requiresScope: 'settings:write', group: 'dev' },
+  { id: 'settings', name: 'Настройки', icon: Settings, path: (id: string) => `/agents/${id}/settings`, requiresScope: 'agents:write' },
+] as const
 
-const currentMenuItems = computed(() => {
-  if (isAgentDetail.value) {
-    const agentId = route.params.id as string
-    return agentMenuItems
-      .filter(item => !item.requiresScope || hasScope(item.requiresScope))
-      .map(item => ({
-        ...item,
-        path: item.path(agentId)
-      }))
+const currentMenuItems = computed<any[]>(() => {
+  if (!isAgentDetail.value) {
+    return menuItems.filter(
+      item => !('requiresScope' in item && item.requiresScope) || hasScope(item.requiresScope),
+    )
   }
-  return menuItems.filter(
-    item => !('requiresScope' in item && item.requiresScope) || hasScope(item.requiresScope),
+  const agentId = route.params.id as string
+  const resolved = agentMenuItems
+    .filter(item => !('requiresScope' in item && item.requiresScope) || hasScope((item as any).requiresScope))
+    .map(item => ({ ...item, path: item.path(agentId) }))
+  // Классический вид: плоский список всех разделов (как раньше на проде).
+  if (!newInterface.value) return resolved
+  // Новый интерфейс: разделы агента вынесены в горизонтальные вкладки (AgentTabsNav).
+  // В sidebar видны только «базовые» пункты, которые не имеют отдельной вкладки —
+  // сейчас это «Чат» (тестовый чат агента). Плюс тумблер «Режим разработчика», а при
+  // включённом dev-mode — dev-разделы без дубля с верхней навигацией.
+  // Функции/Сценарии/Webhook/Модель/API-ключи — уже в top-tabs, не дублируем.
+  const DEV_IN_TOP_TABS = new Set(['functions', 'scenarios', 'webhook', 'model', 'api-keys'])
+  const ALWAYS_VISIBLE_IN_NEW = new Set(['chat'])
+  const alwaysVisible = resolved.filter(i => ALWAYS_VISIBLE_IN_NEW.has((i as any).id))
+  const dev = resolved.filter(
+    i => (i as any).group === 'dev' && !DEV_IN_TOP_TABS.has((i as any).id),
   )
+  const list: any[] = [...alwaysVisible, { id: '__dev-toggle', type: 'dev-toggle' }]
+  if (devMode.value) list.push(...dev)
+  return list
 })
 
 const activeMenuPath = computed(() => {
   const currentPath = route.path || ''
   const candidates = currentMenuItems.value
     .map(item => item.path)
+    .filter((path): path is string => typeof path === 'string')
     .filter(path => currentPath === path || (path !== '/' && currentPath.startsWith(path + '/')))
   if (!candidates.length) return ''
   return candidates.sort((a, b) => b.length - a.length)[0]

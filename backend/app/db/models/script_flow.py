@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.db.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
+from app.db.models.mixins import SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from app.db.models.agent import Agent
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from app.db.models.script_node import ScriptNode
 
 
-class ScriptFlow(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+class ScriptFlow(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "script_flows"
 
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), index=True, nullable=False)
@@ -47,6 +47,13 @@ class ScriptFlow(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     flow_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     flow_definition: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    # Явная связь навык↔услуга (внешние id услуг SQNS). Первичный источник для
+    # раздела «Навыки»; flow_metadata["service_ids"] остаётся fallback-совместимым.
+    service_external_ids: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
+    # Дистиллированная структура навыка (производная от compiled_text).
+    skill_doc: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     compiled_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     index_status: Mapped[str] = mapped_column(
         Enum("idle", "pending", "indexing", "indexed", "failed", name="script_flow_index_status"),

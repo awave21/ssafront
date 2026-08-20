@@ -15,7 +15,17 @@
         </p>
       </div>
       <div class="space-y-1">
-        <label class="insp-label">Как интерпретировать ответ клиента</label>
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>Как интерпретировать ответ клиента</span>
+          <FieldHelpIcons
+            field-key="condition.routing_hint"
+            node-type="condition"
+            :node-id="nodeId"
+            :current-node-data="currentNodeData"
+            :current-value="localRoutingHint"
+            @ai-fill="(t: string) => applyAi('routing_hint', t)"
+          />
+        </label>
         <textarea
           v-model="localRoutingHint"
           rows="3"
@@ -59,10 +69,12 @@
 </template>
 
 <script setup lang="ts">
-import { inject } from 'vue'
+import { computed, inject } from 'vue'
 import { SCRIPT_FLOW_INSPECTOR_KEY } from '~/composables/useScriptFlowInspectorModel'
+import FieldHelpIcons from './FieldHelpIcons.vue'
 
 const {
+  nodeId,
   localRoutingHint,
   localBranches,
   lastFocusedField,
@@ -74,5 +86,19 @@ const {
 
 const focusField = (k: string) => {
   lastFocusedField.value = k
+}
+
+const currentNodeData = computed(() => ({
+  routing_hint: localRoutingHint.value,
+  branches: localBranches.value
+    .filter((b) => b.label.trim())
+    .map((b) => ({ id: b.id, label: b.label.trim() })),
+}))
+
+const applyAi = (field: string, text: string) => {
+  if (field === 'routing_hint') {
+    localRoutingHint.value = text
+    flushNode()
+  }
 }
 </script>

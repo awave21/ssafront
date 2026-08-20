@@ -32,7 +32,16 @@
         </p>
       </div>
       <div class="space-y-1">
-        <label class="insp-label">Откуда берутся данные для правила</label>
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>Откуда берутся данные для правила</span>
+          <FieldHelpIcons
+            field-key="business_rule.data_source"
+            node-type="business_rule"
+            :node-id="props.nodeId"
+            :current-node-data="currentNodeData"
+            :ai-enabled="false"
+          />
+        </label>
         <select v-model="localDataSource" class="insp-input" @change="flushNode">
           <option value="sqns_resources">Сотрудники</option>
           <option value="sqns_services">Услуги</option>
@@ -41,7 +50,16 @@
       </div>
       <div class="grid grid-cols-2 gap-2">
         <div class="space-y-1">
-          <label class="insp-label">С чем связано правило</label>
+          <label class="insp-label inline-flex items-center gap-2">
+            <span>С чем связано правило</span>
+            <FieldHelpIcons
+              field-key="business_rule.entity_type"
+              node-type="business_rule"
+              :node-id="props.nodeId"
+              :current-node-data="currentNodeData"
+              :ai-enabled="false"
+            />
+          </label>
           <select v-model="localEntityType" class="insp-input" @change="flushNode">
             <option value="employee">Сотрудник</option>
             <option value="service">Услуга</option>
@@ -49,7 +67,16 @@
           </select>
         </div>
         <div class="space-y-1">
-          <label class="insp-label">Приоритет правила</label>
+          <label class="insp-label inline-flex items-center gap-2">
+            <span>Приоритет правила</span>
+            <FieldHelpIcons
+              field-key="business_rule.rule_priority"
+              node-type="business_rule"
+              :node-id="props.nodeId"
+              :current-node-data="currentNodeData"
+              :ai-enabled="false"
+            />
+          </label>
           <input v-model.number="localRulePriority" type="number" min="1" max="999" class="insp-input" @input="flushNode">
         </div>
       </div>
@@ -70,7 +97,17 @@
       v-if="localEntityId && localEntityType !== 'custom' && (patchSpecialistProfile || patchServiceDescription)"
       class="space-y-1 rounded-xl border border-border/80 bg-background/95 p-3 shadow-sm"
     >
-      <label class="insp-label">Расширенное описание в справочнике</label>
+      <label class="insp-label inline-flex items-center gap-2">
+        <span>Расширенное описание в справочнике</span>
+        <FieldHelpIcons
+          field-key="business_rule.sqns_profile_draft"
+          node-type="business_rule"
+          :node-id="props.nodeId"
+          :current-node-data="currentNodeData"
+          :current-value="sqnsProfileDraft"
+          @ai-fill="(t: string) => applyAiSqnsProfile(t)"
+        />
+      </label>
       <textarea
         v-model="sqnsProfileDraft"
         rows="5"
@@ -88,7 +125,17 @@
         </p>
       </div>
       <div class="space-y-1">
-        <label class="insp-label">Когда это правило должно сработать</label>
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>Когда это правило должно сработать</span>
+          <FieldHelpIcons
+            field-key="business_rule.rule_condition"
+            node-type="business_rule"
+            :node-id="props.nodeId"
+            :current-node-data="currentNodeData"
+            :current-value="localRuleCondition"
+            @ai-fill="(t: string) => applyAi('rule_condition', t)"
+          />
+        </label>
         <textarea v-model="localRuleCondition" rows="3" class="insp-input resize-none" @input="flushNode" />
       </div>
       <div class="grid grid-cols-2 gap-2">
@@ -118,7 +165,17 @@
         </div>
       </div>
       <div class="space-y-1">
-        <label class="insp-label">Что ассистент должен сделать по этому правилу</label>
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>Что ассистент должен сделать по этому правилу</span>
+          <FieldHelpIcons
+            field-key="business_rule.rule_action"
+            node-type="business_rule"
+            :node-id="props.nodeId"
+            :current-node-data="currentNodeData"
+            :current-value="localRuleAction"
+            @ai-fill="(t: string) => applyAi('rule_action', t)"
+          />
+        </label>
         <textarea v-model="localRuleAction" rows="4" class="insp-input resize-none" @input="flushNode" />
       </div>
     </div>
@@ -148,6 +205,7 @@ import { useDebounceFn } from '@vueuse/core'
 import { SCRIPT_FLOW_INSPECTOR_KEY } from '~/composables/useScriptFlowInspectorModel'
 import InspectorKgLinks from './InspectorKgLinks.vue'
 import ScriptFlowEntityCombobox from './ScriptFlowEntityCombobox.vue'
+import FieldHelpIcons from './FieldHelpIcons.vue'
 
 const props = defineProps<{
   nodeId: string | null
@@ -251,4 +309,35 @@ const persistSqnsProfile = async () => {
 }
 
 const debouncedSaveSqnsProfile = useDebounceFn(persistSqnsProfile, 650)
+
+const currentNodeData = computed(() => ({
+  data_source: localDataSource.value,
+  entity_type: localEntityType.value,
+  entity_id: localEntityId.value,
+  rule_priority: localRulePriority.value,
+  rule_condition: localRuleCondition.value,
+  rule_action: localRuleAction.value,
+  rule_active: localRuleActive.value,
+  requires_entity: localRequiresEntity.value,
+  must_follow_node_refs: localMustFollowNodeRefs.value,
+  is_catalog_rule: localIsCatalogRule.value,
+  sqns_profile_draft: sqnsProfileDraft.value,
+}))
+
+const FIELD_REFS: Record<string, { value: string }> = {
+  rule_condition: localRuleCondition,
+  rule_action: localRuleAction,
+}
+
+const applyAi = (field: string, text: string) => {
+  const ref = FIELD_REFS[field]
+  if (!ref) return
+  ref.value = text
+  flushNode()
+}
+
+const applyAiSqnsProfile = (text: string) => {
+  sqnsProfileDraft.value = text
+  void debouncedSaveSqnsProfile()
+}
 </script>

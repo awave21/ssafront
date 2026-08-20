@@ -742,6 +742,7 @@ def build_expert_tactics_tool(
 
     async def search_expert_tactics(query: str, service_id: str = "") -> str:
         """Найти экспертную тактику для текущей ситуации в диалоге."""
+        from app.core.config import get_settings
         from app.services.runtime.script_flow_retriever import ScriptFlowRetriever
 
         q = (query or "").strip()
@@ -749,6 +750,7 @@ def build_expert_tactics_tool(
             return "Не указан запрос."
 
         sid = (service_id or "").strip() or None
+        min_score = get_settings().expert_tactics_min_score
 
         async with async_session_factory() as db:
             retriever = ScriptFlowRetriever(
@@ -760,6 +762,7 @@ def build_expert_tactics_tool(
             packet = await retriever.build_context_packet(
                 query=q,
                 service_id=sid,
+                min_score=min_score,
             )
 
         await _log_tactic_search(

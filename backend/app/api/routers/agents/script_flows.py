@@ -29,6 +29,13 @@ from app.db.session import get_db
 from app.schemas.auth import AuthContext
 from app.schemas.script_flow_definition import validate_flow_definition
 from app.services.script_flow_compiler import compile_script_flow_to_text
+from app.services.script_flow_skill_distiller import (
+    distill_skill,
+    converse_skill,
+    converse_skill_stream,
+    _sanitize_skill_doc,
+)
+from sse_starlette.sse import EventSourceResponse
 from app.services.script_flow_graphrag_compiler import compile_script_flow_graphrag_payload
 from app.services.script_flow_graphrag_schema import ScriptFlowGraphPreview
 from app.services.runtime.script_flow_graphrag_neo4j_read import (
@@ -103,6 +110,8 @@ class ScriptFlowRead(BaseModel):
     definition_version: int
     flow_metadata: dict[str, Any]
     flow_definition: dict[str, Any]
+    service_external_ids: list[str] = []
+    skill_doc: dict[str, Any] | None = None
     compiled_text: str | None
     index_status: str
     index_error: str | None
@@ -111,6 +120,8 @@ class ScriptFlowRead(BaseModel):
     updated_at: datetime | None
     index_progress: int | None = None
     index_retry_count: int | None = None
+    is_deleted: bool = False
+    deleted_at: datetime | None = None
 
 
 class ScriptFlowCreate(BaseModel):
@@ -118,6 +129,7 @@ class ScriptFlowCreate(BaseModel):
     internal_note: str | None = None
     flow_metadata: dict[str, Any] = {}
     flow_definition: dict[str, Any] = {}
+    service_external_ids: list[str] = []
 
 
 class ScriptFlowUpdate(BaseModel):
@@ -125,6 +137,7 @@ class ScriptFlowUpdate(BaseModel):
     internal_note: str | None = None
     flow_metadata: dict[str, Any] | None = None
     flow_definition: dict[str, Any] | None = None
+    service_external_ids: list[str] | None = None
 
 
 class CompileDraftBody(BaseModel):
@@ -137,6 +150,21 @@ class CompileDraftBody(BaseModel):
 class GraphPreviewDraftBody(BaseModel):
     flow_definition: dict[str, Any] = {}
     flow_metadata: dict[str, Any] = {}
+
+
+class GenerateFieldRequest(BaseModel):
+    node_id: str
+    node_type: str
+    field_key: str
+    current_node_data: dict[str, Any] = {}
+
+
+class GenerateFieldResponse(BaseModel):
+    field_key: str
+    generated_text: str
+    model: str
+    tokens_in: int
+    tokens_out: int
 
 
 _COMPILE_DRAFT_CACHE: dict[str, tuple[float, dict[str, str | None]]] = {}
@@ -311,12 +339,15 @@ async def _get_flow_or_404(
     agent_id: UUID,
     tenant_id: UUID,
     flow_id: UUID,
+    include_deleted: bool = False,
 ) -> ScriptFlow:
     stmt = select(ScriptFlow).where(
         ScriptFlow.id == flow_id,
         ScriptFlow.agent_id == agent_id,
         ScriptFlow.tenant_id == tenant_id,
     )
+    if not include_deleted:
+        stmt = stmt.where(ScriptFlow.is_deleted.is_(False))
     flow = (await db.execute(stmt)).scalar_one_or_none()
     if flow is None:
         raise _api_error("not_found", "Script flow not found", status.HTTP_404_NOT_FOUND)
@@ -329,6 +360,7 @@ async def _agent_has_indexed_flows(db: AsyncSession, *, agent_id: UUID, tenant_i
         .where(
             ScriptFlow.agent_id == agent_id,
             ScriptFlow.tenant_id == tenant_id,
+            ScriptFlow.is_deleted.is_(False),
             ScriptFlow.flow_status == "published",
             ScriptFlow.index_status == "indexed",
             ScriptFlow.indexed_version.is_not(None),
@@ -351,7 +383,11 @@ async def list_script_flows(
     await get_agent_or_404(agent_id, db, user)
     stmt = (
         select(ScriptFlow)
-        .where(ScriptFlow.agent_id == agent_id, ScriptFlow.tenant_id == user.tenant_id)
+        .where(
+            ScriptFlow.agent_id == agent_id,
+            ScriptFlow.tenant_id == user.tenant_id,
+            ScriptFlow.is_deleted.is_(False),
+        )
         .order_by(ScriptFlow.created_at.desc())
     )
     rows = (await db.execute(stmt)).scalars().all()
@@ -375,6 +411,7 @@ async def create_script_flow(
         internal_note=payload.internal_note,
         flow_metadata=payload.flow_metadata,
         flow_definition=fd,
+        service_external_ids=list(payload.service_external_ids or []),
     )
     db.add(flow)
     await db.commit()
@@ -643,6 +680,8 @@ async def patch_script_flow(
         flow.internal_note = payload.internal_note
     if payload.flow_metadata is not None:
         flow.flow_metadata = payload.flow_metadata
+    if payload.service_external_ids is not None:
+        flow.service_external_ids = list(payload.service_external_ids)
     if payload.flow_definition is not None:
         flow.flow_definition = _coerce_flow_definition(payload.flow_definition)
         flow.definition_version = flow.definition_version + 1
@@ -658,10 +697,55 @@ async def delete_script_flow(
     db: AsyncSession = Depends(get_db),
     user: AuthContext = Depends(require_scope("agents:write")),
 ) -> None:
+    """Мягкое удаление — поток уходит в корзину, восстановим через /restore.
+
+    Раньше было жёсткое db.delete (каскадом сносило версии/ноды и было
+    невосстановимо). Теперь помечаем deleted_at; граф в Neo4j не трогаем.
+    """
     await get_agent_or_404(agent_id, db, user)
     flow = await _get_flow_or_404(db, agent_id=agent_id, tenant_id=user.tenant_id, flow_id=flow_id)
-    await db.delete(flow)
+    flow.is_deleted = True
+    flow.deleted_at = datetime.now(timezone.utc)
     await db.commit()
+
+
+@router.get("/script-flows-trash", response_model=list[ScriptFlowRead])
+async def list_deleted_script_flows(
+    agent_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> list[ScriptFlowRead]:
+    """Корзина потоков — удалённые (для восстановления)."""
+    await get_agent_or_404(agent_id, db, user)
+    stmt = (
+        select(ScriptFlow)
+        .where(
+            ScriptFlow.agent_id == agent_id,
+            ScriptFlow.tenant_id == user.tenant_id,
+            ScriptFlow.is_deleted.is_(True),
+        )
+        .order_by(ScriptFlow.deleted_at.desc())
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return [ScriptFlowRead.model_validate(r) for r in rows]
+
+
+@router.post("/script-flows/{flow_id}/restore", response_model=ScriptFlowRead)
+async def restore_script_flow(
+    agent_id: UUID,
+    flow_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> ScriptFlowRead:
+    await get_agent_or_404(agent_id, db, user)
+    flow = await _get_flow_or_404(
+        db, agent_id=agent_id, tenant_id=user.tenant_id, flow_id=flow_id, include_deleted=True
+    )
+    flow.is_deleted = False
+    flow.deleted_at = None
+    await db.commit()
+    await db.refresh(flow)
+    return ScriptFlowRead.model_validate(flow)
 
 
 @router.get("/script-flows/{flow_id}/preview")
@@ -860,6 +944,23 @@ async def publish_script_flow(
     flow.published_version = flow.published_version + 1
     flow.compiled_text = compiled_text
     flow.index_status = "pending"
+
+    # Дистилляция навыка (skill_doc) — best-effort и НЕ перезаписывает уже собранный
+    # навык (в чате/вручную). Автозаполняем только пустой skill_doc — например при
+    # первой публикации навыка, собранного из графа-сценария.
+    existing_doc = flow.skill_doc if isinstance(flow.skill_doc, dict) else None
+    already_authored = bool(existing_doc and (existing_doc.get("objections") or existing_doc.get("gaps")))
+    if not already_authored and (compiled_text or "").strip():
+        if openai_api_key := await get_decrypted_api_key(db, flow.tenant_id):
+            try:
+                flow.skill_doc = await distill_skill(
+                    compiled_text,
+                    flow.name,
+                    openai_api_key=openai_api_key,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("skill_distill_failed_on_publish", flow_id=str(flow.id))
+
     meta = copy.deepcopy(flow.flow_metadata or {})
     meta["published_flow_definition"] = copy.deepcopy(flow.flow_definition or {})
     meta["published_snapshot_version"] = flow.published_version
@@ -887,6 +988,372 @@ async def publish_script_flow(
         "flow_status": flow.flow_status,
         "published_version": flow.published_version,
         "index_status": flow.index_status,
+    }
+
+
+@router.post("/script-flows/{flow_id}/distill-skill", response_model=dict)
+async def distill_script_flow_skill(
+    agent_id: UUID,
+    flow_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Пересобрать skill_doc из текущего compiled_text потока (ручной переген).
+
+    Не публикует и не переиндексирует — только обновляет дистиллированную
+    структуру навыка. Требует, чтобы поток был скомпилирован (compiled_text).
+    """
+    await get_agent_or_404(agent_id, db, user)
+    flow = await _get_flow_or_404(db, agent_id=agent_id, tenant_id=user.tenant_id, flow_id=flow_id)
+    if not (flow.compiled_text or "").strip():
+        raise _api_error(
+            "not_compiled",
+            "Навык ещё не скомпилирован — опубликуйте поток перед дистилляцией.",
+            status.HTTP_409_CONFLICT,
+        )
+    openai_api_key = await get_decrypted_api_key(db, flow.tenant_id)
+    if not openai_api_key:
+        raise _api_error(
+            "no_llm_key",
+            "Не настроен ключ OpenAI для тенанта.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        skill_doc = await distill_skill(
+            flow.compiled_text,
+            flow.name,
+            openai_api_key=openai_api_key,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("skill_distill_failed", flow_id=str(flow.id))
+        raise _api_error("distill_error", str(exc), status.HTTP_422_UNPROCESSABLE_ENTITY) from exc
+
+    flow.skill_doc = skill_doc
+    await db.commit()
+    await db.refresh(flow)
+    return {
+        "id": str(flow.id),
+        "skill_doc": skill_doc,
+        "objections": len(skill_doc.get("objections") or []),
+        "gaps": len(skill_doc.get("gaps") or []),
+    }
+
+
+class SkillChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class SkillChatAttachment(BaseModel):
+    name: str
+    text: str
+
+
+# Модели, доступные для выбора в ассистенте навыка (белый список).
+SKILL_CHAT_MODELS: list[dict[str, str]] = [
+    {"id": "openai:gpt-4.1", "label": "GPT-4.1", "hint": "быстро, дёшево"},
+    {"id": "openai:gpt-5.1", "label": "GPT-5.1", "hint": "размышляет, точнее"},
+    {"id": "openai:gpt-4o-mini", "label": "GPT-4o mini", "hint": "самый дешёвый"},
+]
+_SKILL_CHAT_MODEL_IDS = {m["id"] for m in SKILL_CHAT_MODELS}
+
+
+class SkillChatBody(BaseModel):
+    messages: list[SkillChatMessage] = []
+    attachments: list[SkillChatAttachment] = []
+    skill_doc: dict[str, Any] | None = None
+    model: str | None = None
+
+
+@router.get("/script-flows/skill-chat/models", response_model=dict)
+async def list_skill_chat_models(
+    agent_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Список моделей, доступных для ассистента сборки навыка."""
+    return {"models": SKILL_CHAT_MODELS, "default": get_settings().skill_chat_model}
+
+
+@router.post("/script-flows/{flow_id}/skill-chat", response_model=dict)
+async def skill_chat(
+    agent_id: UUID,
+    flow_id: UUID,
+    body: SkillChatBody,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Разговорная сборка навыка: эксперт в чате + материалах передаёт опыт → skill_doc.
+
+    Ассистент структурирует ТОЛЬКО то, что дал эксперт (реплики + вложения), не
+    выдумывает. Возвращает ответ ассистента + обновлённый skill_doc (не сохраняет —
+    сохранение отдельным PATCH /skill-doc по кнопке «Применить»).
+    """
+    await get_agent_or_404(agent_id, db, user)
+    flow = await _get_flow_or_404(db, agent_id=agent_id, tenant_id=user.tenant_id, flow_id=flow_id)
+    openai_api_key = await get_decrypted_api_key(db, flow.tenant_id)
+    if not openai_api_key:
+        raise _api_error("no_llm_key", "Не настроен ключ OpenAI для тенанта.", status.HTTP_400_BAD_REQUEST)
+    chosen_model = body.model if body.model in _SKILL_CHAT_MODEL_IDS else None
+    try:
+        result = await converse_skill(
+            messages=[m.model_dump() for m in body.messages],
+            attachments=[a.model_dump() for a in body.attachments],
+            current_skill_doc=body.skill_doc if body.skill_doc is not None else flow.skill_doc,
+            service_name=flow.name,
+            openai_api_key=openai_api_key,
+            model=chosen_model,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("skill_chat_failed", flow_id=str(flow.id))
+        raise _api_error("skill_chat_error", str(exc), status.HTTP_422_UNPROCESSABLE_ENTITY) from exc
+    additions = result["additions"]
+    return {
+        "reply": result["reply"],
+        "additions": additions,
+        "added_objections": len(additions.get("objections") or []),
+        "added_gaps": len(additions.get("gaps") or []),
+    }
+
+
+@router.post("/script-flows/{flow_id}/skill-chat/stream")
+async def skill_chat_stream(
+    agent_id: UUID,
+    flow_id: UUID,
+    body: SkillChatBody,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> EventSourceResponse:
+    """Потоковая версия skill-chat: reply приходит по мере генерации (SSE).
+
+    События: `delta` {text} — прирост ответа; `done` {reply, additions} — финал;
+    `error` {error}.
+    """
+    await get_agent_or_404(agent_id, db, user)
+    flow = await _get_flow_or_404(db, agent_id=agent_id, tenant_id=user.tenant_id, flow_id=flow_id)
+    openai_api_key = await get_decrypted_api_key(db, flow.tenant_id)
+    if not openai_api_key:
+        raise _api_error("no_llm_key", "Не настроен ключ OpenAI для тенанта.", status.HTTP_400_BAD_REQUEST)
+    chosen_model = body.model if body.model in _SKILL_CHAT_MODEL_IDS else None
+    current_doc = body.skill_doc if body.skill_doc is not None else flow.skill_doc
+    msgs = [m.model_dump() for m in body.messages]
+    atts = [a.model_dump() for a in body.attachments]
+    flow_name = flow.name
+
+    async def event_generator():
+        try:
+            async for kind, payload in converse_skill_stream(
+                messages=msgs,
+                attachments=atts,
+                current_skill_doc=current_doc,
+                service_name=flow_name,
+                openai_api_key=openai_api_key,
+                model=chosen_model,
+            ):
+                if kind == "delta":
+                    yield {"event": "delta", "data": json.dumps({"text": payload})}
+                elif kind == "done":
+                    yield {"event": "done", "data": json.dumps(payload, ensure_ascii=False)}
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("skill_chat_stream_failed", flow_id=str(flow_id))
+            yield {"event": "error", "data": json.dumps({"error": str(exc)})}
+
+    # Заголовки против буферизации SSE прокси (nginx/Caddy) — чтобы дельты
+    # доходили до браузера сразу, а не пачкой в конце.
+    return EventSourceResponse(
+        event_generator(),
+        ping=15,
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class SkillDocPatch(BaseModel):
+    skill_doc: dict[str, Any]
+
+
+@router.patch("/script-flows/{flow_id}/skill-doc", response_model=dict)
+async def update_script_flow_skill_doc(
+    agent_id: UUID,
+    flow_id: UUID,
+    payload: SkillDocPatch,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Сохранить ручные правки структуры навыка (skill_doc).
+
+    Правки эксперта из редактора навыка. Нормализуем той же логикой, что и
+    дистилляцию (инвариант: обработка без фраз → пробел). ВНИМАНИЕ: повторная
+    дистилляция/публикация перезапишет эти правки — это осознанный выбор
+    (источник истины — сценарий, skill_doc производный, но редактируемый).
+    """
+    await get_agent_or_404(agent_id, db, user)
+    flow = await _get_flow_or_404(db, agent_id=agent_id, tenant_id=user.tenant_id, flow_id=flow_id)
+    normalized = _sanitize_skill_doc(payload.skill_doc or {})
+    flow.skill_doc = normalized
+    await db.commit()
+    await db.refresh(flow)
+    return {
+        "id": str(flow.id),
+        "skill_doc": normalized,
+        "objections": len(normalized.get("objections") or []),
+        "gaps": len(normalized.get("gaps") or []),
+    }
+
+
+@router.get("/script-flows/{flow_id}/review-dialogs", response_model=dict)
+async def get_script_flow_review_dialogs(
+    agent_id: UUID,
+    flow_id: UUID,
+    limit: int = 30,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Реальные ходы агента по услугам этого навыка — основа ревью-инбокса.
+
+    Берём сессии, где resolve_clinic_facts определил одну из услуг навыка, и
+    возвращаем последние ходы (вход пациента → ответ агента). Если у навыка нет
+    привязанных услуг — отдаём последние диалоги агента (чтобы страница не пустела).
+    """
+    await get_agent_or_404(agent_id, db, user)
+    flow = await _get_flow_or_404(db, agent_id=agent_id, tenant_id=user.tenant_id, flow_id=flow_id)
+    svc_ids = [str(x) for x in (flow.service_external_ids or []) if str(x).strip()]
+    lim = max(1, min(int(limit or 30), 100))
+
+    params: dict[str, Any] = {"aid": agent_id, "lim": lim}
+    if svc_ids:
+        # сессии, где определялась одна из услуг навыка
+        params["svcs"] = svc_ids
+        rows = (
+            await db.execute(
+                text(
+                    """
+                    WITH skill_sessions AS (
+                        SELECT DISTINCT r.session_id
+                        FROM tool_call_logs tcl
+                        JOIN runs r ON r.id = tcl.run_id
+                        WHERE r.agent_id = :aid
+                          AND tcl.tool_name = 'resolve_clinic_facts'
+                          AND (
+                            (tcl.response_payload #>> '{resolved,service_external_id}') = ANY(:svcs)
+                            OR EXISTS (
+                              SELECT 1
+                              FROM jsonb_array_elements(
+                                COALESCE(tcl.response_payload->'services', '[]'::jsonb)
+                              ) AS svc
+                              WHERE (svc->>'external_id') = ANY(:svcs)
+                            )
+                          )
+                    )
+                    SELECT r.id, r.session_id, r.input_message, r.output_message,
+                           r.tools_called, r.created_at
+                    FROM runs r
+                    JOIN skill_sessions s ON s.session_id = r.session_id
+                    WHERE r.agent_id = :aid AND r.status = 'succeeded'
+                    ORDER BY r.created_at DESC
+                    LIMIT :lim
+                    """
+                ),
+                params,
+            )
+        ).fetchall()
+    else:
+        rows = (
+            await db.execute(
+                text(
+                    """
+                    SELECT r.id, r.session_id, r.input_message, r.output_message,
+                           r.tools_called, r.created_at
+                    FROM runs r
+                    WHERE r.agent_id = :aid AND r.status = 'succeeded'
+                    ORDER BY r.created_at DESC
+                    LIMIT :lim
+                    """
+                ),
+                params,
+            )
+        ).fetchall()
+
+    dialogs = [
+        {
+            "run_id": str(row.id),
+            "session_id": row.session_id,
+            "input": row.input_message,
+            "output": row.output_message,
+            "tool_names": [
+                c.get("name")
+                for c in (row.tools_called or [])
+                if isinstance(c, dict) and c.get("name")
+            ],
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
+    return {"dialogs": dialogs, "has_service_link": bool(svc_ids)}
+
+
+class ReviewCorrectionBody(BaseModel):
+    situation: str
+    trigger_when: str = ""
+    approach: str = ""
+    phrase: str | None = None
+    level: str = "пример"
+    # верно / ушёл в генерик / пережал — пометка ревьюера (для аналитики)
+    mark: str | None = None
+
+
+@router.post("/script-flows/{flow_id}/review-correction", response_model=dict)
+async def add_script_flow_review_correction(
+    agent_id: UUID,
+    flow_id: UUID,
+    body: ReviewCorrectionBody,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Правка из ревью → в skill_doc.
+
+    Если дана фраза «как надо» — добавляем обработку (objection) с этой фразой и
+    её уровнем дословности. Если фразы нет — фиксируем как пробел (gap).
+    """
+    await get_agent_or_404(agent_id, db, user)
+    flow = await _get_flow_or_404(db, agent_id=agent_id, tenant_id=user.tenant_id, flow_id=flow_id)
+    doc = copy.deepcopy(flow.skill_doc) if isinstance(flow.skill_doc, dict) else {}
+    doc.setdefault("context", "")
+    for key in ("objections", "sequence", "facts_from_tool", "endings", "gaps"):
+        doc.setdefault(key, [])
+
+    situation = (body.situation or "").strip()
+    if not situation:
+        raise _api_error("empty_situation", "Ситуация обязательна.", status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+    phrase = (body.phrase or "").strip()
+    if phrase:
+        level = body.level if body.level in ("пример", "дословно", "обязательно") else "пример"
+        doc["objections"].append(
+            {
+                "situation": situation,
+                "trigger_when": (body.trigger_when or "").strip(),
+                "approach": (body.approach or "").strip(),
+                "phrases": [{"text": phrase, "level": level}],
+                "forbidden": [],
+            }
+        )
+    else:
+        doc["gaps"].append(
+            {"situation": situation, "trigger_when": (body.trigger_when or "").strip()}
+        )
+
+    normalized = _sanitize_skill_doc(doc)
+    flow.skill_doc = normalized
+    await db.commit()
+    await db.refresh(flow)
+    return {
+        "id": str(flow.id),
+        "skill_doc": normalized,
+        "objections": len(normalized.get("objections") or []),
+        "gaps": len(normalized.get("gaps") or []),
     }
 
 
@@ -1197,6 +1664,151 @@ async def suggest_keywords(
     flow = await _get_flow_or_404(db, agent_id=agent_id, tenant_id=user.tenant_id, flow_id=flow_id)
     meta = flow.flow_metadata or {}
     return {"keywords": meta.get("keyword_hints") or [], "when_relevant": meta.get("when_relevant")}
+
+
+@router.post(
+    "/script-flows/{flow_id}/nodes/generate-field",
+    response_model=GenerateFieldResponse,
+)
+async def generate_node_field(
+    agent_id: UUID,
+    flow_id: UUID,
+    payload: GenerateFieldRequest,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> GenerateFieldResponse:
+    from decimal import Decimal
+
+    from app.db.models.model_pricing import ModelPricing
+    from app.services.script_flow_field_generator import (
+        generate_field_value,
+        _normalize_openai_model,
+    )
+    from app.services.script_flow_field_meta import field_key_node_type, get_field_ai_meta
+    from app.services.tenant_balance import apply_balance_charge
+
+    agent = await get_agent_or_404(agent_id, db, user)
+    flow = await _get_flow_or_404(db, agent_id=agent_id, tenant_id=user.tenant_id, flow_id=flow_id)
+
+    field_key = (payload.field_key or "").strip()
+    field_meta = get_field_ai_meta(field_key)
+    if field_meta is None:
+        raise _api_error(
+            "unknown_field_key",
+            f"Field {field_key!r} is not eligible for AI auto-fill",
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+    expected_type = field_key_node_type(field_key)
+    if expected_type and expected_type != payload.node_type:
+        raise _api_error(
+            "node_type_mismatch",
+            f"field_key prefix {expected_type!r} does not match node_type {payload.node_type!r}",
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+    field_name = field_key.split(".", 1)[1] if "." in field_key else field_key
+
+    fd = flow.flow_definition or {}
+    nodes_list = fd.get("nodes") if isinstance(fd, dict) else None
+    nodes_list = nodes_list if isinstance(nodes_list, list) else []
+    target_node = next(
+        (n for n in nodes_list if isinstance(n, dict) and str(n.get("id")) == payload.node_id),
+        None,
+    )
+    if target_node is None:
+        raise _api_error(
+            "node_not_found",
+            f"Node {payload.node_id!r} not found in flow",
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    openai_api_key = await get_decrypted_api_key(db, user.tenant_id)
+    if not (openai_api_key or "").strip():
+        raise _api_error(
+            "no_openai_key",
+            "Подключите OpenAI API ключ в настройках LLM-провайдеров",
+            status.HTTP_409_CONFLICT,
+        )
+
+    try:
+        result = await generate_field_value(
+            agent_system_prompt=agent.system_prompt or "",
+            agent_model=agent.model,
+            flow_name=flow.name or "",
+            node_id=payload.node_id,
+            node_type=payload.node_type,
+            field_key=field_key,
+            field_name=field_name,
+            current_node_data=payload.current_node_data or {},
+            flow_definition=fd,
+            openai_api_key=openai_api_key,
+        )
+    except ValueError as exc:
+        raise _api_error(
+            "generation_failed",
+            str(exc),
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "script_flow_field_generate_failed",
+            field_key=field_key,
+            node_id=payload.node_id,
+            error=str(exc),
+        )
+        raise _api_error(
+            "openai_unavailable",
+            "OpenAI временно недоступен, повторите попытку позже",
+            status.HTTP_502_BAD_GATEWAY,
+        ) from exc
+
+    pricing_model = _normalize_openai_model(result.model)
+    pricing_stmt = (
+        select(ModelPricing)
+        .where(
+            ModelPricing.provider == "openai",
+            ModelPricing.model_name == pricing_model,
+            ModelPricing.is_active.is_(True),
+        )
+        .limit(1)
+    )
+    pricing = (await db.execute(pricing_stmt)).scalar_one_or_none()
+    if pricing is not None and (result.tokens_in or result.tokens_out):
+        million = Decimal("1000000")
+        amount = (
+            Decimal(result.tokens_in) * Decimal(pricing.input_usd) / million
+            + Decimal(result.tokens_out) * Decimal(pricing.output_usd) / million
+        )
+        if amount > 0:
+            ts_ms = int(time.time() * 1000)
+            try:
+                await apply_balance_charge(
+                    db,
+                    tenant_id=user.tenant_id,
+                    amount_usd=amount,
+                    source_type="script_flow_field_ai",
+                    source_id=f"{flow_id}:{payload.node_id}:{field_key}:{ts_ms}",
+                    metadata={
+                        "model": pricing_model,
+                        "tokens_in": result.tokens_in,
+                        "tokens_out": result.tokens_out,
+                        "field_key": field_key,
+                    },
+                )
+                await db.commit()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "script_flow_field_billing_failed",
+                    field_key=field_key,
+                    error=str(exc),
+                )
+
+    return GenerateFieldResponse(
+        field_key=field_key,
+        generated_text=result.generated_text,
+        model=result.model,
+        tokens_in=result.tokens_in,
+        tokens_out=result.tokens_out,
+    )
 
 
 @router.post("/script-flows/test-search", response_model=dict)

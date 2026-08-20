@@ -1,4 +1,13 @@
 <template>
+  <AgentKnowledgeWorkspace
+    :counts="{
+      directQuestions: directQuestions.length,
+      directories: visibleDirectories.length,
+      tables: tables.length,
+      sqns: isSqnsEnabled ? sqnsToolsList.length : undefined,
+    }"
+    :show-sqns="isSqnsEnabled"
+  >
   <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-6">
     <div v-if="knowledgeSubTab === 'dashboard'">
       <KnowledgeDashboard
@@ -153,6 +162,7 @@
       @save="handleSaveDirectQuestion"
     />
   </div>
+  </AgentKnowledgeWorkspace>
 </template>
 
 <script setup lang="ts">
@@ -161,6 +171,7 @@ import { storeToRefs } from 'pinia'
 import KnowledgeDashboard from '~/components/knowledge/KnowledgeDashboard.vue'
 import { Database } from 'lucide-vue-next'
 import { navigateTo, useRoute, useRouter } from '#app'
+import AgentKnowledgeWorkspace from '~/components/agents/knowledge-workspace/AgentKnowledgeWorkspace.vue'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import { useToast } from '~/composables/useToast'
 import type { Directory } from '~/types/directories'
@@ -426,6 +437,19 @@ watch(knowledgeSubTab, async (value) => {
   }
   await loadDataForKnowledgeSubTab(value)
 })
+
+// URL → state. Sub-nav клики меняют ?knowledgeTab=..., подхватываем чтобы
+// панель переключилась и без mount'а (в отличие от инициализации на строке 219).
+watch(
+  () => route.query.knowledgeTab,
+  (raw) => {
+    const requested = queryString(raw) || 'dashboard'
+    if (!isValidKnowledgeSubTab(requested)) return
+    if (knowledgeSubTab.value !== requested) {
+      knowledgeSubTab.value = requested as KnowledgeSubTabId
+    }
+  },
+)
 
 onMounted(() => {
   nextTick(() => {

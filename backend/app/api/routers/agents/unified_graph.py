@@ -22,14 +22,11 @@ from app.services.agent_unified_graph import (
     load_unified_graph_preview,
     materialize_unified_graph,
 )
-from app.services.graphrag_export.graph_preview_ask import (
-    SUPPORTED_METHODS,
-    answer_graph_preview_question,
-)
-from app.services.runtime.microsoft_graphrag_neo4j_sync import (
-    build_microsoft_graphrag_sync_plan,
-    read_microsoft_graphrag_neo4j_counts,
-    sync_microsoft_graphrag_workspace_to_neo4j,
+from app.services.graph.widget_ask import widget_ask
+from app.services.runtime.graphrag_neo4j_sync import (
+    build_graphrag_sync_plan,
+    read_graphrag_neo4j_counts,
+    sync_graphrag_workspace_to_neo4j,
 )
 from app.services.unified_graph_rebuild_jobs import (
     create_unified_graph_rebuild_job,
@@ -43,9 +40,9 @@ router = APIRouter()
 
 class UnifiedGraphAskBody(BaseModel):
     question: str = Field(..., min_length=1, max_length=4000)
-    method: Literal["naive", "basic", "local", "global", "drift"] = Field(
-        default="naive",
-        description="Режим поиска: naive (превью+LLM), либо graphrag query --method basic|local|global|drift.",
+    method: Literal["naive", "basic", "local", "global", "drift"] | None = Field(
+        default=None,
+        description="Игнорируется — оставлено для backwards-compat. Всегда используется neo4j_hybrid.",
     )
 
 
@@ -191,14 +188,22 @@ async def get_unified_graph_preview(
     db: AsyncSession = Depends(get_db),
     user: AuthContext = Depends(require_scope("agents:write")),
 ) -> dict[str, object]:
-    """Превью узлов и рёбер из таблиц agent_unified_graph_*.
+    """Превью графа: то, что видит runtime-агент через HybridGraphRetriever.
 
-    Источник — структурный материализатор (specialists/services/categories/...).
-    LLM-извлечения через GraphRAG больше не попадают в визуализацию;
-    GraphRAG используется отдельно в query-tool для текстового семантического поиска.
+    По умолчанию читает Neo4j (`UNIFIED_GRAPH_DATA_SOURCE=neo4j`) — :FlowNode/:GraphNode/:Service/:Specialist.
+    При откате (`UNIFIED_GRAPH_DATA_SOURCE=postgres`) — старые таблицы agent_unified_graph_*.
     """
     await get_agent_or_404(agent_id, db, user)
-    payload = await load_unified_graph_preview(db, agent_id=agent_id)
+    settings = get_settings()
+    if settings.unified_graph_data_source == "postgres":
+        payload = await load_unified_graph_preview(db, agent_id=agent_id)
+    else:
+        from app.services.graph.unified_preview import load_unified_graph_from_neo4j
+
+        payload = await load_unified_graph_from_neo4j(
+            agent_id=agent_id,
+            tenant_id=user.tenant_id,
+        )
     return {
         "tenant_id": str(user.tenant_id),
         "agent_id": str(agent_id),
@@ -213,41 +218,43 @@ async def post_unified_graph_ask(
     db: AsyncSession = Depends(get_db),
     user: AuthContext = Depends(require_scope("agents:write")),
 ) -> dict[str, object]:
-    """
-    Вопрос по графу с переключением режима поиска.
-
-    Режимы:
-    - ``naive`` — превью (head N узлов) + LLM, без эмбеддингов. Самый быстрый.
-    - ``basic`` — векторный поиск по text_units (graphrag query --method basic).
-    - ``local`` — entity-centric поиск (graphrag query --method local).
-    - ``global`` — map-reduce по community reports (graphrag query --method global).
-    - ``drift`` — local + community context (graphrag query --method drift).
-    """
+    """Вопрос к графу через HybridGraphRetriever — тот же путь, что в рантайме агента."""
     agent = await get_agent_or_404(agent_id, db, user)
-    settings = get_settings()
-    result = await answer_graph_preview_question(
+    result = await widget_ask(
         db=db,
         agent=agent,
-        settings=settings,
         tenant_id=user.tenant_id,
         question=body.question,
-        method=body.method,
     )
-    return {
-        "answer": str(result.get("answer") or ""),
-        "method": str(result.get("method") or body.method),
-        "used_nodes": int(result.get("used_nodes") or 0),
-        "used_relations": int(result.get("used_relations") or 0),
-        "total_nodes": int(result.get("total_nodes") or 0),
-        "total_relations": int(result.get("total_relations") or 0),
-        "system_prompt": result.get("system_prompt"),
-        "user_prompt": result.get("user_prompt"),
-        "command": result.get("command"),
-        "latency_ms": result.get("latency_ms"),
-        "stderr_tail": result.get("stderr_tail"),
-        "prompt_templates": result.get("prompt_templates") or [],
-        "supported_methods": list(SUPPORTED_METHODS),
-    }
+    return result
+
+
+@router.post("/import-parquet")
+async def post_import_parquet(
+    agent_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict[str, object]:
+    """Одноразовый импорт GraphRAG parquet entities/relationships в Neo4j."""
+    import asyncio as _asyncio
+    from app.services.graph.parquet_importer import import_graphrag_parquet_to_neo4j
+    from app.services.tenant_llm_config import get_decrypted_api_key
+
+    await get_agent_or_404(agent_id, db, user)
+    openai_api_key = await get_decrypted_api_key(db, user.tenant_id)
+
+    async def _run() -> None:
+        from app.db.session import async_session_factory
+        async with async_session_factory() as session:
+            await import_graphrag_parquet_to_neo4j(
+                tenant_id=user.tenant_id,
+                agent_id=agent_id,
+                db=session,
+                openai_api_key=openai_api_key,
+            )
+
+    _asyncio.create_task(_run())
+    return {"status": "started", "message": "Импорт запущен в фоне, см. логи для прогресса."}
 
 
 @router.get("/neo4j/status")
@@ -258,12 +265,12 @@ async def get_unified_graph_neo4j_status(
 ) -> dict[str, object]:
     agent = await get_agent_or_404(agent_id, db, user)
     settings = get_settings()
-    plan = await build_microsoft_graphrag_sync_plan(
+    plan = await build_graphrag_sync_plan(
         settings=settings,
         agent=agent,
         tenant_id=user.tenant_id,
     )
-    neo4j_counts = read_microsoft_graphrag_neo4j_counts(
+    neo4j_counts = read_graphrag_neo4j_counts(
         tenant_id=user.tenant_id,
         agent_id=agent_id,
     )
@@ -285,7 +292,7 @@ async def post_unified_graph_neo4j_sync(
     settings = get_settings()
     dry_run = True if body is None else bool(body.dry_run)
     if dry_run:
-        plan = await build_microsoft_graphrag_sync_plan(
+        plan = await build_graphrag_sync_plan(
             settings=settings,
             agent=agent,
             tenant_id=user.tenant_id,
@@ -296,7 +303,7 @@ async def post_unified_graph_neo4j_sync(
             "plan": plan,
         }
 
-    ok, message = await sync_microsoft_graphrag_workspace_to_neo4j(
+    ok, message = await sync_graphrag_workspace_to_neo4j(
         settings=settings,
         agent=agent,
         tenant_id=user.tenant_id,

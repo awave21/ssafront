@@ -32,6 +32,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { SimulationNodeDatum } from 'd3'
 import type { UnifiedGraphNodeDto, UnifiedGraphPreview, UnifiedGraphRelationDto } from '../../../types/unifiedGraph'
 import { ORIGIN_COLORS, ORIGIN_LABELS } from './colors'
+import { formatRelation } from './relationLabels'
 
 type SimNode = UnifiedGraphNodeDto &
   SimulationNodeDatum & { x?: number; y?: number; vx?: number; vy?: number; fx?: number | null; fy?: number | null }
@@ -60,8 +61,10 @@ const props = withDefaults(
     showIsolatedNodes?: boolean
     /** Нижние информационные плашки (счётчики и статус). */
     bottomBadges?: string[]
+    /** Если задан — отрисовывать только узлы этих типов (и связанные с ними рёбра). null = все. */
+    visibleTypes?: string[] | null
   }>(),
-  { heightPx: 560, selectedGraphNodeId: null, layoutMode: 'balanced', showIsolatedNodes: false, bottomBadges: () => [] },
+  { heightPx: 560, selectedGraphNodeId: null, layoutMode: 'balanced', showIsolatedNodes: false, bottomBadges: () => [], visibleTypes: null },
 )
 
 const emit = defineEmits<{
@@ -114,10 +117,18 @@ const draw = async () => {
   const height = canvasH.value
 
   const linksRaw = props.data.relations ?? []
-  const allNodes: SimNode[] = props.data.nodes.map((n) => ({ ...n }))
+  const rawNodes: SimNode[] = props.data.nodes.map((n) => ({ ...n }))
+  const typeFilter = props.visibleTypes && props.visibleTypes.length
+    ? new Set(props.visibleTypes)
+    : null
+  const allNodes: SimNode[] = typeFilter
+    ? rawNodes.filter((n) => typeFilter.has(n.entity_type))
+    : rawNodes
+  const allowedIds = new Set(allNodes.map((n) => n.graph_node_id))
   const degree = new Map<string, number>()
   for (const n of allNodes) degree.set(n.graph_node_id, 0)
   for (const r of linksRaw) {
+    if (!allowedIds.has(r.source_graph_node_id) || !allowedIds.has(r.target_graph_node_id)) continue
     degree.set(r.source_graph_node_id, (degree.get(r.source_graph_node_id) ?? 0) + 1)
     degree.set(r.target_graph_node_id, (degree.get(r.target_graph_node_id) ?? 0) + 1)
   }
@@ -299,7 +310,7 @@ const draw = async () => {
     .attr('text-anchor', 'middle')
     .attr('pointer-events', 'none')
     .attr('opacity', 1)
-    .text((d) => truncateEdge(d.relation_type, 22))
+    .text((d) => truncateEdge(formatRelation(d.relation_type), 22))
 
   const pointerInSim = (event: MouseEvent | d3.D3DragEvent<SVGGElement, SimNode, SimNode | SVGGElement>) => {
     const p = d3.pointer(event, svgEl)
@@ -671,6 +682,14 @@ watch(
   () => {
     void draw()
   },
+)
+
+watch(
+  () => props.visibleTypes,
+  () => {
+    void draw()
+  },
+  { deep: true },
 )
 
 watch(

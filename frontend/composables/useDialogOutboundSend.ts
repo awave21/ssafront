@@ -2,7 +2,9 @@ import { resolveDialogPlatform } from '~/utils/dialogIdentity'
 import type { Dialog } from '~/types/dialogs'
 import { useMessages } from './useMessages'
 
-const PHONE_OPERATOR_PLATFORMS = new Set(['telegram_phone', 'whatsapp', 'max'])
+// Внешние каналы, где текст оператора всегда доставляется клиенту через
+// manager-dispatch (а не скармливается агенту как ввод пользователя).
+const EXTERNAL_OPERATOR_PLATFORMS = new Set(['telegram_phone', 'whatsapp', 'max', 'jivo'])
 
 type DialogOutboundSendParams = {
   agentId: string
@@ -22,23 +24,23 @@ export const useDialogOutboundSend = () => {
     markMessageFailed
   } = useMessages()
 
-  const isPhoneOperatorDialog = (dialog: Dialog | null | undefined): boolean => {
+  const isExternalOperatorDialog = (dialog: Dialog | null | undefined): boolean => {
     if (!dialog) return false
     const integrationType = typeof dialog.user_info?.integration_channel_type === 'string'
       ? dialog.user_info.integration_channel_type.toLowerCase()
       : ''
-    if (integrationType && PHONE_OPERATOR_PLATFORMS.has(integrationType)) {
+    if (integrationType && EXTERNAL_OPERATOR_PLATFORMS.has(integrationType)) {
       return true
     }
     const platform = resolveDialogPlatform(dialog)
-    return Boolean(platform && PHONE_OPERATOR_PLATFORMS.has(platform.toLowerCase()))
+    return Boolean(platform && EXTERNAL_OPERATOR_PLATFORMS.has(platform.toLowerCase()))
   }
 
   const shouldUseManagerSend = (
     dialog: Dialog | null | undefined,
     isAgentEnabled: boolean
   ): boolean => {
-    if (isPhoneOperatorDialog(dialog)) return true
+    if (isExternalOperatorDialog(dialog)) return true
     return !isAgentEnabled
   }
 
@@ -70,7 +72,7 @@ export const useDialogOutboundSend = () => {
   }
 
   return {
-    isPhoneOperatorDialog,
+    isExternalOperatorDialog,
     shouldUseManagerSend,
     sendDialogOutbound
   }

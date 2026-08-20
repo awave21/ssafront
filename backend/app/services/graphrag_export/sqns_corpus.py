@@ -33,7 +33,7 @@ _INDEXER_VENDOR_RE = re.compile(
     r"https?://[^\s\)\]\>\"']*graphrag[^\s\)\]\>\"']*"
     r"|github\.com/microsoft/graphrag[^\s\)\]\>\"']*"
     r"|Microsoft\s+GraphRAG"
-    r"|query_microsoft_graphrag"
+    r"|query_graphrag"
     r"|microsoft_graphrag\w*"
     r"|MICROSOFT[_\s]?GRAPHRAG[A-Z0-9_]*"
     r"|\bGraphRAG\b"

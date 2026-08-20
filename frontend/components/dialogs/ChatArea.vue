@@ -77,7 +77,7 @@ const {
   dialogHasMore
 } = useMessages()
 const { sendManagerMessage } = useMessages()
-const { isPhoneOperatorDialog } = useDialogOutboundSend()
+const { isExternalOperatorDialog } = useDialogOutboundSend()
 
 const { markAsRead, getDialogById, syncDialogAgentStatus } = useDialogs()
 
@@ -86,7 +86,7 @@ const messages = computed(() => messagesMap[props.dialogId] ?? [])
 const currentDialog = computed(() => getDialogById(props.dialogId))
 const hasMore = computed(() => dialogHasMore(props.dialogId))
 const isAgentEnabled = computed(() => (currentDialog.value?.agent_status ?? 'active') === 'active')
-const isManagerSendMode = computed(() => isPhoneOperatorDialog(currentDialog.value) || !isAgentEnabled.value)
+const isManagerSendMode = computed(() => isExternalOperatorDialog(currentDialog.value) || !isAgentEnabled.value)
 const syncedStateDialogId = ref<string | null>(null)
 const isSyncingState = ref(false)
 

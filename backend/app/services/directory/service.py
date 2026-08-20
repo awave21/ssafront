@@ -376,6 +376,85 @@ async def create_embedding(
         return None
 
 
+async def create_embeddings_batch(
+    texts: list[str],
+    *,
+    openai_api_key: str | None = None,
+    db: AsyncSession | None = None,
+    tenant_id: UUID | None = None,
+    charge_source_type: str | None = None,
+    charge_source_id: str | None = None,
+    charge_metadata: dict[str, Any] | None = None,
+    batch_size: int = 100,
+) -> list[list[float] | None]:
+    """Создаёт embeddings пакетом через OpenAI multi-input API.
+
+    Возвращает список той же длины, что texts. None — для пустых текстов
+    или при ошибке на конкретный батч.
+    """
+    if not texts:
+        return []
+    if not openai_api_key:
+        logger.warning("embedding_batch_skipped_missing_tenant_llm_key")
+        return [None] * len(texts)
+
+    from app.core.config import get_settings
+    from app.services.runtime.model_resolver import resolve_openai_client
+
+    settings = get_settings()
+    client = resolve_openai_client(openai_api_key=openai_api_key)
+
+    results: list[list[float] | None] = [None] * len(texts)
+    # Indexes of non-empty inputs in original order
+    nonempty_indexes = [i for i, t in enumerate(texts) if (t or "").strip()]
+    if not nonempty_indexes:
+        return results
+
+    total_tokens_used = 0
+    for batch_start in range(0, len(nonempty_indexes), batch_size):
+        batch_idxs = nonempty_indexes[batch_start: batch_start + batch_size]
+        batch_inputs = [texts[i] for i in batch_idxs]
+        try:
+            response = await client.embeddings.create(
+                input=batch_inputs,
+                model=settings.embedding_model,
+            )
+            for local_idx, item in enumerate(response.data):
+                results[batch_idxs[local_idx]] = item.embedding
+            usage = getattr(response, "usage", None)
+            tt = getattr(usage, "total_tokens", None) or getattr(usage, "prompt_tokens", None)
+            if isinstance(tt, int):
+                total_tokens_used += tt
+        except Exception as exc:  # noqa: BLE001
+            logger.error("embedding_batch_creation_failed", error=str(exc), batch_size=len(batch_inputs))
+
+    if (
+        db is not None
+        and tenant_id is not None
+        and charge_source_type
+        and total_tokens_used > 0
+    ):
+        try:
+            await apply_embedding_balance_charge(
+                db,
+                tenant_id=tenant_id,
+                model_name=settings.embedding_model,
+                input_tokens=total_tokens_used,
+                source_type=charge_source_type,
+                source_id=charge_source_id or str(uuid4()),
+                metadata={
+                    "model": settings.embedding_model,
+                    "input_tokens": total_tokens_used,
+                    "batch_count": len(nonempty_indexes),
+                    **(charge_metadata or {}),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("embedding_batch_balance_charge_failed", error=str(exc))
+
+    return results
+
+
 async def update_item_embedding(
     db: AsyncSession,
     item: DirectoryItem,

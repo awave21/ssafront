@@ -18,10 +18,11 @@ class Channel(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "channels"
     __table_args__ = (
         UniqueConstraint("telegram_webhook_token", name="uq_channels_telegram_webhook_token"),
+        UniqueConstraint("jivo_provider_token", name="uq_channels_jivo_provider_token"),
     )
 
     type: Mapped[str] = mapped_column(
-        Enum("telegram", "telegram_phone", "whatsapp", "max", "web_widget", name="channel_type"),
+        Enum("telegram", "telegram_phone", "whatsapp", "max", "web_widget", "jivo", name="channel_type"),
         nullable=False,
         index=True,
     )
@@ -55,6 +56,14 @@ class Channel(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     widget_api_key_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
     widget_allowed_origins: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     widget_settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # Jivo (Bot API) fields.
+    # jivo_provider_token — наш секрет: аутентификация входящего вебхука и сегмент URL ответа.
+    # jivo_provider_id / jivo_reply_base_url — вводит клиент из кабинета Jivo после подключения.
+    # Исходящий ответ: POST {jivo_reply_base_url}/{jivo_provider_id}/{jivo_provider_token}
+    jivo_provider_token: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    jivo_provider_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    jivo_reply_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     agent_links: Mapped[list["AgentChannel"]] = relationship(
         "AgentChannel",

@@ -51,6 +51,10 @@
     </div>
 
     <div v-else class="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+      <AgentTabsNav
+        v-if="activeAgentId && !hideTabs"
+        :agent-id="activeAgentId"
+      />
       <slot />
     </div>
 
@@ -81,6 +85,7 @@ import { usePermissions } from '~/composables/usePermissions'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import AuthModal from '~/components/AuthModal.vue'
 import AgentTestChatWidget from '~/components/agents/AgentTestChatWidget.vue'
+import AgentTabsNav from '~/components/agents/AgentTabsNav.vue'
 
 type Props = {
   title: string
@@ -94,6 +99,8 @@ type Props = {
    * иначе высота «плавает» и Vue Flow постоянно пересчитывает размеры.
    */
   preventInnerScroll?: boolean
+  /** Скрыть горизонтальные вкладки навигации (например, для чата на полный экран) */
+  hideTabs?: boolean
 }
 
 const props = defineProps<Props>()
@@ -143,6 +150,10 @@ onUnmounted(() => {
 
 const resolveAgentId = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value
+
+const activeAgentId = computed(() =>
+  resolveAgentId(route.params.id as string | string[] | undefined) || null,
+)
 
 watch(
   () => route.params.id,

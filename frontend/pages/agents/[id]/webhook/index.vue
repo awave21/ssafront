@@ -1,6 +1,7 @@
 <template>
-  <div class="h-full px-5 py-5">
-    <div class="space-y-4">
+  <AgentPageShell title="Webhook" :hide-actions="true">
+    <AgentFunctionsWorkspace>
+      <div class="space-y-4">
       <div v-if="loading" class="flex items-center justify-center py-12">
         <Loader2 class="w-8 h-8 animate-spin text-slate-400" />
       </div>
@@ -85,8 +86,9 @@
           </TableBody>
         </Table>
       </div>
-    </div>
-  </div>
+      </div>
+    </AgentFunctionsWorkspace>
+  </AgentPageShell>
 </template>
 
 <script setup lang="ts">
@@ -96,6 +98,8 @@ import { Loader2, Pencil, Plus, Trash2, Webhook } from 'lucide-vue-next'
 import { Button } from '~/components/ui/button'
 import { Switch } from '~/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '~/components/ui/table'
+import AgentPageShell from '~/components/agents/AgentPageShell.vue'
+import AgentFunctionsWorkspace from '~/components/agents/functions-workspace/AgentFunctionsWorkspace.vue'
 import type { Tool, ToolBinding } from '~/types/tool'
 import type { FunctionRule } from '~/types/functionRule'
 import { useApiFetch } from '~/composables/useApiFetch'

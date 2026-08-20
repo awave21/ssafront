@@ -44,7 +44,7 @@
               class="block w-full cursor-pointer rounded-md border border-border bg-muted/30 px-2.5 py-2 text-left transition-all hover:border-slate-300 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60"
               @click="openRelatedNode(r.target_graph_node_id)"
             >
-              <span class="font-medium text-foreground">{{ r.relation_type }}</span>
+              <span class="font-medium text-foreground">{{ formatRelation(r.relation_type) }}</span>
               <span class="text-muted-foreground"> → </span>
               <span class="text-sm font-medium text-foreground">
                 {{ titleFor(r.target_graph_node_id) }}
@@ -72,7 +72,7 @@
                 {{ titleFor(r.source_graph_node_id) }}
                 <span aria-hidden="true">›</span>
               </span>
-              <span class="text-muted-foreground"> —{{ r.relation_type }}→ </span>
+              <span class="text-muted-foreground"> —{{ formatRelation(r.relation_type) }}→ </span>
               <span class="text-foreground">этот узел</span>
               <span v-if="r.origin_slice" class="mt-0.5 block text-[10px] text-muted-foreground">
                 {{ originLabel(r.origin_slice) }}
@@ -94,6 +94,7 @@ import { computed } from 'vue'
 import Badge from '~/components/ui/badge/Badge.vue'
 import KnowledgeSheetShell from '~/components/knowledge/KnowledgeSheetShell.vue'
 import type { UnifiedGraphNodeDto, UnifiedGraphPreview } from '../../../types/unifiedGraph'
+import { formatRelation } from './relationLabels'
 
 const props = defineProps<{
   node: UnifiedGraphNodeDto | null

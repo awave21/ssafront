@@ -2,6 +2,7 @@ export const ORIGIN_COLORS: Record<string, string> = {
   sqns: '#6366f1',
   knowledge: '#22c55e',
   directory: '#f97316',
+  script_canvas: '#8b5cf6',
   script_bridge: '#ec4899',
 }
 
@@ -9,7 +10,8 @@ export const ORIGIN_LABELS: Record<string, string> = {
   sqns: 'SQNS',
   knowledge: 'Файлы',
   directory: 'Справочники',
-  script_bridge: 'Сценарии',
+  script_canvas: 'Скрипт-флоу (canvas)',
+  script_bridge: 'Семантика (LLM)',
 }
 
 export const FALLBACK_NODE_COLOR = '#64748b'

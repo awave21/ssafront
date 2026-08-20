@@ -17,6 +17,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -71,6 +72,10 @@ class SqnsResource(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         server_default="now()",
     )
+
+    # Эмбеддинг для гибридного поиска специалистов (name + specialization + information).
+    embedding: Mapped[list | None] = mapped_column(Vector(1536), nullable=True)
+    embedding_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Relationships
     agent: Mapped["Agent"] = relationship(
@@ -157,6 +162,10 @@ class SqnsService(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
         index=True,
     )
+
+    # Эмбеддинг для гибридного поиска услуг (name + category + description).
+    embedding: Mapped[list | None] = mapped_column(Vector(1536), nullable=True)
+    embedding_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Relationships
     agent: Mapped["Agent"] = relationship(

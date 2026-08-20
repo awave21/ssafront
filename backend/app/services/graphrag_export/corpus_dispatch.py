@@ -13,13 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, get_settings
 from app.db.models.agent import Agent
 from app.db.session import async_session_factory
-from app.services.graphrag_export.local_index import run_local_microsoft_graphrag_index
+from app.services.graphrag_export.local_index import run_local_graphrag_index
 from app.services.graphrag_export.sqns_corpus import build_sqns_graphrag_corpus
 
 logger = structlog.get_logger(__name__)
 
 
-async def dispatch_microsoft_graphrag_corpus(
+async def dispatch_graphrag_corpus(
     *,
     db: AsyncSession,
     agent: Agent,
@@ -41,7 +41,7 @@ async def dispatch_microsoft_graphrag_corpus(
 
     if ws_root:
         logger.info("microsoft_graphrag_dispatch_mode", mode="local", agent_id=str(agent.id))
-        ok, msg = await run_local_microsoft_graphrag_index(
+        ok, msg = await run_local_graphrag_index(
             db=db, agent=agent, settings=cfg, active_sqns_only=active_sqns_only
         )
         if ok:
@@ -102,7 +102,7 @@ async def _dispatch_with_new_session(agent_id: UUID, tenant_id: UUID) -> None:
             ).scalar_one_or_none()
             if agent is None:
                 return
-            ok, msg = await dispatch_microsoft_graphrag_corpus(db=db, agent=agent, settings=cfg)
+            ok, msg = await dispatch_graphrag_corpus(db=db, agent=agent, settings=cfg)
             if not ok:
                 logger.warning("microsoft_graphrag_auto_dispatch_failed", agent_id=str(agent_id), msg=msg)
     except Exception as exc:  # noqa: BLE001

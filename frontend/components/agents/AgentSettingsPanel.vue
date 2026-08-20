@@ -122,6 +122,94 @@
       <div class="rounded-md border border-slate-200 bg-slate-50/60 p-4">
         <div class="flex items-start justify-between gap-4">
           <div class="space-y-1">
+            <label class="block text-sm font-bold text-slate-900">Задержка перед ответом</label>
+            <p class="text-xs text-slate-500">
+              Бот подождёт заданное время и объединит несколько сообщений подряд в один ответ. Применяется ко всем каналам агента.
+            </p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span
+              class="inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium"
+              :class="form.debounce_enabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'"
+            >
+              {{ form.debounce_enabled ? 'Включена' : 'Выключена' }}
+            </span>
+            <Switch
+              :model-value="form.debounce_enabled"
+              :disabled="!canEditAgents"
+              @update:model-value="(enabled: boolean) => { form.debounce_enabled = enabled }"
+            />
+          </div>
+        </div>
+        <div v-if="form.debounce_enabled" class="mt-4 flex items-center gap-3">
+          <input
+            v-model.number="form.debounce_delay_seconds"
+            :disabled="!canEditAgents"
+            type="number"
+            min="0"
+            max="30"
+            step="1"
+            class="w-40 px-4 py-3 bg-white border border-slate-200 rounded-md focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+          />
+          <span class="text-sm text-slate-500">секунд</span>
+        </div>
+      </div>
+
+      <div class="rounded-md border border-slate-200 bg-slate-50/60 p-4">
+        <div class="flex items-start justify-between gap-4">
+          <div class="space-y-1">
+            <label class="block text-sm font-bold text-slate-900">Уведомления менеджеру в Telegram</label>
+            <p class="text-xs text-slate-500">
+              Когда правило ставит диалог на паузу, платформа отправит уведомление в чат менеджера. Требуется бот и chat_id.
+            </p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span
+              class="inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium"
+              :class="form.admin_notification_enabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'"
+            >
+              {{ form.admin_notification_enabled ? 'Включены' : 'Выключены' }}
+            </span>
+            <Switch
+              :model-value="form.admin_notification_enabled"
+              :disabled="!canEditAgents"
+              @update:model-value="(enabled: boolean) => { form.admin_notification_enabled = enabled }"
+            />
+          </div>
+        </div>
+        <div v-if="form.admin_notification_enabled" class="mt-4 space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Токен Telegram-бота</label>
+            <input
+              v-model="form.admin_notification_bot_token"
+              :disabled="!canEditAgents"
+              type="text"
+              placeholder="1234567890:AA..."
+              class="w-full px-4 py-3 bg-white border border-slate-200 rounded-md focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            />
+            <p class="mt-1 text-xs text-slate-400">
+              Создайте отдельного бота через @BotFather для уведомлений. Токен вида 1234567890:AA...
+            </p>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Chat ID менеджера</label>
+            <input
+              v-model="form.admin_notification_chat_id"
+              :disabled="!canEditAgents"
+              type="text"
+              placeholder="например 123456789 или -1001234567890 для группы"
+              class="w-full px-4 py-3 bg-white border border-slate-200 rounded-md focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            />
+            <p class="mt-1 text-xs text-slate-400">
+              Менеджер должен один раз написать боту «Старт». Chat ID можно получить через @userinfobot.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-md border border-slate-200 bg-slate-50/60 p-4">
+        <div class="flex items-start justify-between gap-4">
+          <div class="space-y-1">
             <label class="block text-sm font-bold text-slate-900">Отключить агента</label>
             <p class="text-xs text-slate-500">
               При отключении агент временно не инициирует новые ответы. Входящие сообщения продолжают поступать.

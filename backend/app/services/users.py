@@ -20,6 +20,7 @@ ROLE_SCOPES: dict[str, list[str]] = {
         "runs:write",
         # Аналитика
         "analytics:view",
+        "analytics:write",
         # Тарифы моделей
         "model_pricing:read",
         "model_pricing:write",
@@ -52,6 +53,7 @@ ROLE_SCOPES: dict[str, list[str]] = {
         "runs:write",
         # Аналитика
         "analytics:view",
+        "analytics:write",
         # Тарифы моделей
         "model_pricing:read",
         "model_pricing:write",

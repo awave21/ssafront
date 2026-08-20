@@ -152,6 +152,22 @@ async def run_agent_with_tools(
         wrapped_tools.append(pydantic_tool)
     
     sqns_toolsets, sqns_tools = await prepare_sqns_tooling(agent, user)
+    # Деградация: SQNS настроен (enabled+host+credential), но ни toolset, ни legacy-тулы
+    # не собрались (prepare_sqns_tooling проглатывает ошибку сборки клиента). В этом
+    # случае агент отвечает БЕЗ фактов клиники — не молчим, сигналим наверх.
+    sqns_configured = bool(
+        getattr(agent, "sqns_enabled", False)
+        and getattr(agent, "sqns_host", None)
+        and getattr(agent, "sqns_credential_id", None)
+    )
+    sqns_degraded = sqns_configured and not sqns_toolsets and not sqns_tools
+    if sqns_degraded:
+        logger.warning(
+            "sqns_tooling_degraded",
+            agent_id=str(agent.id),
+            trace_id=trace_id,
+            hint="SQNS configured but no tools/toolsets built — agent runs WITHOUT clinic facts",
+        )
     if sqns_tools:
         wrapped_tools.extend(sqns_tools)
     if extra_tools:
@@ -265,6 +281,7 @@ async def run_agent_with_tools(
             "toolset_count": len(sqns_toolsets),
             "message_history_count": len(message_history) if message_history else 0,
             "has_system_prompt_override": system_prompt_override is not None,
+            "sqns_degraded": sqns_degraded,
         }
         logger.info(
             "pre_run_context_diagnostics",
@@ -280,6 +297,10 @@ async def run_agent_with_tools(
                 budget_warn_tokens=settings.runtime_context_budget_warn_tokens,
                 **context_diagnostics,
             )
+
+    # Флаг деградации SQNS должен доходить наверх даже при выключенной диагностике.
+    if context_diagnostics is None and sqns_degraded:
+        context_diagnostics = {"sqns_degraded": True}
 
     # Логируем историю сообщений, которая уйдет в модель (для отладки)
     # Проверяем структуру сообщений перед отправкой
@@ -354,11 +375,18 @@ async def run_agent_with_tools(
             ),
             deps=agent_deps,
         )
-    output = getattr(result, "data", None)
+    # PydanticAI 1.x: финальный текст ответа — result.output (в старом API было result.data).
+    # Раньше здесь читался только result.data; в 1.47 его нет → getattr возвращал None →
+    # срабатывал fallback str(result) (repr всего объекта), а repr экранирует непечатные
+    # символы (например узкий неразрывный пробел U+202F в ценах «25 000 ₽») в литерал
+    # « ». Из-за этого текст расходился с new_messages и ответ сохранялся дважды.
+    output = getattr(result, "output", None)
+    if output is None:
+        output = getattr(result, "data", None)  # обратная совместимость со старым API
+    if output is not None and not isinstance(output, str) and hasattr(output, "output"):
+        output = getattr(output, "output", output)
     if output is None:
         output = str(result)
-    elif hasattr(output, "output"):
-        output = getattr(output, "output", output)
     if not isinstance(output, str):
         output = str(output)
     output = _sanitize_output(output)

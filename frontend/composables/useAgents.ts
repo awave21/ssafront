@@ -71,6 +71,11 @@ export type Agent = {
   model: string
   timezone?: string
   manager_pause_minutes?: number
+  debounce_enabled?: boolean
+  debounce_delay_seconds?: number
+  admin_notification_enabled?: boolean
+  admin_notification_bot_token?: string | null
+  admin_notification_chat_id?: string | null
   llm_params?: {
     temperature?: number
     max_tokens?: number
@@ -97,6 +102,11 @@ export type CreateAgentData = {
   model: string
   timezone?: string
   manager_pause_minutes?: number
+  debounce_enabled?: boolean
+  debounce_delay_seconds?: number
+  admin_notification_enabled?: boolean
+  admin_notification_bot_token?: string | null
+  admin_notification_chat_id?: string | null
   llm_params?: {
     temperature?: number
     max_tokens?: number

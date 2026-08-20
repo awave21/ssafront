@@ -47,10 +47,28 @@ class StaffServiceLine(BaseModel):
     service_external_id: int | None
     service_name: str
     bookings_total: int
-    primary_count: int = 0
-    repeat_count: int = 0
+    arrived_total: int = 0
+    no_show_total: int = 0
+    primary_total: int = 0
+    repeat_total: int = 0
     revenue_total: float
-    avg_price: float = 0.0
+    avg_check: float = 0.0
+    conversion_pct: float = 0.0
+    no_show_pct: float = 0.0
+
+
+class StaffClientLine(BaseModel):
+    client_external_id: int
+    full_name: str
+    phone: str | None = None
+    visits_total: int = 0
+    arrived_total: int = 0
+    no_show_total: int = 0
+    primary_total: int = 0
+    repeat_total: int = 0
+    revenue_total: float = 0.0
+    avg_check: float = 0.0
+    last_visit_at: datetime | None = None
 
 
 class StaffSparkPoint(BaseModel):
@@ -62,6 +80,7 @@ class StaffSparkPoint(BaseModel):
 class StaffDetailResponse(_PeriodMixin):
     staff: StaffMember
     top_services: list[StaffServiceLine] = Field(default_factory=list)
+    clients: list[StaffClientLine] = Field(default_factory=list)
     sparkline: list[StaffSparkPoint] = Field(default_factory=list)
 
 

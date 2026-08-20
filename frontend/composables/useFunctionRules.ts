@@ -84,8 +84,10 @@ export const useFunctionRules = (agentId: string) => {
     }))
   }
 
+  // Runtime сортирует по priority ASC (меньше = раньше срабатывает).
+  // Показываем правила в том же порядке, что и порядок выполнения.
   const sortedRules = computed(() =>
-    [...rules.value].sort((left, right) => right.priority - left.priority),
+    [...rules.value].sort((left, right) => left.priority - right.priority),
   )
 
   return {

@@ -40,6 +40,7 @@ from app.services.runtime.context_assembler import (
     select_optional_runtime_tool_categories,
 )
 from app.services.runtime.tool_registry import build_optional_runtime_tools
+from app.services.runtime.skill_layer import build_skill_layer_prompt
 from app.services.runtime.scenario_runtime import apply_dialog_scenario_phases_before_llm
 from app.core.config import get_settings
 from app.services.logfire_cost_reconcile import schedule_logfire_cost_reconcile
@@ -63,19 +64,28 @@ _normalize_augment_prompt_blocks = normalize_augment_prompt_blocks
 _select_optional_runtime_tool_categories = select_optional_runtime_tool_categories
 
 
+def _normalize_output_text_for_compare(text: str) -> str:
+    """Нормализация текста для сравнения: NFKC + свод всех юникод-пробелов к обычному
+    и схлопывание. Защищает страховку от ложного «текста ещё нет» из-за узких/неразрывных
+    пробелов (U+202F, U+00A0), из-за которых ответ мог сохраниться дважды."""
+    import unicodedata
+
+    return " ".join(unicodedata.normalize("NFKC", text or "").split())
+
+
 def _session_messages_contain_output_text(
     messages: list[dict[str, Any]],
     output_text: str,
 ) -> bool:
     """Проверка, что финальный текст ответа уже представлен в сообщениях для session_messages."""
-    needle = output_text.strip()
+    needle = _normalize_output_text_for_compare(output_text)
     if not needle:
         return True
     for m in messages:
         if not isinstance(m, dict):
             continue
         for txt in extract_text_contents(m):
-            if txt.strip() == needle:
+            if _normalize_output_text_for_compare(txt) == needle:
                 return True
     return False
 
@@ -142,7 +152,7 @@ def _extract_graph_booking_meta(tools_called: list[dict[str, Any]] | None) -> di
     for call in tools_called:
         if not isinstance(call, dict):
             continue
-        if call.get("name") != "query_microsoft_graphrag":
+        if call.get("name") != "query_graphrag":
             continue
         result = call.get("result")
         if not isinstance(result, dict):
@@ -152,7 +162,7 @@ def _extract_graph_booking_meta(tools_called: list[dict[str, Any]] | None) -> di
             for key in ("service_candidates", "specialist_candidates", "category_candidates")
         ):
             continue
-            return result
+        return result
     return None
 
 
@@ -738,6 +748,20 @@ async def execute_agent_run(
         base = (system_prompt_override or agent.system_prompt or "").rstrip()
         system_prompt_override = base + optional_tools_bundle.system_prompt_addition
 
+    # Навык-слой: если услуга диалога уже определена (resolve_clinic_facts) и у её
+    # потока есть skill_doc — подгрузить навык целиком (продолжение эксперта).
+    if settings.runtime_skill_layer_enabled:
+        try:
+            skill_addition = await build_skill_layer_prompt(
+                db, agent_id=agent.id, session_id=session_id
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("skill_layer_build_failed", session_id=session_id)
+            skill_addition = None
+        if skill_addition:
+            base = (system_prompt_override or agent.system_prompt or "").rstrip()
+            system_prompt_override = base + skill_addition
+
     # Same phases as inbound webhooks (webhooks_inbound_agent): dialog_start on first message
     # in session, then client_message / client_return. Test chat (/runs, WS) previously skipped
     # these and only ran agent_message after the model — so «Начало диалога» did not fire in UI.
@@ -1090,6 +1114,45 @@ async def execute_agent_run(
         await db.flush()
 
     await sync_run_balance_charge(db, run=run)
+
+    # Фаза post_run: даёт правилам сработать после окончательного ответа модели.
+    # Здесь уже сохранены tools_called, cost, tokens, output — идеальная точка
+    # для «после успешной записи → уведомить», «после каждого run → лог в CRM» и т.п.
+    if rules_enabled:
+        ui = user_info if isinstance(user_info, dict) else {}
+        try:
+            await run_rules_for_phase(
+                db,
+                tenant_id=run.tenant_id,
+                agent_id=agent.id,
+                session_id=session_id,
+                trace_id=trace_id,
+                phase="post_run",
+                message=str(result.output or ""),
+                user=user,
+                run_id=run.id,
+                context={
+                    "user_info": ui,
+                    "agent_timezone": getattr(agent, "timezone", None) or "UTC",
+                    "input_message": input_message,
+                    "assistant_output": str(result.output or ""),
+                    "cost_usd": float(getattr(run, "cost_usd", 0) or 0),
+                    "cost_rub": float(getattr(run, "cost_rub", 0) or 0),
+                    "total_tokens": int(getattr(run, "total_tokens", 0) or 0),
+                    "prompt_tokens": int(getattr(run, "prompt_tokens", 0) or 0),
+                    "completion_tokens": int(getattr(run, "completion_tokens", 0) or 0),
+                    "tools_called": result.tools_called or [],
+                },
+                rules_enabled=rules_enabled,
+                semantic_allowed=semantic_allowed,
+            )
+        except Exception as _post_run_exc:  # noqa: BLE001
+            logger.warning(
+                "post_run_rules_dispatch_failed",
+                agent_id=str(agent.id),
+                run_id=str(run.id),
+                error=str(_post_run_exc),
+            )
 
     messages_to_save: list[dict[str, Any]] = list(result.new_messages or [])
     if new_messages_filter and messages_to_save:

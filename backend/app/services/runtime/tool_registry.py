@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.db.models.agent import Agent
-from app.services.runtime.microsoft_graphrag_tool import build_microsoft_graphrag_tool
+from app.services.runtime.graphrag_tool import build_graphrag_tool
 from app.services.runtime.tools import (
     build_direct_answer_tool,
     build_direct_questions_search_tool,
@@ -63,6 +63,7 @@ async def build_optional_runtime_tools(
 
     tools: list[PydanticTool] = []
     retrieval_decisions: list[dict[str, Any]] = []
+    system_prompt_addition: str | None = None
 
     if "knowledge" in selected_categories:
         kt = await build_knowledge_search_tool(
@@ -106,11 +107,15 @@ async def build_optional_runtime_tools(
 
     # Graph/expertise-инструменты подключаются только если соответствующие
     # optional-категории уже разрешены upstream. Для GraphRAG-агентов primary path
-    # теперь один: query_microsoft_graphrag.
+    # теперь один: query_graphrag.
 
-    if "expertise" in selected_categories:
+    # query_graphrag строим только если GraphRAG реально включён у агента.
+    # Раньше тул регистрировался безусловно, игнорируя microsoft_graphrag_enabled —
+    # из-за этого агенты с выключенным графом всё равно получали тяжёлую схему тула
+    # (лишний контекст) и booking-подбор дублировался с resolve_clinic_facts.
+    if "expertise" in selected_categories and getattr(agent, "microsoft_graphrag_enabled", False):
         tools.append(
-            await build_microsoft_graphrag_tool(
+            await build_graphrag_tool(
                 db=db,
                 settings=settings,
                 agent=agent,
@@ -127,8 +132,41 @@ async def build_optional_runtime_tools(
             )
         )
 
+    # Навыки эксперта, выбираемые САМОЙ моделью (как Claude Skills). Регистрируем,
+    # только если фича включена и у агента есть опубликованные навыки со skill_doc.
+    if getattr(settings, "runtime_expert_skill_tool_enabled", False):
+        from app.services.runtime.expert_skill_tool import (
+            build_expert_skill_tool,
+            list_published_skills,
+        )
+
+        published_skills = await list_published_skills(db, agent.id)
+        if published_skills:
+            # Агентский путь: модель сама выбирает навык по описанию тула (каталог тем +
+            # правило «когда звать» зашиты в description инструмента). Никакого per-model
+            # толчка в system_prompt — поведение модель-агностично (модель сменяема).
+            tools.append(build_expert_skill_tool(skills=published_skills))
+
+    # Единый подбор фактов клиники (услуги/врачи по смыслу, hybrid-поиск).
+    # Читает SQNS-кэш → регистрируем только при включённой интеграции SQNS.
+    if "clinic_facts" in selected_categories and getattr(agent, "sqns_enabled", False):
+        # Управляется тем же тумблером, что и legacy SQNS-тулы (sqns_disabled_tools),
+        # чтобы его можно было выключить из UI SQNS.
+        _disabled = agent.sqns_disabled_tools if isinstance(agent.sqns_disabled_tools, list) else []
+        if "resolve_clinic_facts" not in _disabled:
+            from app.services.runtime.clinic_facts_tool import build_resolve_clinic_facts_tool
+
+            tools.append(
+                build_resolve_clinic_facts_tool(
+                    db=db,
+                    agent=agent,
+                    tenant_id=tenant_id,
+                    openai_api_key=openai_api_key,
+                )
+            )
+
     return OptionalRuntimeToolsBundle(
         tools=tools,
         retrieval_decisions=retrieval_decisions,
-        system_prompt_addition=None,
+        system_prompt_addition=system_prompt_addition,
     )

@@ -227,8 +227,29 @@ class SqnsToolToggleRequest(BaseModel):
         return self
 
 
+# Виртуальный тул: resolve_clinic_facts строится не в legacy-наборе, а в
+# tool_registry (категория clinic_facts). Показываем его в UI и даём тумблер
+# через тот же механизм sqns_disabled_tools — без отдельного поля/миграции.
+RESOLVE_CLINIC_FACTS_TOOL: dict[str, Any] = {
+    "name": "resolve_clinic_facts",
+    "description": (
+        "Подбор услуг и специалистов клиники по СМЫСЛУ запроса пациента "
+        "(семантический hybrid-поиск). Заменяет ручной подбор услуг/специалистов и "
+        "вариантов записи: находит услугу, её цену и совместимых врачей с правилами "
+        "записи, возвращает стабильные external_id для sqns_list_slots."
+    ),
+    "schema": {"required": []},
+}
+
+
 def _list_sqns_tool_names() -> set[str]:
-    return {str(item["name"]) for item in get_sqns_tools_definitions() if isinstance(item, dict) and item.get("name")}
+    names = {
+        str(item["name"])
+        for item in get_sqns_tools_definitions()
+        if isinstance(item, dict) and item.get("name")
+    }
+    names.add(str(RESOLVE_CLINIC_FACTS_TOOL["name"]))
+    return names
 
 
 def _normalize_sqns_disabled_tools(agent: Agent) -> list[str]:
@@ -336,6 +357,17 @@ async def get_sqns_status(
     if agent.sqns_enabled:
         disabled_tools = set(_normalize_sqns_disabled_tools(agent))
         description_overrides = _normalize_sqns_tool_descriptions(agent)
+        # Первым — семантический подбор (resolve_clinic_facts), он основной путь.
+        rcf_name = str(RESOLVE_CLINIC_FACTS_TOOL["name"])
+        tools.append(
+            SqnsTool(
+                name=rcf_name,
+                description=description_overrides.get(rcf_name, RESOLVE_CLINIC_FACTS_TOOL["description"]),
+                isEnabled=rcf_name not in disabled_tools,
+                requiredFields=[],
+                dataSources={},
+            )
+        )
         for defn in get_sqns_tools_definitions():
             tool_name = str(defn["name"])
             tools.append(

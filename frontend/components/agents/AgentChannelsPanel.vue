@@ -11,40 +11,36 @@
       <Loader2 class="w-8 h-8 animate-spin text-indigo-600" />
     </div>
 
-    <div v-else class="space-y-5">
+    <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
       <div
-        class="p-4 border rounded-lg transition-all"
+        class="p-4 border rounded-lg transition-all flex flex-col h-full"
         :class="[
           telegramChannel
             ? 'border-indigo-100 bg-indigo-50/30'
             : 'border-slate-100 bg-white hover:border-slate-200'
         ]"
       >
-        <div class="flex items-start justify-between gap-4">
-          <div class="flex gap-4 min-w-0">
-            <div class="w-12 h-12 bg-gradient-to-br from-blue-400 to-blue-600 rounded-md flex items-center justify-center">
-              <Send class="w-6 h-6 text-white" />
-            </div>
-            <div class="min-w-0">
-              <h4 class="font-bold text-slate-900">Подключение Telegram бота</h4>
-              <p class="text-sm text-slate-500 mt-1">
-                Подключите Telegram-бота для автоматического общения с клиентами.
-              </p>
-              <div v-if="telegramChannel" class="mt-3">
-                <span
-                  class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
-                  :class="telegramChannel.webhook_enabled ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'"
-                >
-                  {{ telegramChannel.webhook_enabled ? 'Активен' : 'Неактивен' }}
-                </span>
-              </div>
-            </div>
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 bg-gradient-to-br from-blue-400 to-blue-600 rounded-md flex items-center justify-center flex-shrink-0">
+            <Send class="w-6 h-6 text-white" />
           </div>
-
+          <h4 class="font-bold text-slate-900 leading-tight">Подключение Telegram бота</h4>
+        </div>
+        <p class="text-sm text-slate-500 mt-3">
+          Подключите Telegram-бота для автоматического общения с клиентами.
+        </p>
+        <div v-if="telegramChannel" class="mt-3">
+          <span
+            class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
+            :class="telegramChannel.webhook_enabled ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'"
+          >
+            {{ telegramChannel.webhook_enabled ? 'Активен' : 'Неактивен' }}
+          </span>
+        </div>
+        <div v-if="canEditAgents" class="mt-auto pt-4">
           <button
-            v-if="canEditAgents"
             @click="showChannelEditSheet = true"
-            class="px-4 py-2 rounded-md text-sm font-bold transition-colors"
+            class="w-full px-4 py-2 rounded-md text-sm font-bold transition-colors"
             :class="telegramChannel ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
           >
             {{ telegramChannel ? 'Настроить' : 'Подключить' }}
@@ -108,52 +104,84 @@
 
       <!-- Web Widget Channel -->
       <div
-        class="p-4 border rounded-lg transition-all"
+        class="p-4 border rounded-lg transition-all flex flex-col h-full"
         :class="[
           webWidgetChannel
             ? 'border-purple-100 bg-purple-50/30'
             : 'border-slate-100 bg-white hover:border-slate-200'
         ]"
       >
-        <div class="flex items-start justify-between gap-4">
-          <div class="flex gap-4 min-w-0">
-            <div class="w-12 h-12 bg-gradient-to-br from-purple-400 to-purple-600 rounded-md flex items-center justify-center flex-shrink-0">
-              <Globe class="w-6 h-6 text-white" />
-            </div>
-            <div class="min-w-0">
-              <h4 class="font-bold text-slate-900">Виджет на сайт</h4>
-              <p class="text-sm text-slate-500 mt-1">
-                Встраиваемый чат-виджет для любого сайта. Один тег &lt;script&gt; — и готово.
-              </p>
-              <div v-if="webWidgetChannel" class="mt-3 flex items-center gap-2">
-                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-green-100 text-green-700">
-                  Активен
-                </span>
-                <span v-if="webWidgetChannel.widget_api_key_last4" class="text-[10px] text-slate-400 font-mono">
-                  ···{{ webWidgetChannel.widget_api_key_last4 }}
-                </span>
-              </div>
-            </div>
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 bg-gradient-to-br from-purple-400 to-purple-600 rounded-md flex items-center justify-center flex-shrink-0">
+            <Globe class="w-6 h-6 text-white" />
           </div>
+          <h4 class="font-bold text-slate-900 leading-tight">Виджет на сайт</h4>
+        </div>
+        <p class="text-sm text-slate-500 mt-3">
+          Встраиваемый чат-виджет для любого сайта. Один тег &lt;script&gt; — и готово.
+        </p>
+        <div v-if="webWidgetChannel" class="mt-3 flex items-center gap-2">
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-green-100 text-green-700">
+            Активен
+          </span>
+          <span v-if="webWidgetChannel.widget_api_key_last4" class="text-[10px] text-slate-400 font-mono">
+            ···{{ webWidgetChannel.widget_api_key_last4 }}
+          </span>
+        </div>
+        <div v-if="canEditAgents" class="mt-auto pt-4">
+          <button
+            v-if="webWidgetChannel"
+            @click="showWidgetSheet = true"
+            class="w-full px-4 py-2 rounded-md text-sm font-bold bg-purple-600 text-white hover:bg-purple-700 transition-colors"
+          >
+            Настроить
+          </button>
+          <button
+            v-else
+            @click="handleConnectWidget"
+            :disabled="widgetConnecting"
+            class="w-full px-4 py-2 rounded-md text-sm font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-50 inline-flex items-center justify-center"
+          >
+            <Loader2 v-if="widgetConnecting" class="w-4 h-4 animate-spin" />
+            <span v-else>Подключить</span>
+          </button>
+        </div>
+      </div>
 
-          <div v-if="canEditAgents" class="flex items-center gap-2 flex-shrink-0">
-            <button
-              v-if="webWidgetChannel"
-              @click="showWidgetSheet = true"
-              class="px-3 py-1.5 rounded-md text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 transition-colors"
-            >
-              Настроить
-            </button>
-            <button
-              v-else
-              @click="handleConnectWidget"
-              :disabled="widgetConnecting"
-              class="px-3 py-1.5 rounded-md text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-50"
-            >
-              <Loader2 v-if="widgetConnecting" class="w-3 h-3 animate-spin" />
-              <span v-else>Подключить</span>
-            </button>
+      <!-- Jivo Channel -->
+      <div
+        class="p-4 border rounded-lg transition-all flex flex-col h-full"
+        :class="[
+          jivoChannel
+            ? 'border-emerald-100 bg-emerald-50/30'
+            : 'border-slate-100 bg-white hover:border-slate-200'
+        ]"
+      >
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-md flex items-center justify-center flex-shrink-0">
+            <MessagesSquare class="w-6 h-6 text-white" />
           </div>
+          <h4 class="font-bold text-slate-900 leading-tight">Jivo</h4>
+        </div>
+        <p class="text-sm text-slate-500 mt-3">
+          Онлайн-чат Jivo на сайте и в мессенджерах — агент отвечает клиентам.
+        </p>
+        <div v-if="jivoChannel" class="mt-3">
+          <span
+            class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
+            :class="isJivoConfigured ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'"
+          >
+            {{ isJivoConfigured ? 'Активен' : 'Ожидает подключения' }}
+          </span>
+        </div>
+        <div v-if="canEditAgents" class="mt-auto pt-4">
+          <button
+            @click="showJivoSheet = true"
+            class="w-full px-4 py-2 rounded-md text-sm font-bold transition-colors"
+            :class="jivoChannel ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+          >
+            {{ jivoChannel ? 'Настроить' : 'Подключить' }}
+          </button>
         </div>
       </div>
     </div>
@@ -192,18 +220,28 @@
       @connected="handleWidgetConnected"
       @disconnected="handleWidgetDisconnected"
     />
+
+    <JivoEditSheet
+      v-if="agent"
+      :open="showJivoSheet"
+      :channel="jivoChannel"
+      @update:open="showJivoSheet = $event"
+      @connected="handleJivoConnected"
+      @disconnected="handleJivoDisconnected"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { Globe, Loader2, MessageCircle, MessageSquare, Send, Smartphone } from 'lucide-vue-next'
+import { Globe, Loader2, MessageCircle, MessageSquare, MessagesSquare, Send, Smartphone } from 'lucide-vue-next'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import { usePermissions } from '~/composables/usePermissions'
 import { useToast } from '~/composables/useToast'
 import ChannelEditSheet from '~/components/ChannelEditSheet.vue'
 import WebWidgetEditSheet from '~/components/agents/WebWidgetEditSheet.vue'
+import JivoEditSheet from '~/components/agents/JivoEditSheet.vue'
 import AgentChannelActionCard from '~/components/agents/AgentChannelActionCard.vue'
 import AgentChannelQrModal from '~/components/agents/AgentChannelQrModal.vue'
 import AgentChannelTwoFactorModal from '~/components/agents/AgentChannelTwoFactorModal.vue'
@@ -217,6 +255,7 @@ const {
   agent,
   telegramChannel,
   webWidgetChannel,
+  jivoChannel,
   telegramPhoneChannel,
   whatsappPhoneChannel,
   maxPhoneChannel,
@@ -227,7 +266,12 @@ const { success: toastSuccess, error: toastError } = useToast()
 
 const showChannelEditSheet = ref(false)
 const showWidgetSheet = ref(false)
+const showJivoSheet = ref(false)
 const widgetConnecting = ref(false)
+
+const isJivoConfigured = computed(() =>
+  Boolean(jivoChannel.value?.provider_id && jivoChannel.value?.reply_base_url)
+)
 const channelLoading = ref<Record<PhoneChannelKey, boolean>>({
   telegramPhone: false,
   whatsappPhone: false,
@@ -293,6 +337,14 @@ const handleWidgetConnected = () => {
 
 const handleWidgetDisconnected = () => {
   showWidgetSheet.value = false
+}
+
+const handleJivoConnected = () => {
+  showJivoSheet.value = false
+}
+
+const handleJivoDisconnected = () => {
+  showJivoSheet.value = false
 }
 
 const getErrorMessage = (err: any, fallback: string) => {

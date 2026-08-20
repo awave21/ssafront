@@ -92,11 +92,13 @@ def _collect_node_filters(
     data: dict[str, Any],
     *,
     flow_metadata: dict[str, Any],
+    flow_service_ids: list[str] | None = None,
 ) -> dict[str, list[str]]:
     kg = data.get("kg_links") if isinstance(data.get("kg_links"), dict) else {}
     return {
         "service_ids": _as_list_of_str(data.get("service_ids"))
-        or _as_list_of_str(flow_metadata.get("service_ids")),
+        or _as_list_of_str(flow_metadata.get("service_ids"))
+        or list(flow_service_ids or []),
         "employee_ids": _as_list_of_str(data.get("employee_ids"))
         or _as_list_of_str(flow_metadata.get("employee_ids")),
         "motive_ids": _as_list_of_str(kg.get("motive_ids")),
@@ -110,6 +112,7 @@ def compile_script_flow_index_payload(flow: ScriptFlow) -> ScriptFlowIndexPayloa
     flow_definition = flow.flow_definition if isinstance(flow.flow_definition, dict) else {}
     flow_metadata = flow.flow_metadata if isinstance(flow.flow_metadata, dict) else {}
     variables = flow_metadata.get("variables") or {}
+    flow_service_ids = _as_list_of_str(getattr(flow, "service_external_ids", None))
 
     nodes_raw = flow_definition.get("nodes")
     edges_raw = flow_definition.get("edges")
@@ -131,7 +134,9 @@ def compile_script_flow_index_payload(flow: ScriptFlow) -> ScriptFlowIndexPayloa
         stage_s = _truncate(data.get("stage"), 50)
         stage = stage_s or None
         content_text = _render_node_content_text(data, variables)
-        filters = _collect_node_filters(data, flow_metadata=flow_metadata)
+        filters = _collect_node_filters(
+            data, flow_metadata=flow_metadata, flow_service_ids=flow_service_ids
+        )
         is_searchable = data.get("is_searchable")
         if node_type == "condition":
             # Legacy flow JSON often persisted condition nodes with

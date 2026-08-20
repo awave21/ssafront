@@ -34,17 +34,37 @@
       </div>
 
       <div class="space-y-1">
-      <label class="insp-label">Как клиент обычно это формулирует</label>
-      <textarea
-        v-model="localClientPhraseExamplesStr"
-        class="insp-input font-mono text-[11px]"
-        placeholder="Например: Хочу записаться... / Сколько стоит... / Что вы посоветуете..."
-        @input="flushNode"
-        @focus="focusField('client_phrase_examples')"
-      />
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>Как клиент обычно это формулирует</span>
+          <FieldHelpIcons
+            field-key="trigger.client_phrase_examples"
+            node-type="trigger"
+            :node-id="nodeId"
+            :current-node-data="currentNodeData"
+            :current-value="localClientPhraseExamplesStr"
+            @ai-fill="(t: string) => applyAi('client_phrase_examples', t)"
+          />
+        </label>
+        <textarea
+          v-model="localClientPhraseExamplesStr"
+          class="insp-input font-mono text-[11px]"
+          placeholder="Например: Хочу записаться... / Сколько стоит... / Что вы посоветуете..."
+          @input="flushNode"
+          @focus="focusField('client_phrase_examples')"
+        />
       </div>
       <div class="space-y-1">
-        <label class="insp-label">Когда сценарий уместен</label>
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>Когда сценарий уместен</span>
+          <FieldHelpIcons
+            field-key="trigger.when_relevant"
+            node-type="trigger"
+            :node-id="nodeId"
+            :current-node-data="currentNodeData"
+            :current-value="localWhenRelevant"
+            @ai-fill="(t: string) => applyAi('when_relevant', t)"
+          />
+        </label>
         <textarea
           v-model="localWhenRelevant"
           class="insp-input"
@@ -54,7 +74,17 @@
         />
       </div>
       <div class="space-y-1">
-        <label class="insp-label">Слова и сигналы, по которым это можно узнать</label>
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>Слова и сигналы, по которым это можно узнать</span>
+          <FieldHelpIcons
+            field-key="trigger.keyword_hints"
+            node-type="trigger"
+            :node-id="nodeId"
+            :current-node-data="currentNodeData"
+            :current-value="localKeywordHintsStr"
+            @ai-fill="(t: string) => applyAi('keyword_hints', t)"
+          />
+        </label>
         <textarea
           v-model="localKeywordHintsStr"
           class="insp-input font-mono text-[11px]"
@@ -68,10 +98,12 @@
 </template>
 
 <script setup lang="ts">
-import { inject } from 'vue'
+import { computed, inject } from 'vue'
 import { SCRIPT_FLOW_INSPECTOR_KEY } from '~/composables/useScriptFlowInspectorModel'
+import FieldHelpIcons from './FieldHelpIcons.vue'
 
 const {
+  nodeId,
   localWhenRelevant,
   localClientPhraseExamplesStr,
   localKeywordHintsStr,
@@ -82,5 +114,31 @@ const {
 
 const focusField = (k: string) => {
   lastFocusedField.value = k
+}
+
+const splitLines = (s: string) =>
+  s
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean)
+
+const currentNodeData = computed(() => ({
+  client_phrase_examples: splitLines(localClientPhraseExamplesStr.value),
+  when_relevant: localWhenRelevant.value,
+  keyword_hints: splitLines(localKeywordHintsStr.value),
+  is_flow_entry: localIsFlowEntry.value,
+}))
+
+const FIELD_REFS: Record<string, { value: string }> = {
+  client_phrase_examples: localClientPhraseExamplesStr,
+  when_relevant: localWhenRelevant,
+  keyword_hints: localKeywordHintsStr,
+}
+
+const applyAi = (field: string, text: string) => {
+  const ref = FIELD_REFS[field]
+  if (!ref) return
+  ref.value = text
+  flushNode()
 }
 </script>

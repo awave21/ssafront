@@ -7,12 +7,18 @@ import re
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, literal, or_, select, text
+from sqlalchemy import and_, bindparam, case, func, literal, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.script_flow_edge_index import ScriptFlowEdgeIndex
 from app.db.models.script_flow_node_index import ScriptFlowNodeIndex
 from app.services.directory.service import create_embedding
+
+# Hybrid RRF: слияние векторного и лексического пулов.
+_RRF_K = 60          # сглаживающая константа Reciprocal Rank Fusion
+_HYBRID_POOL = 20    # размер каждого пула до слияния
+_LEXICAL_MIN = 0.4   # порог лексического скора для «спасения» узла, недобранного вектором
+                     # (content ILIKE = 0.45 → подстрочное совпадение проходит)
 
 
 @dataclass
@@ -58,6 +64,8 @@ class ScriptFlowRetriever:
         stage: str | None = None,
         service_id: str | None = None,
         entry_only: bool = False,
+        min_score: float = 0.0,
+        flow_ids: list[UUID] | None = None,
     ) -> list[ScriptFlowNodeHit]:
         hits, _debug = await self.search_nodes_with_debug(
             query=query,
@@ -65,6 +73,8 @@ class ScriptFlowRetriever:
             stage=stage,
             service_id=service_id,
             entry_only=entry_only,
+            min_score=min_score,
+            flow_ids=flow_ids,
         )
         return hits
 
@@ -76,12 +86,19 @@ class ScriptFlowRetriever:
         stage: str | None = None,
         service_id: str | None = None,
         entry_only: bool = False,
+        min_score: float = 0.0,
+        flow_ids: list[UUID] | None = None,
     ) -> tuple[list[ScriptFlowNodeHit], dict[str, Any]]:
         """Return node matches via pgvector with lexical fallback.
 
-        Stage is treated as a soft filter: if stage-constrained lookup returns
-        nothing, we retry once without stage to avoid losing relevant flows when
-        indexed nodes use different stage labels (or no stage at all).
+        Semantics:
+        - Если у нод есть эмбеддинги (vector-путь вернул строки) — работаем строго
+          семантически и применяем порог `min_score`. Если ничего не прошло порог —
+          возвращаем пусто (тактику не подставляем → агент отвечает по основному
+          промпту). Лексику в этом случае НЕ включаем, чтобы не подсунуть мусор.
+        - Если эмбеддингов нет вовсе (переходный период / сбой API) — лексический
+          фолбэк по ILIKE.
+        Stage — мягкий фильтр: при пустом результате пробуем без stage.
         """
         q = (query or "").strip()
         if not q:
@@ -91,68 +108,137 @@ class ScriptFlowRetriever:
                 "entry_only": entry_only,
             }
 
-        vector_hits = await self._vector_search_nodes(
-            query=q,
-            limit=limit,
-            stage=stage,
-            service_id=service_id,
-            entry_only=entry_only,
-        )
-        if vector_hits:
-            return vector_hits, {
-                "search_mode": "vector_stage_filtered" if stage else "vector",
-                "stage_fallback_used": False,
+        pool = max(limit, _HYBRID_POOL)
+
+        async def _hybrid(stage_arg: str | None) -> tuple[list[ScriptFlowNodeHit] | None, list[ScriptFlowNodeHit]]:
+            """Возврат (vector_hits|None, fused). None у vector_hits — эмбеддингов нет вовсе."""
+            vhits = await self._vector_search_nodes(
+                query=q, limit=pool, stage=stage_arg, service_id=service_id,
+                entry_only=entry_only, flow_ids=flow_ids,
+            )
+            if not vhits:
+                return None, []
+            lhits = await self._lexical_search_nodes(
+                query=q, limit=pool, stage=stage_arg, service_id=service_id,
+                entry_only=entry_only, flow_ids=flow_ids,
+            )
+            return vhits, self._rrf_fuse(vhits, lhits, min_score=min_score, limit=limit)
+
+        vector_hits, fused = await _hybrid(stage)
+
+        if vector_hits is None:
+            # Эмбеддингов нет вовсе → чистый лексический фолбэк.
+            lexical_hits = await self._lexical_search_nodes(
+                query=q, limit=limit, stage=stage, service_id=service_id,
+                entry_only=entry_only, flow_ids=flow_ids,
+            )
+            if lexical_hits:
+                return lexical_hits, {
+                    "search_mode": "lexical_stage_filtered" if stage else "lexical",
+                    "stage_fallback_used": False,
+                    "entry_only": entry_only,
+                }
+            if stage:
+                lexical_hits_no_stage = await self._lexical_search_nodes(
+                    query=q, limit=limit, stage=None, service_id=service_id,
+                    entry_only=entry_only, flow_ids=flow_ids,
+                )
+                if lexical_hits_no_stage:
+                    return lexical_hits_no_stage, {
+                        "search_mode": "lexical_stage_fallback",
+                        "stage_fallback_used": True,
+                        "entry_only": entry_only,
+                    }
+            return [], {
+                "search_mode": "no_matches",
+                "stage_fallback_used": bool(stage),
                 "entry_only": entry_only,
             }
 
-        lexical_hits = await self._lexical_search_nodes(
-            query=q,
-            limit=limit,
-            stage=stage,
-            service_id=service_id,
-            entry_only=entry_only,
-        )
-        if lexical_hits:
-            return lexical_hits, {
-                "search_mode": "lexical_stage_filtered" if stage else "lexical",
+        if fused:
+            return fused, {
+                "search_mode": "hybrid_stage_filtered" if stage else "hybrid",
                 "stage_fallback_used": False,
                 "entry_only": entry_only,
+                "min_score": min_score,
             }
 
         if stage:
-            vector_hits_no_stage = await self._vector_search_nodes(
-                query=q,
-                limit=limit,
-                stage=None,
-                service_id=service_id,
-                entry_only=entry_only,
-            )
-            if vector_hits_no_stage:
-                return vector_hits_no_stage, {
-                    "search_mode": "vector_stage_fallback",
+            _v2, fused_no_stage = await _hybrid(None)
+            if fused_no_stage:
+                return fused_no_stage, {
+                    "search_mode": "hybrid_stage_fallback",
                     "stage_fallback_used": True,
                     "entry_only": entry_only,
+                    "min_score": min_score,
                 }
 
-            lexical_hits_no_stage = await self._lexical_search_nodes(
-                query=q,
-                limit=limit,
-                stage=None,
-                service_id=service_id,
-                entry_only=entry_only,
-            )
-            if lexical_hits_no_stage:
-                return lexical_hits_no_stage, {
-                    "search_mode": "lexical_stage_fallback",
-                    "stage_fallback_used": True,
-                    "entry_only": entry_only,
-                }
-
+        # Эмбеддинги есть, но ни вектор, ни лексика не прошли гейт → нет тактики → базовый промпт.
         return [], {
-            "search_mode": "no_matches",
+            "search_mode": "hybrid_below_threshold",
             "stage_fallback_used": bool(stage),
             "entry_only": entry_only,
+            "min_score": min_score,
+            "top_score": max((h.score for h in vector_hits), default=0.0),
         }
+
+    @staticmethod
+    def _rrf_fuse(
+        vector_hits: list[ScriptFlowNodeHit],
+        lexical_hits: list[ScriptFlowNodeHit],
+        *,
+        min_score: float,
+        limit: int,
+        k: int = _RRF_K,
+        lexical_min: float = _LEXICAL_MIN,
+    ) -> list[ScriptFlowNodeHit]:
+        """Слить векторный и лексический пулы через RRF.
+
+        Ранжирование — по Σ 1/(k+rank). Гейт уверенности (сохраняет фолбэк на
+        базовый промпт): узел проходит, если у него сильный вектор (cosine ≥
+        min_score) ИЛИ сильная лексика (score ≥ lexical_min). При min_score ≤ 0
+        (sandbox) гейт отключён. Отображаемый score — cosine, если есть, иначе
+        лексический.
+        """
+        def _key(h: ScriptFlowNodeHit) -> tuple[UUID, str]:
+            return (h.flow_id, h.node_id)
+
+        v_score = {_key(h): h.score for h in vector_hits}
+        l_score = {_key(h): h.score for h in lexical_hits}
+        v_rank = {_key(h): i for i, h in enumerate(vector_hits)}
+        l_rank = {_key(h): i for i, h in enumerate(lexical_hits)}
+
+        hit_by_key: dict[tuple[UUID, str], ScriptFlowNodeHit] = {}
+        for h in vector_hits:
+            hit_by_key.setdefault(_key(h), h)
+        for h in lexical_hits:
+            hit_by_key.setdefault(_key(h), h)
+
+        scored: list[tuple[float, float, ScriptFlowNodeHit]] = []
+        for kk, hit in hit_by_key.items():
+            vs = v_score.get(kk)
+            ls = l_score.get(kk)
+            passes = (
+                min_score <= 0.0
+                or (vs is not None and vs >= min_score)
+                or (ls is not None and ls >= lexical_min)
+            )
+            if not passes:
+                continue
+            rrf = 0.0
+            if kk in v_rank:
+                rrf += 1.0 / (k + v_rank[kk])
+            if kk in l_rank:
+                rrf += 1.0 / (k + l_rank[kk])
+            display = vs if vs is not None else (ls if ls is not None else 0.0)
+            scored.append((rrf, float(display), hit))
+
+        scored.sort(key=lambda t: t[0], reverse=True)
+        out: list[ScriptFlowNodeHit] = []
+        for _rrf, display, hit in scored[: max(1, limit)]:
+            hit.score = display
+            out.append(hit)
+        return out
 
     async def _vector_search_nodes(
         self,
@@ -162,6 +248,7 @@ class ScriptFlowRetriever:
         stage: str | None,
         service_id: str | None,
         entry_only: bool,
+        flow_ids: list[UUID] | None = None,
     ) -> list[ScriptFlowNodeHit]:
         if not self.openai_api_key:
             return []
@@ -199,6 +286,9 @@ class ScriptFlowRetriever:
             params["service_ids"] = f'["{service_id}"]'
         if entry_only:
             where_sql.append("node_type = 'trigger'")
+        if flow_ids:
+            where_sql.append("flow_id IN :flow_ids")
+            params["flow_ids"] = list(flow_ids)
 
         sql = text(
             f"""
@@ -226,6 +316,8 @@ class ScriptFlowRetriever:
             LIMIT :limit
             """
         )
+        if flow_ids:
+            sql = sql.bindparams(bindparam("flow_ids", expanding=True))
         rows = (await self.db.execute(sql, params)).fetchall()
         return [self._hit_from_row(row, score=float(row.score or 0.0)) for row in rows]
 
@@ -237,6 +329,7 @@ class ScriptFlowRetriever:
         stage: str | None,
         service_id: str | None,
         entry_only: bool,
+        flow_ids: list[UUID] | None = None,
     ) -> list[ScriptFlowNodeHit]:
         q = query.strip()
         q_lower = q.lower()
@@ -281,6 +374,8 @@ class ScriptFlowRetriever:
             filters.append(ScriptFlowNodeIndex.service_ids.contains([service_id]))
         if entry_only:
             filters.append(ScriptFlowNodeIndex.node_type == "trigger")
+        if flow_ids:
+            filters.append(ScriptFlowNodeIndex.flow_id.in_(flow_ids))
 
         stmt = (
             select(ScriptFlowNodeIndex, score_expr)
@@ -439,6 +534,8 @@ class ScriptFlowRetriever:
         stage: str | None = None,
         service_id: str | None = None,
         entry_only: bool = False,
+        min_score: float = 0.0,
+        flow_ids: list[UUID] | None = None,
     ) -> ScriptFlowContextPacket:
         """Build the future runtime packet for scenario answering."""
         hits, search_debug = await self.search_nodes_with_debug(
@@ -446,6 +543,8 @@ class ScriptFlowRetriever:
             stage=stage,
             service_id=service_id,
             entry_only=entry_only,
+            min_score=min_score,
+            flow_ids=flow_ids,
         )
         neighborhoods = await self.expand_neighborhood(hits)
         return ScriptFlowContextPacket(
@@ -455,6 +554,7 @@ class ScriptFlowRetriever:
                 "stage": stage,
                 "service_id": service_id,
                 "entry_only": entry_only,
+                "min_score": min_score,
                 "semantic_hit_count": len(hits),
                 "engine": "pgvector_or_lexical_fallback",
                 **search_debug,

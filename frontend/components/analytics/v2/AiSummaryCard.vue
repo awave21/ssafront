@@ -274,9 +274,6 @@ const confidenceLabel = (c: AiConfidenceLevel): string => {
 }
 
 // Impact formatting
-const fmtImpact = (v: number): string => {
-  if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + ' млн ₽'
-  if (v >= 1_000) return Math.round(v / 1_000) + ' тыс ₽'
-  return v.toLocaleString('ru-RU') + ' ₽'
-}
+const impactFormatter = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+const fmtImpact = (v: number): string => impactFormatter.format(Number.isFinite(v) ? v : 0) + ' ₽'
 </script>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 import json
 import re
@@ -92,11 +93,50 @@ def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9а-яё]+", "-", value.lower()).strip("-") or "item"
 
 
-def _append_unique_entity(dst: list[GraphEntity], seen: set[str], entity: GraphEntity) -> None:
+def _extract_trigger_context(node_map: dict[str, dict[str, Any]]) -> str | None:
+    """Extract trigger context from flow's trigger-type nodes for LLM prompt enrichment."""
+    parts: list[str] = []
+    for node in node_map.values():
+        if _node_type(node) != "trigger":
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        situation = _str(data.get("situation") or data.get("when_relevant"))
+        if situation:
+            parts.append(situation)
+        kh = data.get("keyword_hints")
+        if isinstance(kh, list):
+            keywords = [str(k).strip() for k in kh if str(k).strip()]
+            if keywords:
+                parts.append(", ".join(keywords[:8]))
+        cpe = data.get("client_phrase_examples")
+        if isinstance(cpe, list):
+            examples = [f"«{str(p).strip()}»" for p in cpe[:3] if str(p).strip()]
+            if examples:
+                parts.append("; ".join(examples))
+    return " | ".join(parts) if parts else None
+
+
+def _append_unique_entity(
+    dst: list[GraphEntity],
+    seen: set[str],
+    entity: GraphEntity,
+    entity_index: dict[str, GraphEntity] | None = None,
+) -> None:
     if entity.graph_node_id in seen:
+        # Accumulate source_node_ids from all canvas nodes that produce this entity,
+        # so HAS_SEMANTIC edges are created for every contributing canvas node.
+        if entity_index is not None and entity.source_node_ids:
+            existing = entity_index[entity.graph_node_id]
+            existing_ids = set(existing.source_node_ids or [])
+            for sid in entity.source_node_ids:
+                if sid not in existing_ids:
+                    existing_ids.add(sid)
+                    (existing.source_node_ids or []).append(sid)
         return
     seen.add(entity.graph_node_id)
     dst.append(entity)
+    if entity_index is not None:
+        entity_index[entity.graph_node_id] = entity
 
 
 def _append_unique_relation(dst: list[GraphRelation], seen: set[tuple[str, str, str]], relation: GraphRelation) -> None:
@@ -113,6 +153,7 @@ class ScriptFlowGraphRAGExtractor:
         *,
         flow_definition: dict[str, Any],
         flow_metadata: dict[str, Any],
+        flow_name: str | None = None,
         openai_api_key: str | None = None,
         model_name: str | None = None,
     ) -> tuple[list[GraphEntity], list[GraphRelation], dict[str, Any]]:
@@ -121,6 +162,7 @@ class ScriptFlowGraphRAGExtractor:
         edges = flow_definition.get("edges") if isinstance(flow_definition.get("edges"), list) else []
 
         entities: list[GraphEntity] = []
+        entity_index: dict[str, GraphEntity] = {}
         relations: list[GraphRelation] = []
         seen_entities: set[str] = set()
         seen_relations: set[tuple[str, str, str]] = set()
@@ -135,11 +177,52 @@ class ScriptFlowGraphRAGExtractor:
             if node_id:
                 node_map[node_id] = node
 
+        # Extract trigger context: situation/keywords from trigger-type nodes.
+        # Used in LLM prompt so extracted entities reference the specific scenario.
+        trigger_context = _extract_trigger_context(node_map)
+
         llm_enabled = bool((openai_api_key or "").strip())
         extraction_mode = "llm_structured" if llm_enabled else "heuristic_fallback"
         llm_ok_nodes = 0
         llm_failed_nodes = 0
 
+        # Phase 1: precompute deterministic per-node payloads, then run LLM extraction
+        # for all nodes in parallel (Semaphore caps concurrency).
+        prep_by_node: dict[str, dict[str, str]] = {}
+        for node_id, node in node_map.items():
+            data = node.get("data") if isinstance(node.get("data"), dict) else {}
+            prep_by_node[node_id] = {
+                "node_type": _node_type(node),
+                "title": _node_title(node),
+                "stage": _str(data.get("stage")) or "",
+                "content": _resolved_text(data, variables),
+            }
+
+        llm_results_by_node: dict[str, Any] = {}
+        if llm_enabled and prep_by_node:
+            sem = asyncio.Semaphore(8)
+
+            async def _run_one(nid: str, p: dict[str, str]) -> tuple[str, Any]:
+                async with sem:
+                    res = await self._extract_node_semantics(
+                        node_id=nid,
+                        node_type=p["node_type"],
+                        title=p["title"],
+                        stage=p["stage"],
+                        content=p["content"],
+                        trigger_context=trigger_context,
+                        flow_name=flow_name,
+                        openai_api_key=openai_api_key,
+                        model_name=model_name,
+                    )
+                return nid, res
+
+            gathered = await asyncio.gather(
+                *[_run_one(nid, p) for nid, p in prep_by_node.items()]
+            )
+            llm_results_by_node = {nid: res for nid, res in gathered}
+
+        # Phase 2: deterministic graph construction + merge LLM results.
         for node_id, node in node_map.items():
             data = node.get("data") if isinstance(node.get("data"), dict) else {}
             node_type = _node_type(node)
@@ -180,6 +263,7 @@ class ScriptFlowGraphRAGExtractor:
                         source_node_ids=[node_id],
                         properties={"stage": stage},
                     ),
+                    entity_index,
                 )
                 _append_unique_relation(
                     relations,
@@ -208,6 +292,7 @@ class ScriptFlowGraphRAGExtractor:
                         source_node_ids=[node_id],
                         properties={"name": var_name, "source_type": source_type},
                     ),
+                    entity_index,
                 )
                 if f"{{{{{var_name}}}}}" in str(data) or var_name in content:
                     _append_unique_relation(
@@ -229,6 +314,8 @@ class ScriptFlowGraphRAGExtractor:
                 ("proof_ids", "supported_by_proof", "proof"),
                 ("objection_ids", "handles_objection", "objection"),
                 ("constraint_ids", "blocked_by_constraint", "constraint"),
+                ("service_ids", "covers_service", "service"),
+                ("employee_ids", "provided_by", "specialist"),
             ):
                 raw = kg_links.get(field)
                 if not isinstance(raw, list):
@@ -250,6 +337,7 @@ class ScriptFlowGraphRAGExtractor:
                             source_node_ids=[node_id],
                             properties={"library_id": item_id, "field": field},
                         ),
+                        entity_index,
                     )
                     _append_unique_relation(
                         relations,
@@ -263,15 +351,7 @@ class ScriptFlowGraphRAGExtractor:
                         ),
                     )
 
-            llm_result = await self._extract_node_semantics(
-                node_id=node_id,
-                node_type=node_type,
-                title=title,
-                stage=stage,
-                content=content,
-                openai_api_key=openai_api_key,
-                model_name=model_name,
-            )
+            llm_result = llm_results_by_node.get(node_id)
 
             if llm_result is None:
                 llm_failed_nodes += 1
@@ -294,6 +374,7 @@ class ScriptFlowGraphRAGExtractor:
                                 source_node_ids=[node_id],
                                 properties={"keyword": keyword, "source": "heuristic_extractor"},
                             ),
+                            entity_index,
                         )
                         relation_type = {
                             "objection": "handles_objection",
@@ -339,6 +420,7 @@ class ScriptFlowGraphRAGExtractor:
                                 "source": "llm_structured_extraction",
                             },
                         ),
+                        entity_index,
                     )
 
                 for rel in llm_result.relations:
@@ -406,6 +488,8 @@ class ScriptFlowGraphRAGExtractor:
         title: str,
         stage: str,
         content: str,
+        trigger_context: str | None = None,
+        flow_name: str | None = None,
         openai_api_key: str | None,
         model_name: str | None,
     ) -> StructuredNodeExtractionResult | None:
@@ -432,15 +516,58 @@ class ScriptFlowGraphRAGExtractor:
             "leads_to_outcome, relevant_for_persona, motivated_by, occurs_at_stage, next_step_to, relates_to. "
             "source_ref='canvas' означает связь от текущего узла канваса. target_ref и source_ref для других "
             "сущностей должны совпадать с title сущности в entities. "
-            "Произвольные атрибуты клади в `extra` как список пар {key,value} (строки)."
+            "Произвольные атрибуты клади в `extra` как список пар {key,value} (строки). "
+            "КРИТИЧНО: extracting `specialist` ТОЛЬКО если в тексте упомянуто конкретное ФИО "
+            "(Иванова Мария Петровна, доктор Петров А.С., Соколова О.В.). "
+            "НЕ извлекай абстракции 'врач', 'доктор', 'эксперт', 'специалист', 'косметолог' "
+            "как specialist — пропусти их. Реальные специалисты приходят из CRM отдельно. "
+            "То же для `service`: ТОЛЬКО конкретные полные названия услуг ('Ботулинотерапия Диспорт', "
+            "'Фракционная мезотерапия'), НЕ общие термины ('процедура', 'инъекции', 'омоложение', "
+            "'консультация') — реальные услуги приходят из CRM отдельно. "
+            "В поле description каждой сущности — развёрнутое описание (2-4 предложения): что это, "
+            "как применяется в клинике, какую ценность несёт клиенту. "
+            "Для objection/concern — типичная фраза клиента дословно. "
+            "Для tactic — конкретный способ ответа администратора.\n\n"
+            "Пример хорошей экстракции:\n"
+            "Вход: title=\"Ответ эксперта\", scenario_context=\"сценарий: Ботулинотерапия | триггер: ботокс, диспорт\", "
+            "content=\"Расскажу про Диспорт — он мягче Ботокса, эффект до 4 месяцев, идеален для лба.\"\n"
+            "Выход:\n"
+            "  entities:\n"
+            "    - {title: 'Диспорт мягче Ботокса', entity_type: 'proof', "
+            "description: 'Сравнительный довод в сценарии Ботулинотерапия: Диспорт даёт более мягкий "
+            "эффект, чем Ботокс. Используется при выборе препарата клиентом.'}\n"
+            "    - {title: 'Эффект Диспорта до 4 месяцев', entity_type: 'proof', "
+            "description: 'Срок действия Диспорта в сценарии Ботулинотерапия — до 4 месяцев. "
+            "Аргумент в пользу долгосрочности результата.'}\n"
+            "    - {title: 'Диспорт идеален для лба', entity_type: 'proof', "
+            "description: 'Зона применения Диспорта в сценарии Ботулинотерапия — лоб. "
+            "Подсказывает клиенту, какие зоны лучше всего обрабатывать этим препаратом.'}\n"
+            "  relations:\n"
+            "    - {source_ref: 'canvas', target_ref: 'Диспорт мягче Ботокса', relation_type: 'supported_by_proof'}\n"
+            "    - {source_ref: 'canvas', target_ref: 'Эффект Диспорта до 4 месяцев', relation_type: 'supported_by_proof'}\n"
+            "    - {source_ref: 'canvas', target_ref: 'Диспорт идеален для лба', relation_type: 'supported_by_proof'}\n"
         )
+        scenario_context_parts: list[str] = []
+        if flow_name:
+            scenario_context_parts.append(f"сценарий: {flow_name}")
+        if trigger_context:
+            scenario_context_parts.append(f"триггер: {trigger_context}")
+        scenario_line = (
+            f"scenario_context: {' | '.join(scenario_context_parts)}\n"
+            if scenario_context_parts
+            else ""
+        )
+
         user_prompt = (
             f"node_id: {node_id}\n"
             f"node_type: {node_type}\n"
             f"title: {title}\n"
             f"stage: {stage or '-'}\n"
+            f"{scenario_line}"
             "content:\n"
             f"{content}\n\n"
+            "В description каждой сущности обязательно укажи к какому сценарию/триггеру она относится "
+            "(используй scenario_context выше). "
             "Верни только значимые для GraphRAG сущности и связи. Если сущностей нет — верни пустые списки."
         )
 

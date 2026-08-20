@@ -61,17 +61,29 @@ def configure_logging() -> None:
 
 
 def _configure_webhook_logger() -> None:
+    # В production Docker Compose монтирует infra/logs в /logs.
     log_file = Path("/logs/webhooks.log")
-    if not log_file.parent.exists():
-        return
     logger = logging.getLogger("webhooks")
     logger.setLevel(logging.INFO)
-    for handler in logger.handlers:
-        if isinstance(handler, logging.FileHandler) and Path(handler.baseFilename) == log_file:
-            return
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(file_handler)
+
+    if not any(
+        isinstance(handler, logging.StreamHandler)
+        and not isinstance(handler, logging.FileHandler)
+        and handler.stream is sys.stdout
+        for handler in logger.handlers
+    ):
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(console_handler)
+
+    if log_file.parent.exists() and not any(
+        isinstance(handler, logging.FileHandler) and Path(handler.baseFilename) == log_file
+        for handler in logger.handlers
+    ):
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(file_handler)
+
     logger.propagate = False
 
 

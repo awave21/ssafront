@@ -1,18 +1,51 @@
 <template>
   <Sheet :open="open" @update:open="(v) => !v && $emit('close')">
-    <SheetContent side="right" class="w-full max-w-md overflow-y-auto">
-      <SheetHeader class="pb-4">
-        <SheetTitle class="text-base font-bold">Правила мотивации врачей</SheetTitle>
+    <SheetContent side="right" class-name="w-full max-w-md flex flex-col">
+      <SheetHeader>
+        <div class="flex items-center justify-between">
+          <SheetTitle class="text-base font-bold">Правила мотивации врачей</SheetTitle>
+          <SheetClose />
+        </div>
       </SheetHeader>
 
-      <div class="space-y-6">
-        <!-- Первичка -->
+      <div class="flex-1 overflow-y-auto p-6 space-y-6">
+        <!-- Первичка — три уровня -->
         <div class="rounded-2xl bg-slate-50 p-4 space-y-3">
-          <div class="text-[10px] font-black uppercase tracking-wider text-slate-500">Первичные визиты</div>
+          <div class="text-[10px] font-black uppercase tracking-wider text-slate-500">Первичные визиты — % по уровням</div>
+
           <div class="flex items-center gap-3">
-            <label class="w-40 text-xs text-slate-600">% от выручки</label>
+            <span class="flex w-40 items-center gap-1.5 text-xs">
+              <span class="inline-block h-2 w-2 rounded-full bg-rose-400"></span>
+              Ниже нормы
+            </span>
             <input
-              v-model.number="form.primary_pct"
+              v-model.number="form.primary_pct_low"
+              type="number" min="0" max="100" step="0.5"
+              class="w-20 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-bold tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <span class="text-sm text-slate-400">%</span>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <span class="flex w-40 items-center gap-1.5 text-xs">
+              <span class="inline-block h-2 w-2 rounded-full bg-slate-400"></span>
+              Норма
+            </span>
+            <input
+              v-model.number="form.primary_pct_norm"
+              type="number" min="0" max="100" step="0.5"
+              class="w-20 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-bold tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <span class="text-sm text-slate-400">%</span>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <span class="flex w-40 items-center gap-1.5 text-xs">
+              <span class="inline-block h-2 w-2 rounded-full bg-emerald-400"></span>
+              Выше нормы (бонус)
+            </span>
+            <input
+              v-model.number="form.primary_pct_high"
               type="number" min="0" max="100" step="0.5"
               class="w-20 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-bold tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
@@ -85,8 +118,25 @@
           </div>
         </div>
 
-        <!-- Действия -->
-        <div class="flex gap-3 pt-2">
+        <!-- Товары -->
+        <div class="rounded-2xl bg-slate-50 p-4">
+          <label class="flex cursor-pointer items-start gap-3">
+            <input
+              v-model="form.include_commodities"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded accent-primary"
+            />
+            <div>
+              <div class="text-sm font-semibold text-slate-700">Учитывать товары в бонусе</div>
+              <div class="mt-0.5 text-xs text-slate-400">Если включено — выручка от продаж товаров прибавляется к расчёту бонуса</div>
+            </div>
+          </label>
+        </div>
+
+      </div>
+
+      <SheetFooter>
+        <div class="flex gap-3">
           <button
             :disabled="saving"
             class="flex-1 rounded-2xl bg-primary py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-50"
@@ -101,14 +151,14 @@
             Отмена
           </button>
         </div>
-      </div>
+      </SheetFooter>
     </SheetContent>
   </Sheet>
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '~/components/ui/sheet'
+import { Sheet, SheetClose, SheetContent, SheetFooter, SheetHeader, SheetTitle } from '~/components/ui/sheet'
 import type { MotivationRule } from '~/types/analytics'
 
 const props = defineProps<{

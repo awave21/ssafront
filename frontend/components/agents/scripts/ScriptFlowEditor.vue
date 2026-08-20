@@ -1331,6 +1331,8 @@ const recordHistory = () => {
 
 const debouncedRecordHistory = useDebounceFn(recordHistory, 400)
 
+watch(() => nodes.value.length, () => { if (!syncingFromParent.value) debouncedRecordHistory() })
+watch(() => edges.value.length, () => { if (!syncingFromParent.value) debouncedRecordHistory() })
 
 if (import.meta.client) {
   useEventListener(window, 'keydown', (e: KeyboardEvent) => {
@@ -1495,11 +1497,14 @@ if (import.meta.client) {
       deleteSelectedEdge()
       return
     }
-    if (inspectorNodeId.value) {
-      const rm = inspectorNodeId.value
+    const rm = inspectorNodeId.value ?? selectedId.value
+    if (rm) {
       nodes.value = nodes.value.filter(n => String(n.id) !== rm)
+      edges.value = edges.value.filter(e => e.source !== rm && e.target !== rm)
       inspectorNodeId.value = null
+      selectedId.value = null
       emit('selectNode', null)
+      recordHistory()
       requestImmediatePersist()
       toastSuccess('Узел удалён')
     }

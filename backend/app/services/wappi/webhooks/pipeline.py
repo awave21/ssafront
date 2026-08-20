@@ -431,11 +431,13 @@ async def _handle_inbound_message(
                 message_ids=message_ids,
             )
 
+    debounce_delay = float(agent.debounce_delay_seconds) if agent.debounce_enabled else 0.0
     await debounce_and_run(
         context.session_id,
         context.input_text,
         _run_after_debounce,
         message_id=context.wappi_message_id,
+        delay=debounce_delay,
     )
 
 

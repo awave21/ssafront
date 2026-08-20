@@ -16,7 +16,7 @@ from app.core.config import Settings
 from app.db.models.agent import Agent
 from app.services.graphrag_export.graphrag_preview import agent_graphrag_workspace
 from app.services.graphrag_export.sqns_corpus import gather_sqns_graphrag_sections, write_graphrag_sections_to_workspace
-from app.services.runtime.microsoft_graphrag_neo4j_sync import sync_microsoft_graphrag_workspace_to_neo4j
+from app.services.runtime.graphrag_neo4j_sync import sync_graphrag_workspace_to_neo4j
 from app.services.tenant_llm_config import get_decrypted_api_key
 
 logger = structlog.get_logger(__name__)
@@ -157,7 +157,7 @@ async def _run_graphrag_subprocess(
     return int(proc.returncode or 0), out, err
 
 
-async def run_local_microsoft_graphrag_index(
+async def run_local_graphrag_index(
     *,
     db: AsyncSession,
     agent: Agent,
@@ -259,7 +259,7 @@ async def run_local_microsoft_graphrag_index(
         logger.warning("graphrag_index_failed", code=code, stderr=err[:2000])
         return False, f"graphrag index завершился с кодом {code}: {err or out}"[:4000]
 
-    neo4j_ok, neo4j_msg = await sync_microsoft_graphrag_workspace_to_neo4j(
+    neo4j_ok, neo4j_msg = await sync_graphrag_workspace_to_neo4j(
         settings=settings,
         agent=agent,
         tenant_id=agent.tenant_id,

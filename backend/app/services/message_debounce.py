@@ -101,6 +101,7 @@ async def debounce_and_run(
     text: str,
     callback,  # async callable(aggregated_text: str, message_ids: list[str]) -> None
     message_id: str | None = None,
+    delay: float | None = None,
 ) -> None:
     """
     Добавить текст в буфер и запустить задачу с задержкой.
@@ -113,7 +114,10 @@ async def debounce_and_run(
     """
     await append_message(session_key, text, message_id)
     version = await bump_version(session_key)
-    delay = _debounce_delay(text)
+    # delay передаётся каналом из настроек агента (debounce_delay_seconds);
+    # если не передан — используем «умное» окно по длине текста (обратная совместимость).
+    if delay is None:
+        delay = _debounce_delay(text)
 
     logger.info(
         "debounce_scheduled",

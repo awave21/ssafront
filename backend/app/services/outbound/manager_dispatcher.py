@@ -9,7 +9,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.channel import AgentChannel, Channel
+from app.db.models.session_message import SessionMessage
+from app.services.jivo import (
+    JivoClientError,
+    is_outbound_configured,
+    send_bot_message,
+)
 from app.services.telegram import TelegramWebhookError, send_telegram_message
+from app.utils.message_mapping import extract_user_info
 from app.services.wappi import (
     WappiAsyncMessageSendResult,
     WappiClientError,
@@ -263,6 +270,87 @@ async def _dispatch_to_wappi_phone_channel(
     )
 
 
+async def _resolve_latest_jivo_chat_id(db: AsyncSession, session_id: str) -> str | None:
+    """Последний известный chat_id Jivo для сессии.
+
+    chat_id открывается заново на каждый чат, поэтому берём его из самого свежего
+    входящего сообщения клиента (user_info.jivo_chat_id), сохранённого вебхуком.
+    """
+    stmt = (
+        select(SessionMessage.message)
+        .where(SessionMessage.session_id == session_id)
+        .order_by(SessionMessage.message_index.desc())
+        .limit(30)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    for msg in rows:
+        if not isinstance(msg, dict):
+            continue
+        info = extract_user_info(msg)
+        if isinstance(info, dict):
+            chat_id = info.get("jivo_chat_id")
+            if chat_id:
+                return str(chat_id)
+    return None
+
+
+async def _dispatch_to_jivo(
+    db: AsyncSession,
+    *,
+    agent_id: UUID,
+    dialog_id: str,
+    dialog_peer: str,
+    content: str,
+) -> ManagerDispatchResult:
+    channel = await _get_agent_channel(db, agent_id=agent_id, channel_type="jivo")
+    if channel is None:
+        raise ManagerDispatchError(
+            "Канал типа 'jivo' не найден у агента",
+            http_status_code=400,
+        )
+
+    reply_base_url = channel.jivo_reply_base_url
+    provider_id = channel.jivo_provider_id
+    provider_token = channel.jivo_provider_token
+    if not is_outbound_configured(reply_base_url, provider_id) or not (provider_token or "").strip():
+        raise ManagerDispatchError(
+            "Канал Jivo не настроен для отправки (provider_id / reply_base_url / token)",
+            http_status_code=400,
+        )
+
+    chat_id = await _resolve_latest_jivo_chat_id(db, dialog_id)
+    if not chat_id:
+        raise ManagerDispatchError(
+            "Не удалось определить chat_id Jivo для этого диалога — нет входящих сообщений",
+            http_status_code=409,
+        )
+
+    try:
+        response = await send_bot_message(
+            reply_base_url=reply_base_url or "",
+            provider_id=provider_id or "",
+            token=provider_token or "",
+            client_id=dialog_peer,
+            chat_id=chat_id,
+            text=content,
+        )
+    except JivoClientError as exc:
+        raise ManagerDispatchError(str(exc), http_status_code=502) from exc
+
+    provider_message_id: str | None = None
+    if isinstance(response, dict):
+        raw_id = response.get("id")
+        if raw_id is not None:
+            provider_message_id = str(raw_id)
+
+    return ManagerDispatchResult(
+        channel_type="jivo",
+        status="sent",
+        provider_message_id=provider_message_id,
+        raw=response if isinstance(response, dict) else None,
+    )
+
+
 async def dispatch_manager_message(
     db: AsyncSession,
     *,
@@ -276,6 +364,15 @@ async def dispatch_manager_message(
         return await _dispatch_to_telegram_bot(
             db,
             agent_id=agent_id,
+            dialog_peer=dialog_peer,
+            content=content,
+        )
+
+    if channel_type == "jivo":
+        return await _dispatch_to_jivo(
+            db,
+            agent_id=agent_id,
+            dialog_id=dialog_id,
             dialog_peer=dialog_peer,
             content=content,
         )

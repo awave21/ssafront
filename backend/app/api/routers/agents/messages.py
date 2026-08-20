@@ -25,9 +25,11 @@ from app.schemas.auth import AuthContext
 from app.schemas.dialog import MessageRead, MessageCreate, ManagerMessageCreate, StreamRequest
 from app.schemas.run import RunCreate
 from app.services.dialog_state import update_last_manager_message
+from app.services.function_rules_runtime import run_rules_for_phase
 from app.services.outbound import ManagerDispatchError, dispatch_manager_message
 from app.utils.broadcast import broadcaster
 from app.utils.message_mapping import build_manager_message
+from uuid import uuid4 as _uuid4_for_trace
 
 logger = structlog.get_logger(__name__)
 
@@ -45,7 +47,7 @@ _MESSAGE_STATUS_ALIASES: dict[str, str] = {
     "seen": "read",
     "displayed": "read",
 }
-_MANAGER_SUPPORTED_DIALOG_PREFIXES = {"telegram", "telegram_phone", "whatsapp", "max"}
+_MANAGER_SUPPORTED_DIALOG_PREFIXES = {"telegram", "telegram_phone", "whatsapp", "max", "jivo"}
 
 
 def _normalize_message_status(raw_status: Any) -> str:
@@ -666,6 +668,35 @@ async def send_manager_message(
         tenant_id=user.tenant_id,
         session_id=dialog_id,
     )
+
+    # Фаза manager_message: даёт правилам сработать после вмешательства оператора.
+    # Пример правила: «после ответа менеджера пометить сессию тегом hot_lead» или
+    # «после ответа менеджера отменить запланированный follow-up».
+    try:
+        await run_rules_for_phase(
+            db,
+            tenant_id=user.tenant_id,
+            agent_id=agent_id,
+            session_id=dialog_id,
+            trace_id=str(_uuid4_for_trace()),
+            phase="manager_message",
+            message=str(normalized_content or ""),
+            user=user,
+            run_id=None,
+            context={
+                "user_info": {},
+                "agent_timezone": "UTC",
+                "manager_message": str(normalized_content or ""),
+                "channel_type": dispatch_result.channel_type,
+            },
+        )
+    except Exception as _mm_exc:  # noqa: BLE001
+        logger.warning(
+            "manager_message_rules_dispatch_failed",
+            agent_id=str(agent_id),
+            dialog_id=dialog_id,
+            error=str(_mm_exc),
+        )
 
     logger.info(
         "manager_message_sent",

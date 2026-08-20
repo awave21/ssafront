@@ -67,6 +67,13 @@ class Agent(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     summary_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     knowledge_tool_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     manager_pause_minutes: Mapped[int] = mapped_column(Integer, default=10, server_default="10", nullable=False)
+    debounce_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    debounce_delay_seconds: Mapped[int] = mapped_column(Integer, default=8, server_default="8", nullable=False)
+    admin_notification_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
+    admin_notification_bot_token: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    admin_notification_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_disabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     timezone: Mapped[str] = mapped_column(String(50), default="UTC", server_default="UTC", nullable=False)
     function_rules_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)

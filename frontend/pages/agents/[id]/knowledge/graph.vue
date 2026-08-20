@@ -83,6 +83,7 @@
             :selected-graph-node-id="selectedNode?.graph_node_id ?? null"
             layout-mode="balanced"
             :show-isolated-nodes="true"
+            :visible-types="visibleTypes"
             @node-select="onNodeSelect"
           />
           <UnifiedGraphNodeDetailPanel

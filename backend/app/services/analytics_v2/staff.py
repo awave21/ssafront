@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.analytics_v2 import (
+    StaffClientLine,
     StaffDetailResponse,
     StaffMember,
     StaffOverviewResponse,
@@ -16,6 +17,7 @@ from app.schemas.analytics_v2 import (
     StaffSparkPoint,
 )
 from app.services.analytics import AnalyticsPeriod
+from app.services.sqns.client_pii import decrypt_client_pii
 
 logger = structlog.get_logger(__name__)
 
@@ -199,6 +201,8 @@ class StaffAnalyticsService:
                     """
                     WITH service_items AS (
                       SELECT
+                        v.id AS visit_id,
+                        v.attendance,
                         COALESCE(v.is_primary_per_resource, v.is_primary_visit) AS is_primary,
                         jsonb_array_elements(
                           COALESCE(v.raw_data -> 'services', '[]'::jsonb)
@@ -209,15 +213,26 @@ class StaffAnalyticsService:
                         AND v.visit_datetime >= :start_utc
                         AND v.visit_datetime <  :end_utc
                         AND NOT v.deleted
-                        AND v.attendance IS NOT NULL AND v.attendance > 0
                     )
                     SELECT
                       NULLIF(svc->>'id', '')::bigint AS service_external_id,
-                      COALESCE(svc->>'title', svc->>'name', 'Услуга') AS service_name,
+                      COALESCE(svc->>'name', svc->>'title', 'Услуга') AS service_name,
                       COUNT(*) AS bookings_total,
-                      COUNT(*) FILTER (WHERE is_primary = true)  AS primary_count,
-                      COUNT(*) FILTER (WHERE is_primary = false) AS repeat_count,
-                      COALESCE(SUM(NULLIF(svc->>'totalAmount', '')::numeric), 0) AS revenue_total
+                      COUNT(*) FILTER (WHERE attendance IS NOT NULL AND attendance > 0) AS arrived_total,
+                      COUNT(*) FILTER (WHERE attendance IS NULL OR attendance <= 0) AS no_show_total,
+                      COUNT(*) FILTER (WHERE is_primary = true) AS primary_total,
+                      COUNT(*) FILTER (WHERE is_primary = false) AS repeat_total,
+                      COALESCE(
+                        SUM(
+                          COALESCE(
+                            NULLIF(svc->>'paySum', '')::numeric,
+                            NULLIF(svc->>'totalAmount', '')::numeric,
+                            NULLIF(svc->>'price', '')::numeric * COALESCE(NULLIF(svc->>'amount', '')::numeric, 1),
+                            0
+                          )
+                        ),
+                        0
+                      ) AS revenue_total
                     FROM service_items
                     GROUP BY 1, 2
                     ORDER BY revenue_total DESC NULLS LAST, bookings_total DESC
@@ -233,17 +248,82 @@ class StaffAnalyticsService:
         ).mappings().all()
         top_services: list[StaffServiceLine] = []
         for r in services_rows:
-            cnt = int(r["bookings_total"] or 0)
-            rev = float(r["revenue_total"] or 0)
+            bookings = int(r["bookings_total"] or 0)
+            arrived = int(r["arrived_total"] or 0)
+            no_show = int(r["no_show_total"] or 0)
+            revenue = float(r["revenue_total"] or 0)
             top_services.append(
                 StaffServiceLine(
                     service_external_id=int(r["service_external_id"]) if r["service_external_id"] is not None else None,
                     service_name=r["service_name"] or "—",
-                    bookings_total=cnt,
-                    primary_count=int(r["primary_count"] or 0),
-                    repeat_count=int(r["repeat_count"] or 0),
-                    revenue_total=rev,
-                    avg_price=round(rev / cnt, 2) if cnt else 0.0,
+                    bookings_total=bookings,
+                    arrived_total=arrived,
+                    no_show_total=no_show,
+                    primary_total=int(r["primary_total"] or 0),
+                    repeat_total=int(r["repeat_total"] or 0),
+                    revenue_total=revenue,
+                    avg_check=round(revenue / bookings, 2) if bookings else 0.0,
+                    conversion_pct=round((arrived / bookings) * 100.0, 1) if bookings else 0.0,
+                    no_show_pct=round((no_show / bookings) * 100.0, 1) if bookings else 0.0,
+                )
+            )
+
+        clients_rows = (
+            await self.db.execute(
+                text(
+                    """
+                    SELECT
+                      v.client_external_id,
+                      COUNT(*) AS visits_total,
+                      COUNT(*) FILTER (WHERE v.attendance IS NOT NULL AND v.attendance > 0) AS arrived_total,
+                      COUNT(*) FILTER (WHERE v.attendance IS NULL OR v.attendance <= 0) AS no_show_total,
+                      COUNT(*) FILTER (WHERE COALESCE(v.is_primary_per_resource, v.is_primary_visit) = true) AS primary_total,
+                      COUNT(*) FILTER (WHERE COALESCE(v.is_primary_per_resource, v.is_primary_visit) = false) AS repeat_total,
+                      COALESCE(SUM(v.total_price), 0) AS revenue_total,
+                      MAX(v.visit_datetime) AS last_visit_at,
+                      c.pii_data AS pii_data
+                    FROM sqns_visits v
+                    LEFT JOIN sqns_clients c
+                      ON c.agent_id = v.agent_id AND c.external_id = v.client_external_id
+                    WHERE v.agent_id = :agent_id
+                      AND v.resource_external_id = :resource_id
+                      AND v.visit_datetime >= :start_utc
+                      AND v.visit_datetime <  :end_utc
+                      AND NOT v.deleted
+                      AND v.client_external_id IS NOT NULL
+                    GROUP BY v.client_external_id, c.pii_data
+                    ORDER BY revenue_total DESC NULLS LAST, visits_total DESC
+                    """
+                ),
+                {
+                    "agent_id": self.agent_id,
+                    "resource_id": resource_external_id,
+                    "start_utc": period.start_utc,
+                    "end_utc": period.end_utc,
+                },
+            )
+        ).mappings().all()
+        clients: list[StaffClientLine] = []
+        for r in clients_rows:
+            pii = decrypt_client_pii(r["pii_data"]) if r["pii_data"] else {}
+            parts = [pii.get("lastname"), pii.get("firstname"), pii.get("patronymic")]
+            full_name = " ".join(p for p in parts if p) or f"Клиент #{r['client_external_id']}"
+            visits = int(r["visits_total"] or 0)
+            arrived = int(r["arrived_total"] or 0)
+            revenue = float(r["revenue_total"] or 0)
+            clients.append(
+                StaffClientLine(
+                    client_external_id=int(r["client_external_id"]),
+                    full_name=full_name,
+                    phone=pii.get("phone"),
+                    visits_total=visits,
+                    arrived_total=arrived,
+                    no_show_total=int(r["no_show_total"] or 0),
+                    primary_total=int(r["primary_total"] or 0),
+                    repeat_total=int(r["repeat_total"] or 0),
+                    revenue_total=revenue,
+                    avg_check=round(revenue / visits, 2) if visits else 0.0,
+                    last_visit_at=r["last_visit_at"],
                 )
             )
 
@@ -292,5 +372,6 @@ class StaffAnalyticsService:
             timezone=period.timezone_name,
             staff=member,
             top_services=top_services,
+            clients=clients,
             sparkline=sparkline,
         )

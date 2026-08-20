@@ -42,10 +42,14 @@ const buildRulePayload = (payload: ScenarioUpsertPayload) => ({
   condition_type: payload.condition_type,
   condition_config: normalizeConditionConfig(payload.condition_config),
   tool_id: null,
-  // Must not be "silent": runtime sets silent_reaction → execute_agent_run skips the LLM entirely
-  // (empty output in test chat). Post-actions (augment_prompt, send_message, …) still run first.
-  reaction_to_execution: 'ai_self_reply' as const,
-  behavior_after_execution: 'continue' as const,
+  // Round-trip reaction/behavior: если пришли в payload — используем их.
+  // Иначе дефолты: ai_self_reply + continue. Раньше здесь был хардкод, который
+  // затирал `pause` у правил, созданных через API/SQL (например, эскалация).
+  //
+  // Замечание про "silent": runtime ставит silent_reaction → execute_agent_run
+  // пропускает LLM (пустой ответ в тестовом чате). Post-actions всё равно исполняются.
+  reaction_to_execution: payload.reaction_to_execution ?? 'ai_self_reply',
+  behavior_after_execution: payload.behavior_after_execution ?? 'continue',
   actions: mapActionsToBackend(payload.actions),
 })
 

@@ -27,6 +27,7 @@ export type UnifiedGraphPreview = {
   relations: UnifiedGraphRelationDto[]
 }
 
+/** @deprecated Оставлен для backwards-compat. Виджет всегда использует neo4j_hybrid. */
 export type GraphSearchMethod = 'naive' | 'basic' | 'local' | 'global' | 'drift'
 
 export type GraphPromptTemplate = {
@@ -34,21 +35,42 @@ export type GraphPromptTemplate = {
   content: string
 }
 
-/** Ответ POST …/unified-graph/ask. */
+export type SqnsCandidate = {
+  name: string
+  score: number
+  entity_type: string
+  graph_node_id: string
+  external_id: string | null
+  additional_info: string | null
+  information?: string | null
+}
+
+export type RetrievedNode = {
+  title: string
+  node_label: 'FlowNode' | 'GraphNode' | 'Service' | 'Specialist' | string
+  score: number
+  situation?: string | null
+  approach?: string | null
+  phrases?: string | null
+  service_name?: string | null
+  service_external_id?: number | null
+  specialists: Array<{ name: string; external_id: number }>
+  objections: string[]
+  tactics: string[]
+}
+
+/** Ответ POST …/unified-graph/ask (режим neo4j_hybrid = как в проде). */
 export type UnifiedGraphAskResponse = {
   answer: string
-  method: GraphSearchMethod
-  used_nodes?: number
-  used_relations?: number
-  total_nodes?: number
-  total_relations?: number
+  retrieval_path: string
+  retrieved_nodes: RetrievedNode[]
+  service_candidates?: SqnsCandidate[]
+  specialist_candidates?: SqnsCandidate[]
+  category_candidates?: SqnsCandidate[]
   system_prompt?: string | null
   user_prompt?: string | null
-  command?: string | null
   latency_ms?: number | null
-  stderr_tail?: string | null
-  prompt_templates?: GraphPromptTemplate[]
-  supported_methods?: GraphSearchMethod[]
+  tokens?: { in: number; out: number }
 }
 
 export type UnifiedGraphRebuildJob = {

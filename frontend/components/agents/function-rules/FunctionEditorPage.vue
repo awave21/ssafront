@@ -1,48 +1,78 @@
 <template>
-  <div class="h-full overflow-y-auto px-5 py-5">
-    <div class="space-y-4">
-      <!-- Header -->
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <Button variant="ghost" size="sm" class="gap-2" @click="$emit('back')">
-            <ArrowLeft class="h-4 w-4" />
-            Назад к списку
-          </Button>
-          <span class="text-muted-foreground">/</span>
-          <h2 class="text-lg font-semibold text-slate-900">
-            {{ isNew ? 'Новая функция' : (editingRule?.name || 'Редактирование') }}
-          </h2>
+  <div class="flex flex-col gap-5">
+    <!-- Заголовок раздела -->
+    <div class="flex items-center justify-between gap-3 border-b border-slate-100 pb-4">
+      <div class="flex items-center gap-2.5">
+        <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Zap class="h-4 w-4" />
         </div>
+        <h1 class="text-lg font-semibold text-slate-900">
+          {{ isNew ? 'Создать функцию' : (editingRule?.name || 'Редактирование функции') }}
+        </h1>
       </div>
+      <button
+        type="button"
+        class="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-primary/40 hover:text-primary transition-colors"
+        @click="helpOpen = !helpOpen"
+      >
+        <BookOpen class="h-3.5 w-3.5" />
+        Помощь по разделу
+      </button>
+    </div>
 
-      <!-- Loading -->
-      <div v-if="loading && !editingRule" class="flex items-center justify-center py-12">
-        <Loader2 class="w-8 h-8 animate-spin text-slate-400" />
-      </div>
+    <!-- Помощь по разделу (раскрывающаяся) -->
+    <div
+      v-if="helpOpen"
+      class="rounded-2xl border border-slate-100 bg-slate-100 p-5 text-sm leading-relaxed text-slate-700"
+    >
+      <p class="mb-2 font-medium text-slate-900">Как заполнить функцию</p>
+      <p>
+        Название на английском в стиле <code class="rounded bg-white px-1 py-0.5 text-xs">create_booking</code>
+        помогает модели корректно вызвать функцию. Описание — это инструкция, когда и как её применять.
+        Условия срабатывания и действия настраиваются ниже.
+      </p>
+    </div>
 
-      <!-- Form -->
-      <div v-else-if="editingRule" class="space-y-4">
-        <div class="bg-white p-2">
-          <FunctionRuleForm
-            :model="editingRule"
-            :tools="tools"
-            :actions="editingActions"
-            :can-edit="canEditAgents"
-            :show-cancel="false"
-            @update:model="onRuleModelUpdate"
-            @cancel="$emit('back')"
-            @add-action="openActionDialog(null)"
-            @edit-action="openActionDialogById"
-            @remove-action="removeAction"
-            @move-action-up="moveActionUp"
-            @move-action-down="moveActionDown"
-          />
-        </div>
-      </div>
+    <!-- Назад к списку -->
+    <div>
+      <button
+        type="button"
+        class="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-primary/40 hover:text-primary transition-colors"
+        @click="$emit('back')"
+      >
+        <ChevronLeft class="h-3.5 w-3.5" />
+        Назад к функциям
+      </button>
+    </div>
 
-      <div v-else class="rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-500">
-        Функция не найдена
+    <!-- Loading -->
+    <div v-if="loading && !editingRule" class="flex items-center justify-center py-12">
+      <Loader2 class="w-8 h-8 animate-spin text-slate-400" />
+    </div>
+
+    <!-- Form -->
+    <div v-else-if="editingRule" class="rounded-2xl border border-slate-100 bg-slate-100 p-5">
+      <div class="mb-4 text-sm font-semibold text-slate-900">
+        {{ isNew ? 'Новая функция' : 'Параметры функции' }}
       </div>
+      <FunctionRuleForm
+        :model="editingRule"
+        :tools="tools"
+        :actions="editingActions"
+        :can-edit="canEditAgents"
+        :show-cancel="false"
+        @update:model="onRuleModelUpdate"
+        @cancel="$emit('back')"
+        @add-action="openActionDialog(null)"
+        @edit-action="openActionDialogById"
+        @remove-action="removeAction"
+        @move-action-up="moveActionUp"
+        @move-action-down="moveActionDown"
+      />
+    </div>
+
+    <div v-else class="rounded-2xl border border-slate-100 bg-white p-8 text-center text-slate-500 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]">
+      Функция не найдена
     </div>
 
     <RuleActionFormDialog
@@ -59,8 +89,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, watchEffect } from 'vue'
-import { ArrowLeft, Loader2 } from 'lucide-vue-next'
-import { Button } from '~/components/ui/button'
+import { ChevronLeft, Loader2, Zap, BookOpen } from 'lucide-vue-next'
 import { useApiFetch } from '~/composables/useApiFetch'
 import { useFunctionRules } from '~/composables/useFunctionRules'
 import { useRuleActions } from '~/composables/useRuleActions'
@@ -128,6 +157,7 @@ const editingRule = ref<FunctionRule | null>(null)
 const editingActions = ref<FunctionRuleAction[]>([])
 const editingAction = ref<FunctionRuleAction | null>(null)
 const isActionDialogOpen = ref(false)
+const helpOpen = ref(false)
 
 const loading = computed(() => rulesLoading.value)
 const saving = computed(() => rulesSaving.value)

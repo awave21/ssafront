@@ -31,6 +31,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { UnifiedGraphNodeDto, UnifiedGraphPreview } from '../../../types/unifiedGraph'
 import { colorForOrigin, colorForType } from './colors'
+import { formatRelation } from './relationLabels'
 
 type ForceNode = UnifiedGraphNodeDto & { x?: number; y?: number; vx?: number; vy?: number }
 type ForceLink = {
@@ -320,7 +321,8 @@ const draw = async () => {
         if (typeof s !== 'object' || typeof t !== 'object') return
         const mx = ((s.x ?? 0) + (t.x ?? 0)) / 2
         const my = ((s.y ?? 0) + (t.y ?? 0)) / 2
-        const text = link.relation_type.length > 50 ? link.relation_type.slice(0, 50) + '…' : link.relation_type
+        const labelRaw = formatRelation(link.relation_type)
+        const text = labelRaw.length > 50 ? labelRaw.slice(0, 50) + '…' : labelRaw
         const fontSize = Math.max(10 / scale, 2)
         ctx.font = `${fontSize}px ui-sans-serif, system-ui, sans-serif`
         const padX = 4 / scale
@@ -338,6 +340,10 @@ const draw = async () => {
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.fillText(text, mx, my)
+      })
+      .onNodeDragEnd((node: ForceNode) => {
+        node.fx = node.x
+        node.fy = node.y
       })
       .onNodeHover((node: ForceNode | null) => {
         hoveredId = node?.graph_node_id ?? null

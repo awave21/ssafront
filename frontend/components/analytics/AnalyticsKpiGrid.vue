@@ -189,7 +189,7 @@ const props = withDefaults(
 
 const moneyFormatter = new Intl.NumberFormat('ru-RU', {
   minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
+  maximumFractionDigits: 2,
 })
 
 const intFormatter = new Intl.NumberFormat('ru-RU', {

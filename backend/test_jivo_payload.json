@@ -1,0 +1,23 @@
+{
+  "id": "996344da-d8f4-11ec-9aaf-c5bde7170335",
+  "site_id": "1153381",
+  "client_id": "test_client_12345",
+  "chat_id": "test_chat_67890",
+  "agents_online": true,
+  "sender": {
+    "id": 2108,
+    "name": "Тестовый клиент",
+    "url": "https://testwebsite.ru/",
+    "has_contacts": false
+  },
+  "message": {
+    "type": "TEXT",
+    "text": "Привет! Это тестовое сообщение.",
+    "timestamp": 1653135123
+  },
+  "channel": {
+    "id": "Qy4NGbfuDt",
+    "type": "widget"
+  },
+  "event": "CLIENT_MESSAGE"
+}

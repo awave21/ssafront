@@ -4,20 +4,27 @@ Queue worker for ScriptFlow indexing into retrieval tables.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from uuid import UUID
 import structlog
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.session import async_session_factory
+
 from app.db.models.script_flow_edge_index import ScriptFlowEdgeIndex
 from app.db.models.script_flow import ScriptFlow
 from app.db.models.script_flow_node_index import ScriptFlowNodeIndex
 from app.services.script_flow_index_compiler import compile_script_flow_index_payload
+from app.services.script_flow_graphrag_compiler import compile_script_flow_graphrag_payload
 from app.services.runtime.script_flow_canvas_neo4j_sync import sync_script_flow_canvas_to_neo4j
+from app.services.runtime.script_flow_graphrag_neo4j_sync import sync_script_flow_graphrag_to_neo4j
+from app.services.runtime.script_flow_embeddings import embed_script_flow_nodes
 from app.services.tenant_llm_config import get_decrypted_api_key
 from app.services.graphrag_export.corpus_dispatch import maybe_auto_dispatch_graphrag_corpus
 from app.utils.broadcast import broadcaster
+from app.core.config import get_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -79,41 +86,56 @@ async def process_pending_script_flow_indexes(
     if not flows:
         return 0
 
-    processed = 0
-    for flow in flows:
-        try:
-            await _index_flow(db, flow)
-            processed += 1
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "script_flow_index_failed",
-                flow_id=str(flow.id),
-                error=str(exc),
-            )
-            try:
-                await db.rollback()
-            except Exception:
-                pass
-            await db.execute(
-                update(ScriptFlow)
-                .where(ScriptFlow.id == flow.id)
-                .values(
-                    index_status="failed",
-                    index_error=str(exc),
-                    index_progress=None,
-                    index_retry_count=getattr(flow, "index_retry_count", 0) + 1,
-                )
-            )
-            await db.commit()
-            await _broadcast_script_flow_index_update(
-                agent_id=flow.agent_id,
-                flow_id=flow.id,
-                index_status="failed",
-                published_version=int(getattr(flow, "published_version", 0) or 0),
-                index_error=str(exc),
-            )
+    flow_ids = [f.id for f in flows]
+    # Release the locks acquired by SELECT...FOR UPDATE before fanning out — each
+    # parallel task opens its own session and reloads the flow there.
+    await db.commit()
 
-    return processed
+    settings = get_settings()
+    concurrency = max(1, int(getattr(settings, "script_flow_index_concurrency", 4) or 4))
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _run_one(flow_id: UUID) -> bool:
+        async with sem:
+            async with async_session_factory() as own_db:
+                flow = await own_db.get(ScriptFlow, flow_id)
+                if flow is None:
+                    return False
+                try:
+                    await _index_flow(own_db, flow)
+                    return True
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception(
+                        "script_flow_index_failed",
+                        flow_id=str(flow_id),
+                        error=str(exc),
+                    )
+                    try:
+                        await own_db.rollback()
+                    except Exception:
+                        pass
+                    await own_db.execute(
+                        update(ScriptFlow)
+                        .where(ScriptFlow.id == flow_id)
+                        .values(
+                            index_status="failed",
+                            index_error=str(exc),
+                            index_progress=None,
+                            index_retry_count=getattr(flow, "index_retry_count", 0) + 1,
+                        )
+                    )
+                    await own_db.commit()
+                    await _broadcast_script_flow_index_update(
+                        agent_id=flow.agent_id,
+                        flow_id=flow_id,
+                        index_status="failed",
+                        published_version=int(getattr(flow, "published_version", 0) or 0),
+                        index_error=str(exc),
+                    )
+                    return False
+
+    results = await asyncio.gather(*[_run_one(fid) for fid in flow_ids])
+    return sum(1 for r in results if r)
 
 
 async def _index_flow(db: AsyncSession, flow: ScriptFlow) -> None:
@@ -190,14 +212,57 @@ async def _index_flow(db: AsyncSession, flow: ScriptFlow) -> None:
         await db.flush()
         await db.commit()
 
+        settings = get_settings()
         openai_api_key = await get_decrypted_api_key(db, flow.tenant_id)
-        await sync_script_flow_canvas_to_neo4j(
-            flow=flow,
-            nodes=index_payload.nodes,
-            edges=index_payload.edges,
-            db=db,
-            openai_api_key=openai_api_key,
-        )
+
+        # pgvector-путь тактик: эмбеддинги узлов пишем в Postgres (независимо от Neo4j).
+        try:
+            await embed_script_flow_nodes(
+                db=db,
+                nodes=index_payload.nodes,
+                openai_api_key=openai_api_key,
+                tenant_id=flow.tenant_id,
+                flow_name=flow.name,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "script_flow_node_embedding_failed",
+                flow_id=str(flow.id),
+                error=str(exc),
+            )
+
+        # Графовый путь (Neo4j) — временно отключаемый флагом; код и данные сохраняются.
+        if settings.script_flow_graph_sync_enabled:
+            await sync_script_flow_canvas_to_neo4j(
+                flow=flow,
+                nodes=index_payload.nodes,
+                edges=index_payload.edges,
+                db=db,
+                openai_api_key=openai_api_key,
+            )
+
+            # Compile GraphRAG payload (LLM extraction) and sync GraphNode to Neo4j
+            try:
+                graphrag_payload = await compile_script_flow_graphrag_payload(
+                    flow,
+                    openai_api_key=openai_api_key,
+                    extraction_model=settings.script_flow_graphrag_extraction_model,
+                    summary_model=settings.script_flow_graphrag_summary_model,
+                )
+                await sync_script_flow_graphrag_to_neo4j(
+                    flow=flow,
+                    payload=graphrag_payload,
+                    db=db,
+                    openai_api_key=openai_api_key,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "script_flow_graphrag_sync_failed",
+                    flow_id=str(flow.id),
+                    error=str(exc),
+                )
+        else:
+            logger.info("script_flow_graph_sync_skipped", flow_id=str(flow.id))
 
         await db.execute(
             update(ScriptFlow).where(ScriptFlow.id == fid).values(index_progress=96)

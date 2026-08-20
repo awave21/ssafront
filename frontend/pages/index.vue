@@ -39,7 +39,7 @@ const showLanding = ref(false)
 const config = useRuntimeConfig()
 
 onMounted(() => {
-  if (config.public.landingMode === 'true') {
+  if (config.public.landingMode === 'true' || config.public.landingMode === true) {
     showLanding.value = true
     return
   }

@@ -118,6 +118,22 @@ class AgentBase(BaseModel):
         ),
     )
     manager_pause_minutes: int = Field(default=10, ge=1, le=1440, description="Длительность автопаузы агента после сообщения менеджера (минуты)")
+    debounce_enabled: bool = Field(default=True, description="Задержка перед ответом: собирать несколько сообщений подряд в один ответ")
+    debounce_delay_seconds: int = Field(default=8, ge=0, le=30, description="Окно задержки в секундах (0 = отвечать сразу)")
+    admin_notification_enabled: bool = Field(
+        default=False,
+        description="Отправлять уведомление менеджеру в Telegram при постановке диалога на паузу правилом",
+    )
+    admin_notification_bot_token: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Токен Telegram-бота для отправки уведомлений менеджеру. Если пусто и включен флаг, будет использован токен основного канала агента.",
+    )
+    admin_notification_chat_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Chat ID менеджера в Telegram. Обязателен при включённых уведомлениях.",
+    )
     timezone: str = Field(
         default="UTC",
         max_length=50,
@@ -183,6 +199,22 @@ class AgentUpdate(BaseModel):
     summary_prompt: str | None = Field(default=None, max_length=2000)
     knowledge_tool_description: str | None = Field(default=None, max_length=4000)
     manager_pause_minutes: int | None = Field(default=None, ge=1, le=1440, description="Длительность автопаузы агента после сообщения менеджера (минуты)")
+    debounce_enabled: bool | None = Field(default=None, description="Задержка перед ответом: собирать несколько сообщений подряд в один ответ")
+    debounce_delay_seconds: int | None = Field(default=None, ge=0, le=30, description="Окно задержки в секундах (0 = отвечать сразу)")
+    admin_notification_enabled: bool | None = Field(
+        default=None,
+        description="Отправлять уведомление менеджеру в Telegram при постановке диалога на паузу правилом",
+    )
+    admin_notification_bot_token: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Токен Telegram-бота для отправки уведомлений менеджеру.",
+    )
+    admin_notification_chat_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Chat ID менеджера в Telegram.",
+    )
     is_disabled: bool | None = None
     sqns_enabled: bool | None = None
     sqns_configured: bool | None = None
@@ -212,7 +244,7 @@ class AgentUpdate(BaseModel):
     )
     microsoft_graphrag_enabled: bool | None = Field(
         default=None,
-        description="Включить тул query_microsoft_graphrag (нужен MICROSOFT_GRAPHRAG_QUERY_BASE_URL).",
+        description="Включить тул query_graphrag (нужен MICROSOFT_GRAPHRAG_QUERY_BASE_URL).",
     )
     microsoft_graphrag_workspace_slug: str | None = Field(
         default=None,
@@ -221,7 +253,7 @@ class AgentUpdate(BaseModel):
     )
     microsoft_graphrag_tool_description: str | None = Field(
         default=None,
-        description="Переопределение описания тула query_microsoft_graphrag для LLM.",
+        description="Переопределение описания тула query_graphrag для LLM.",
     )
 
     @field_validator("microsoft_graphrag_workspace_slug", mode="before")

@@ -21,6 +21,7 @@ from app.core.config import get_settings
 from app.core.limiter import limiter
 from app.core.logging import bind_trace_id, configure_logging
 from app.services.runtime.neo4j_client import close_neo4j_driver
+from app.services.graph.indexes import ensure_graph_indexes
 
 logger = structlog.get_logger()
 
@@ -76,6 +77,10 @@ async def lifespan(app: FastAPI):
 
     logger.info("app_starting")
     configure_logging()
+
+    # Initialize Neo4j graph indexes (vector + fulltext)
+    await ensure_graph_indexes()
+
     logger.info("app_started_successfully")
     scorer_task = asyncio.create_task(_tactic_application_scorer_loop())
     try:

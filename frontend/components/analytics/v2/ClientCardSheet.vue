@@ -214,11 +214,8 @@ const close = () => emit('close')
 const activeTab = ref<'visits' | 'payments'>('visits')
 
 const fmt = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
-const fmtMoney = (v: number) => {
-  if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + ' млн ₽'
-  if (v >= 10_000) return Math.round(v / 1000) + ' тыс ₽'
-  return fmt.format(Math.round(v)) + ' ₽'
-}
+const fmtMoneyFormatter = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+const fmtMoney = (v: number) => fmtMoneyFormatter.format(Number.isFinite(v) ? v : 0) + ' ₽'
 const fmtDate = (iso: string | null) => {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })

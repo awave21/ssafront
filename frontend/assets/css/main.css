@@ -36,6 +36,19 @@
   * {
     @apply border-border;
   }
+  /*
+   * Root высоты — жёстко 100vh, скролл отключён на html/body.
+   * Layout (agent.vue, default.vue) использует внутренние overflow-y-auto контейнеры
+   * (main), поэтому глобальный body-скролл здесь только помешал бы: он утягивал
+   * бы за собой sidebar вместе с контентом. Модалки, тултипы и toast'ы работают
+   * через Teleport в отдельный узел, глобальный overflow:hidden их не задевает.
+   */
+  html,
+  body,
+  #__nuxt {
+    height: 100%;
+    overflow: hidden;
+  }
   body {
     @apply bg-background text-foreground;
   }

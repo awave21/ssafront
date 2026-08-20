@@ -3,6 +3,8 @@ import { useApiFetch } from './useApiFetch'
 import { useAuth } from './useAuth'
 import { getReadableErrorMessage } from '~/utils/api-errors'
 import type {
+  ReviewCorrectionPayload,
+  ReviewDialog,
   ScriptFlow,
   ScriptFlowCoverageResult,
   ScriptFlowCreatePayload,
@@ -11,11 +13,16 @@ import type {
   ScriptFlowSearchTestResult,
   ScriptFlowSuggestKeywordsResult,
   ScriptFlowUpdatePayload,
+  SkillDoc,
+  SkillGap,
+  SkillObjection,
 } from '~/types/scriptFlow'
 
 export const useScriptFlows = (agentId: string) => {
   const apiFetch = useApiFetch()
   const { token } = useAuth()
+  // @ts-ignore - Nuxt auto-import
+  const { public: { apiBase } } = useRuntimeConfig()
 
   const flows = ref<ScriptFlow[]>([])
   const isLoading = ref(false)
@@ -103,6 +110,126 @@ export const useScriptFlows = (agentId: string) => {
     return await apiFetch(`/agents/${agentId}/script-flows/${flowId}/unpublish`, {
       method: 'POST',
       headers: authHeaders(),
+    })
+  }
+
+  const distillSkill = async (
+    flowId: string,
+  ): Promise<{ id: string; skill_doc: SkillDoc; objections: number; gaps: number }> => {
+    return await apiFetch(`/agents/${agentId}/script-flows/${flowId}/distill-skill`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+  }
+
+  const updateSkillDoc = async (
+    flowId: string,
+    skillDoc: SkillDoc,
+  ): Promise<{ id: string; skill_doc: SkillDoc; objections: number; gaps: number }> => {
+    return await apiFetch(`/agents/${agentId}/script-flows/${flowId}/skill-doc`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: { skill_doc: skillDoc },
+    })
+  }
+
+  const skillChatStream = async (
+    flowId: string,
+    payload: {
+      messages: Array<{ role: string; content: string }>
+      attachments?: Array<{ name: string; text: string }>
+      skill_doc?: SkillDoc | null
+      model?: string
+    },
+    opts: {
+      onDelta: (text: string) => void
+      signal?: AbortSignal
+    },
+  ): Promise<{ reply: string; additions: { objections: SkillObjection[]; gaps: SkillGap[] } } | null> => {
+    const res = await fetch(`${apiBase}/agents/${agentId}/script-flows/${flowId}/skill-chat/stream`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify(payload),
+      signal: opts.signal,
+    })
+    if (!res.ok || !res.body) throw new Error(`Стрим недоступен (${res.status})`)
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let done: { reply: string; additions: { objections: SkillObjection[]; gaps: SkillGap[] } } | null = null
+    for (;;) {
+      const { value, done: rdDone } = await reader.read()
+      if (rdDone) break
+      buffer += decoder.decode(value, { stream: true })
+      let idx: number
+      while ((idx = buffer.indexOf('\n\n')) >= 0) {
+        const rawEvent = buffer.slice(0, idx)
+        buffer = buffer.slice(idx + 2)
+        let event = 'message'
+        let data = ''
+        for (const line of rawEvent.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim()
+          else if (line.startsWith('data:')) data += line.slice(5).trim()
+        }
+        if (!data) continue
+        const parsed = JSON.parse(data)
+        if (event === 'delta') opts.onDelta(parsed.text as string)
+        else if (event === 'done') done = parsed
+        else if (event === 'error') throw new Error(parsed.error || 'Ошибка стрима')
+      }
+    }
+    return done
+  }
+
+  const getSkillChatModels = async (): Promise<{
+    models: Array<{ id: string; label: string; hint: string }>
+    default: string
+  }> => {
+    return await apiFetch(`/agents/${agentId}/script-flows/skill-chat/models`, {
+      headers: authHeaders(),
+    })
+  }
+
+  const skillChat = async (
+    flowId: string,
+    payload: {
+      messages: Array<{ role: string; content: string }>
+      attachments?: Array<{ name: string; text: string }>
+      skill_doc?: SkillDoc | null
+      model?: string
+    },
+    signal?: AbortSignal,
+  ): Promise<{
+    reply: string
+    additions: { objections: SkillObjection[]; gaps: SkillGap[] }
+    added_objections: number
+    added_gaps: number
+  }> => {
+    return await apiFetch(`/agents/${agentId}/script-flows/${flowId}/skill-chat`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: payload,
+      signal,
+    })
+  }
+
+  const getReviewDialogs = async (
+    flowId: string,
+    limit = 30,
+  ): Promise<{ dialogs: ReviewDialog[]; has_service_link: boolean }> => {
+    return await apiFetch(`/agents/${agentId}/script-flows/${flowId}/review-dialogs?limit=${limit}`, {
+      headers: authHeaders(),
+    })
+  }
+
+  const addReviewCorrection = async (
+    flowId: string,
+    payload: ReviewCorrectionPayload,
+  ): Promise<{ id: string; skill_doc: SkillDoc; objections: number; gaps: number }> => {
+    return await apiFetch(`/agents/${agentId}/script-flows/${flowId}/review-correction`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: payload,
     })
   }
 
@@ -252,6 +379,13 @@ export const useScriptFlows = (agentId: string) => {
     previewFlow,
     publishFlow,
     unpublishFlow,
+    distillSkill,
+    updateSkillDoc,
+    skillChat,
+    skillChatStream,
+    getSkillChatModels,
+    getReviewDialogs,
+    addReviewCorrection,
     suggestKeywords,
     testSearch,
     getFlowCoverage,

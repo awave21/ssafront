@@ -15,7 +15,16 @@
         </p>
       </div>
       <div class="space-y-1">
-        <label class="insp-label">Итог разговора в этой ветке</label>
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>Итог разговора в этой ветке</span>
+          <FieldHelpIcons
+            field-key="end.outcome_type"
+            node-type="end"
+            :node-id="nodeId"
+            :current-node-data="currentNodeData"
+            :ai-enabled="false"
+          />
+        </label>
         <select v-model="localOutcomeType" class="insp-input" @change="flushNode">
           <option :value="null">— Не указан —</option>
           <option v-for="opt in OUTCOME_OPTIONS" :key="opt.value" :value="opt.value">
@@ -24,7 +33,17 @@
         </select>
       </div>
       <div class="space-y-1">
-        <label class="insp-label">Что ассистент должен сделать или сказать в финале</label>
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>Что ассистент должен сделать или сказать в финале</span>
+          <FieldHelpIcons
+            field-key="end.final_action"
+            node-type="end"
+            :node-id="nodeId"
+            :current-node-data="currentNodeData"
+            :current-value="localFinalAction"
+            @ai-fill="(t: string) => applyAi('final_action', t)"
+          />
+        </label>
         <textarea
           v-model="localFinalAction"
           rows="4"
@@ -42,9 +61,10 @@
 </template>
 
 <script setup lang="ts">
-import { inject } from 'vue'
+import { computed, inject } from 'vue'
 import { SCRIPT_FLOW_INSPECTOR_KEY } from '~/composables/useScriptFlowInspectorModel'
 import InspectorKgLinks from './InspectorKgLinks.vue'
+import FieldHelpIcons from './FieldHelpIcons.vue'
 
 const OUTCOME_OPTIONS = [
   { value: 'success', label: '✅ Успех' },
@@ -52,9 +72,21 @@ const OUTCOME_OPTIONS = [
   { value: 'lost', label: '❌ Отказ' },
 ] as const
 
-const { localOutcomeType, localFinalAction, lastFocusedField, flushNode } = inject(SCRIPT_FLOW_INSPECTOR_KEY)!
+const { nodeId, localOutcomeType, localFinalAction, lastFocusedField, flushNode } = inject(SCRIPT_FLOW_INSPECTOR_KEY)!
 
 const focusField = (k: string) => {
   lastFocusedField.value = k
+}
+
+const currentNodeData = computed(() => ({
+  outcome_type: localOutcomeType.value,
+  final_action: localFinalAction.value,
+}))
+
+const applyAi = (field: string, text: string) => {
+  if (field === 'final_action') {
+    localFinalAction.value = text
+    flushNode()
+  }
 }
 </script>

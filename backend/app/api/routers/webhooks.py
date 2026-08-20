@@ -14,6 +14,7 @@ from app.db.models.agent import Agent
 from app.db.models.channel import AgentChannel, Channel
 from app.db.session import get_db, async_session_factory
 from app.api.routers.webhooks_inbound_agent import process_webhook_inbound_agent_message
+from app.api.routers.webhooks_jivo import router as jivo_webhooks_router
 from app.api.routers.webhooks_phone import router as phone_webhooks_router
 from app.api.routers.webhooks_utils import mask_headers, sanitize_agent_reply_text
 from app.services.dialog_state import is_dialog_active, is_manager_paused, set_dialog_status
@@ -400,7 +401,8 @@ async def telegram_webhook(
 
             # Показываем typing сразу, пока ждём debounce
             await send_telegram_chat_action(bot_token=bot_token, chat_id=chat_id, action="typing")
-            await debounce_and_run(session_id, input_text, _run_agent_after_debounce)
+            debounce_delay = float(agent.debounce_delay_seconds) if agent.debounce_enabled else 0.0
+            await debounce_and_run(session_id, input_text, _run_agent_after_debounce, delay=debounce_delay)
         else:
             # Агент не запускается: политика чата / канал / пауза.
             # Важно: раньше при отсутствии bot_token попадали в ветку с reason=dialog_inactive — это вводило в заблуждение.
@@ -449,3 +451,4 @@ async def telegram_webhook(
 
 
 router.include_router(phone_webhooks_router)
+router.include_router(jivo_webhooks_router)

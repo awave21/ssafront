@@ -484,6 +484,7 @@ export function useScriptFlowInspectorModel(nodeId: Ref<string | null>) {
   })
 
   return {
+    nodeId,
     localTitle,
     localNodeType,
     localStage,

@@ -360,10 +360,28 @@ export type StaffServiceLine = {
   service_external_id: number | null
   service_name: string
   bookings_total: number
-  primary_count: number
-  repeat_count: number
+  arrived_total: number
+  no_show_total: number
+  primary_total: number
+  repeat_total: number
   revenue_total: number
-  avg_price: number
+  avg_check: number
+  conversion_pct: number
+  no_show_pct: number
+}
+
+export type StaffClientLine = {
+  client_external_id: number
+  full_name: string
+  phone: string | null
+  visits_total: number
+  arrived_total: number
+  no_show_total: number
+  primary_total: number
+  repeat_total: number
+  revenue_total: number
+  avg_check: number
+  last_visit_at: string | null
 }
 
 export type StaffSparkPoint = {
@@ -378,6 +396,7 @@ export type StaffDetailResponse = {
   timezone: string
   staff: StaffMember
   top_services: StaffServiceLine[]
+  clients: StaffClientLine[]
   sparkline: StaffSparkPoint[]
 }
 
@@ -668,7 +687,9 @@ export type AnalyticsClientCardResponse = {
 export type MotivationTier = 'low' | 'norm' | 'high' | 'no_primary'
 
 export type MotivationRule = {
-  primary_pct: number
+  primary_pct_low: number
+  primary_pct_norm: number
+  primary_pct_high: number
   repeat_pct_low: number
   repeat_pct_norm: number
   repeat_pct_high: number
@@ -696,6 +717,7 @@ export type MotivationMember = {
   repeat_avg_check: number
   total_avg_check: number
   tier: MotivationTier
+  applied_primary_pct: number
   applied_repeat_pct: number
   bonus_primary: number
   bonus_repeat: number

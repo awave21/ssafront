@@ -23,10 +23,12 @@ class MotivationRule(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), index=True, nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="doctor")
 
-    # % от выручки первичных визитов
-    primary_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("15.00"))
+    # % с первичных визитов: три уровня (по среднему чеку первички)
+    primary_pct_low: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("18.00"))
+    primary_pct_norm: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("20.00"))
+    primary_pct_high: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("22.00"))
 
-    # % со вторичных визитов: три уровня
+    # % со вторичных визитов: три уровня (по тому же среднему чеку первички)
     repeat_pct_low: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("17.00"))
     repeat_pct_norm: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("20.00"))
     repeat_pct_high: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("22.00"))

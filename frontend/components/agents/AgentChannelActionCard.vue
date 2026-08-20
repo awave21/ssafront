@@ -1,69 +1,59 @@
 <template>
   <div
-    class="p-4 border rounded-lg transition-all"
+    class="p-4 border rounded-lg transition-all flex flex-col h-full"
     :class="[
       connected
         ? 'border-indigo-100 bg-indigo-50/30'
         : 'border-slate-100 bg-white hover:border-slate-200'
     ]"
   >
-    <div class="flex items-start justify-between gap-4">
-      <div class="flex gap-4 min-w-0">
-        <div class="w-12 h-12 rounded-md flex items-center justify-center" :class="iconClass">
-          <component :is="icon" class="w-6 h-6 text-white" />
-        </div>
-        <div class="min-w-0">
-          <h4 class="font-bold text-slate-900">{{ title }}</h4>
-          <p class="text-sm text-slate-500 mt-1">{{ description }}</p>
-          <div v-if="connected" class="mt-3 flex flex-wrap items-center gap-2">
-            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-green-100 text-green-700">
-              Подключен
-            </span>
-            <label
-              v-if="showAuthorizationState"
-              class="inline-flex items-center gap-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
-              :class="isAuthorized ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'"
-            >
-              <input
-                type="checkbox"
-                class="w-3 h-3 accent-emerald-600 cursor-not-allowed"
-                :checked="Boolean(isAuthorized)"
-                disabled
-              >
-              <span>{{ isAuthorized ? 'Авторизован' : 'Ожидает авторизацию' }}</span>
-            </label>
-          </div>
-        </div>
+    <div class="flex items-center gap-3">
+      <div class="w-12 h-12 rounded-md flex items-center justify-center flex-shrink-0" :class="iconClass">
+        <component :is="icon" class="w-6 h-6 text-white" />
       </div>
+      <h4 class="font-bold text-slate-900 leading-tight">{{ title }}</h4>
+    </div>
+    <p class="text-sm text-slate-500 mt-3">{{ description }}</p>
+    <div v-if="connected" class="mt-3 flex flex-wrap items-center gap-2">
+      <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-green-100 text-green-700">
+        Подключен
+      </span>
+      <label
+        v-if="showAuthorizationState"
+        class="inline-flex items-center gap-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
+        :class="isAuthorized ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'"
+      >
+        <input
+          type="checkbox"
+          class="w-3 h-3 accent-emerald-600 cursor-not-allowed"
+          :checked="Boolean(isAuthorized)"
+          disabled
+        >
+        <span>{{ isAuthorized ? 'Авторизован' : 'Ожидает авторизацию' }}</span>
+      </label>
+    </div>
 
-      <div v-if="canEdit" class="flex flex-col items-end gap-2">
-        <button
-          :disabled="loading"
-          class="px-4 py-2 rounded-md text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          :class="connected
-            ? 'bg-red-50 text-red-600 hover:bg-red-100'
-            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
-          @click="handleAction"
-        >
-          <span v-if="loading" class="inline-flex items-center gap-2">
-            <Loader2 class="w-4 h-4 animate-spin" />
-            {{ connected ? 'Отключение...' : 'Подключение...' }}
-          </span>
-          <span v-else>{{ connected ? disconnectLabel : connectLabel }}</span>
-        </button>
-        <button
-          v-if="connected && showAuthorizeButton"
-          :disabled="authorizeLoading"
-          class="px-4 py-2 rounded-md text-sm font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          @click="handleAuthorize"
-        >
-          <span v-if="authorizeLoading" class="inline-flex items-center gap-2">
-            <Loader2 class="w-4 h-4 animate-spin" />
-            Запрос QR...
-          </span>
-          <span v-else>{{ authorizeLabel }}</span>
-        </button>
-      </div>
+    <div v-if="canEdit" class="mt-auto pt-4 flex flex-col gap-2">
+      <button
+        :disabled="loading"
+        class="w-full px-4 py-2 rounded-md text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+        :class="connected
+          ? 'bg-red-50 text-red-600 hover:bg-red-100'
+          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+        @click="handleAction"
+      >
+        <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
+        <span>{{ loading ? (connected ? 'Отключение...' : 'Подключение...') : (connected ? disconnectLabel : connectLabel) }}</span>
+      </button>
+      <button
+        v-if="connected && showAuthorizeButton"
+        :disabled="authorizeLoading"
+        class="w-full px-4 py-2 rounded-md text-sm font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+        @click="handleAuthorize"
+      >
+        <Loader2 v-if="authorizeLoading" class="w-4 h-4 animate-spin" />
+        <span>{{ authorizeLoading ? 'Запрос QR...' : authorizeLabel }}</span>
+      </button>
     </div>
   </div>
 </template>

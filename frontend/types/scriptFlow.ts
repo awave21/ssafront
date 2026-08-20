@@ -215,6 +215,88 @@ export type ScriptFlowMetadata = {
   variables?: Record<string, VariableBinding>
 }
 
+// ── Skill (навык = продолжение эксперта) ──────────────────────────────────────
+/** Уровень дословности фразы эксперта в навыке. */
+export type SkillPhraseLevel = 'пример' | 'дословно' | 'обязательно'
+
+export type SkillPhrase = {
+  text: string
+  level: SkillPhraseLevel
+}
+
+/** Этап диалога — «линия жизни» разговора. */
+export type SkillStage =
+  | 'приветствие'
+  | 'уточнение'
+  | 'презентация'
+  | 'цена'
+  | 'возражения'
+  | 'запись'
+  | 'завершение'
+  | 'другое'
+
+export type SkillObjection = {
+  situation: string
+  trigger_when: string
+  stage: SkillStage
+  approach: string
+  phrases: SkillPhrase[]
+  forbidden: string[]
+}
+
+/** Пробел: ситуация без готовых фраз эксперта (веди своими словами). */
+export type SkillGap = {
+  situation: string
+  trigger_when: string
+}
+
+/** Дистиллированная структура навыка (производная от compiled_text). */
+export type SkillDoc = {
+  context: string
+  objections: SkillObjection[]
+  sequence: string[]
+  facts_from_tool: string[]
+  endings: string[]
+  gaps: SkillGap[]
+}
+
+// ── ExpertSkill entity (навык — самостоятельная сущность, отдельно от потоков) ──
+export type ExpertSkillStatus = 'draft' | 'published'
+
+export type ExpertSkill = {
+  id: string
+  tenant_id: string
+  agent_id: string
+  name: string
+  /** Внешние id услуг SQNS — по ним рантайм подбирает навык для услуги диалога. */
+  service_external_ids: string[]
+  skill_doc: SkillDoc | null
+  status: ExpertSkillStatus
+  is_deleted: boolean
+  deleted_at: string | null
+  created_at: string
+  updated_at: string | null
+}
+
+// ── Review inbox (ревью-инбокс навыка) ────────────────────────────────────────
+export type ReviewDialog = {
+  run_id: string
+  session_id: string
+  input: string
+  output: string | null
+  tool_names: string[]
+  created_at: string | null
+}
+
+export type ReviewCorrectionPayload = {
+  situation: string
+  trigger_when?: string
+  approach?: string
+  phrase?: string | null
+  level?: SkillPhraseLevel
+  mark?: string | null
+}
+
 // ── ScriptFlow entity ────────────────────────────────────────────────────────
 export type ScriptFlow = {
   id: string
@@ -229,6 +311,10 @@ export type ScriptFlow = {
   definition_version?: number
   flow_metadata: ScriptFlowMetadata & Record<string, unknown>
   flow_definition: Record<string, unknown>
+  /** Внешние id услуг SQNS, к которым привязан навык (раздел «Навыки»). */
+  service_external_ids: string[]
+  /** Дистиллированная структура навыка; null, если ещё не публиковался. */
+  skill_doc: SkillDoc | null
   compiled_text: string | null
   index_status: ScriptFlowIndexStatus
   index_error: string | null
@@ -242,6 +328,7 @@ export type ScriptFlowCreatePayload = {
   internal_note?: string | null
   flow_metadata?: Record<string, unknown>
   flow_definition?: Record<string, unknown>
+  service_external_ids?: string[]
 }
 
 export type ScriptFlowUpdatePayload = {
@@ -249,6 +336,7 @@ export type ScriptFlowUpdatePayload = {
   internal_note?: string | null
   flow_metadata?: Record<string, unknown>
   flow_definition?: Record<string, unknown>
+  service_external_ids?: string[]
 }
 
 export type ScriptFlowSuggestKeywordsResult = {

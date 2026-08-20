@@ -304,6 +304,13 @@ async def create_function_rule(
     await db.flush()
 
     for action in payload.actions:
+        # Симметрично update: webhook-action без allowed_domains — уязвимость SSRF.
+        await _validate_webhook_action_config(
+            db,
+            tenant_id=user.tenant_id,
+            action_type=action.action_type,
+            action_config=action.action_config,
+        )
         db.add(
             FunctionPostAction(
                 tenant_id=user.tenant_id,

@@ -116,7 +116,9 @@ def _classify_tier(
 
 def _rule_to_response(rule: MotivationRule) -> MotivationRuleResponse:
     return MotivationRuleResponse(
-        primary_pct=float(rule.primary_pct),
+        primary_pct_low=float(rule.primary_pct_low),
+        primary_pct_norm=float(rule.primary_pct_norm),
+        primary_pct_high=float(rule.primary_pct_high),
         repeat_pct_low=float(rule.repeat_pct_low),
         repeat_pct_norm=float(rule.repeat_pct_norm),
         repeat_pct_high=float(rule.repeat_pct_high),
@@ -152,8 +154,12 @@ class MotivationService:
 
     async def update_rule(self, payload: MotivationRuleUpdate, role: str = "doctor") -> MotivationRuleResponse:
         rule = await self._get_or_create_rule(role)
-        if payload.primary_pct is not None:
-            rule.primary_pct = Decimal(str(payload.primary_pct))
+        if payload.primary_pct_low is not None:
+            rule.primary_pct_low = Decimal(str(payload.primary_pct_low))
+        if payload.primary_pct_norm is not None:
+            rule.primary_pct_norm = Decimal(str(payload.primary_pct_norm))
+        if payload.primary_pct_high is not None:
+            rule.primary_pct_high = Decimal(str(payload.primary_pct_high))
         if payload.repeat_pct_low is not None:
             rule.repeat_pct_low = Decimal(str(payload.repeat_pct_low))
         if payload.repeat_pct_norm is not None:
@@ -195,9 +201,8 @@ class MotivationService:
             commodities_primary = float(row["commodities_primary"] or 0)
 
             revenue_total = services_rev + commodities_rev
-            # бонус считается только от услуг, товары — только для отображения
-            bonusable = services_rev
-            primary_bonusable = services_primary
+            bonusable = services_rev + (commodities_rev if rule.include_commodities else 0)
+            primary_bonusable = services_primary + (commodities_primary if rule.include_commodities else 0)
             repeat_bonusable = bonusable - primary_bonusable
 
             primary_avg = round(primary_bonusable / primary_visits, 2) if primary_visits else 0.0
@@ -207,15 +212,18 @@ class MotivationService:
             tier = _classify_tier(primary_avg, primary_visits, rule_resp.avg_check_low, rule_resp.avg_check_high)
 
             if tier == "low":
-                applied_pct = rule_resp.repeat_pct_low
+                applied_primary_pct = rule_resp.primary_pct_low
+                applied_repeat_pct = rule_resp.repeat_pct_low
             elif tier == "high":
-                applied_pct = rule_resp.repeat_pct_high
+                applied_primary_pct = rule_resp.primary_pct_high
+                applied_repeat_pct = rule_resp.repeat_pct_high
             else:
                 # norm или no_primary — норма
-                applied_pct = rule_resp.repeat_pct_norm
+                applied_primary_pct = rule_resp.primary_pct_norm
+                applied_repeat_pct = rule_resp.repeat_pct_norm
 
-            bonus_primary = round(primary_bonusable * rule_resp.primary_pct / 100, 2)
-            bonus_repeat = round(repeat_bonusable * applied_pct / 100, 2)
+            bonus_primary = round(primary_bonusable * applied_primary_pct / 100, 2)
+            bonus_repeat = round(repeat_bonusable * applied_repeat_pct / 100, 2)
 
             items.append(
                 MotivationMember(
@@ -237,7 +245,8 @@ class MotivationService:
                     repeat_avg_check=repeat_avg,
                     total_avg_check=total_avg,
                     tier=tier,
-                    applied_repeat_pct=applied_pct,
+                    applied_primary_pct=applied_primary_pct,
+                    applied_repeat_pct=applied_repeat_pct,
                     bonus_primary=bonus_primary,
                     bonus_repeat=bonus_repeat,
                     bonus_total=round(bonus_primary + bonus_repeat, 2),

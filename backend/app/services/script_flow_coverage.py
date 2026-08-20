@@ -14,12 +14,23 @@ from uuid import UUID
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.db.models.script_flow_tactic_search import ScriptFlowTacticSearch
 
-# Cosine similarity above this is "good enough" — LLM can rely on the tactic.
-RELEVANCE_HIGH_THRESHOLD = 0.70
+# Дефолты-фолбэки под косинус pgvector-движка (переопределяются настройками
+# tactic_coverage_relevant_threshold / tactic_coverage_weak_threshold).
+# Прежние 0.70/0.55 были откалиброваны под старый графовый масштаб скоров.
+RELEVANCE_HIGH_THRESHOLD = 0.45
 # Below this — irrelevant match (gap).
-RELEVANCE_LOW_THRESHOLD = 0.55
+RELEVANCE_LOW_THRESHOLD = 0.30
+
+
+def _coverage_thresholds() -> tuple[float, float]:
+    """(relevant_high, weak_low) из настроек с фолбэком на модульные дефолты."""
+    s = get_settings()
+    high = getattr(s, "tactic_coverage_relevant_threshold", RELEVANCE_HIGH_THRESHOLD)
+    low = getattr(s, "tactic_coverage_weak_threshold", RELEVANCE_LOW_THRESHOLD)
+    return float(high), float(low)
 
 
 @dataclass
@@ -72,6 +83,7 @@ async def build_coverage_report(
     top_n_gaps: int = 20,
 ) -> CoverageReport:
     since = datetime.now(timezone.utc) - timedelta(days=period_days)
+    high, low = _coverage_thresholds()
 
     base = (
         select(ScriptFlowTacticSearch)
@@ -93,19 +105,19 @@ async def build_coverage_report(
         await db.execute(
             select(
                 func.count().filter(
-                    ScriptFlowTacticSearch.top_score >= RELEVANCE_HIGH_THRESHOLD
+                    ScriptFlowTacticSearch.top_score >= high
                 ),
                 func.count().filter(
-                    (ScriptFlowTacticSearch.top_score < RELEVANCE_HIGH_THRESHOLD)
-                    & (ScriptFlowTacticSearch.top_score > RELEVANCE_LOW_THRESHOLD)
+                    (ScriptFlowTacticSearch.top_score < high)
+                    & (ScriptFlowTacticSearch.top_score > low)
                 ),
                 func.count().filter(
-                    (ScriptFlowTacticSearch.top_score <= RELEVANCE_LOW_THRESHOLD)
+                    (ScriptFlowTacticSearch.top_score <= low)
                     & (ScriptFlowTacticSearch.hit_count > 0)
                 ),
                 func.count().filter(ScriptFlowTacticSearch.hit_count == 0),
                 func.count(func.distinct(ScriptFlowTacticSearch.top_node_id)).filter(
-                    ScriptFlowTacticSearch.top_score >= RELEVANCE_HIGH_THRESHOLD
+                    ScriptFlowTacticSearch.top_score >= high
                 ),
             ).where(
                 ScriptFlowTacticSearch.tenant_id == tenant_id,
@@ -141,7 +153,7 @@ async def build_coverage_report(
             ScriptFlowTacticSearch.agent_id == agent_id,
             ScriptFlowTacticSearch.created_at >= since,
             ScriptFlowTacticSearch.top_node_id.is_not(None),
-            ScriptFlowTacticSearch.top_score >= RELEVANCE_HIGH_THRESHOLD,
+            ScriptFlowTacticSearch.top_score >= high,
         )
         .group_by(
             ScriptFlowTacticSearch.top_node_id,
@@ -179,7 +191,7 @@ async def build_coverage_report(
             ScriptFlowTacticSearch.agent_id == agent_id,
             ScriptFlowTacticSearch.created_at >= since,
             ScriptFlowTacticSearch.hit_count > 0,
-            ScriptFlowTacticSearch.top_score < RELEVANCE_HIGH_THRESHOLD,
+            ScriptFlowTacticSearch.top_score < high,
         )
         .group_by(ScriptFlowTacticSearch.query)
         .order_by(desc("occurrences"), desc("last_seen"))
@@ -236,11 +248,12 @@ async def build_coverage_report(
 
 
 def coverage_report_to_dict(r: CoverageReport) -> dict[str, Any]:
+    high, low = _coverage_thresholds()
     return {
         "period_days": r.period_days,
         "thresholds": {
-            "relevant": RELEVANCE_HIGH_THRESHOLD,
-            "irrelevant": RELEVANCE_LOW_THRESHOLD,
+            "relevant": high,
+            "irrelevant": low,
         },
         "summary": {
             "total_searches": r.summary.total_searches,

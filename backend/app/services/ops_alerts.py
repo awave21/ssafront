@@ -65,3 +65,72 @@ async def send_wappi_balance_alert(
             profile_id=profile_id,
             error=str(exc),
         )
+
+
+async def send_manager_pause_alert(
+    *,
+    bot_token: str | None,
+    chat_id: str | None,
+    agent_name: str,
+    session_id: str,
+    reason: str | None = None,
+    last_client_message: str | None = None,
+    last_agent_message: str | None = None,
+) -> bool:
+    """Отправить уведомление менеджеру о постановке диалога на паузу.
+
+    Возвращает True при успешной отправке, False при пропуске (нет токена/чата)
+    или ошибке отправки. Ошибки не пробрасываются, только логируются — это
+    вспомогательный побочный эффект и не должен ломать основной цикл.
+    """
+    bot_token = _normalize_str(bot_token)
+    chat_id = _normalize_str(chat_id)
+    if not bot_token or not chat_id:
+        logger.debug(
+            "manager_pause_alert_skipped_missing_config",
+            agent_name=agent_name,
+            session_id=session_id,
+            has_token=bool(bot_token),
+            has_chat_id=bool(chat_id),
+        )
+        return False
+
+    parts: list[str] = [f"Диалог поставлен на паузу — требуется внимание"]
+    parts.append(f"Агент: {agent_name}")
+    parts.append(f"Сессия: {session_id}")
+    if reason:
+        parts.append(f"Причина: {reason}")
+    if last_client_message:
+        snippet = last_client_message.strip()
+        if len(snippet) > 400:
+            snippet = snippet[:400] + "..."
+        parts.append(f"\nСообщение клиента:\n{snippet}")
+    if last_agent_message:
+        snippet = last_agent_message.strip()
+        if len(snippet) > 400:
+            snippet = snippet[:400] + "..."
+        parts.append(f"\nОтвет агента:\n{snippet}")
+
+    text = "\n".join(parts)
+
+    try:
+        await send_telegram_message(
+            bot_token=bot_token,
+            chat_id=chat_id,
+            text=text,
+            timeout_seconds=5,
+        )
+        logger.info(
+            "manager_pause_alert_sent",
+            agent_name=agent_name,
+            session_id=session_id,
+        )
+        return True
+    except (TelegramWebhookError, ValueError) as exc:
+        logger.warning(
+            "manager_pause_alert_failed",
+            agent_name=agent_name,
+            session_id=session_id,
+            error=str(exc),
+        )
+        return False

@@ -55,7 +55,7 @@ const props = defineProps<{
 }>()
 
 const intFormatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
-const moneyFormatter = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+const moneyFormatter = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 
 const formatInt = (value: number) => intFormatter.format(Number.isFinite(value) ? value : 0)
 const formatMoney = (value: number) => `${moneyFormatter.format(Number.isFinite(value) ? value : 0)} ₽`

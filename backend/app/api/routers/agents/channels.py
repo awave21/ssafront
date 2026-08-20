@@ -23,6 +23,7 @@ from app.schemas.channel import (
     ChannelConnectionPayload,
     ChannelDisconnectPayload,
     ChannelRead,
+    JivoPrepareRead,
     WidgetRotateKeyRead,
     WidgetSettings,
 )
@@ -46,13 +47,14 @@ router = APIRouter()
 webhook_logger = structlog.get_logger("webhooks")
 wappi_webhook_logger = structlog.get_logger("webhooks.wappi")
 
-AVAILABLE_CHANNEL_TYPES = ["Telegram_Bot", "Telegram_Phone", "Whatsapp_Phone", "Max_Phone", "Web_Widget"]
+AVAILABLE_CHANNEL_TYPES = ["Telegram_Bot", "Telegram_Phone", "Whatsapp_Phone", "Max_Phone", "Web_Widget", "Jivo"]
 CHANNEL_TYPE_MAP = {
     "Telegram_Bot": "telegram",
     "Telegram_Phone": "telegram_phone",
     "Whatsapp_Phone": "whatsapp",
     "Max_Phone": "max",
     "Web_Widget": "web_widget",
+    "Jivo": "jivo",
 }
 WAPPI_PHONE_CHANNEL_TYPES = {"telegram_phone", "whatsapp", "max"}
 WAPPI_PHONE_2FA_CHANNEL_TYPES = {"telegram_phone", "max"}
@@ -81,6 +83,10 @@ def _build_telegram_webhook_endpoint(token: str) -> str:
 
 def _build_phone_channel_webhook_endpoint(channel_id: UUID) -> str:
     return f"{get_settings().api_prefix}/webhooks/channels/phone/{channel_id}"
+
+
+def _build_jivo_webhook_endpoint(token: str) -> str:
+    return f"{get_settings().api_prefix}/webhooks/jivo/{token}"
 
 
 def _build_public_webhook_url(endpoint: str) -> str:
@@ -488,6 +494,11 @@ async def connect_channel(
     agent = await get_agent_or_404(agent_id, db, user)
     agent_id_str = str(agent_id)
     resolved_type = _resolve_channel_type(payload.type)
+    if resolved_type == "jivo":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Для Jivo используйте POST /channels/jivo/prepare, затем PUT /channels",
+        )
     stmt = (
         select(Channel.id)
         .join(AgentChannel, AgentChannel.channel_id == Channel.id)
@@ -595,6 +606,52 @@ async def connect_channel(
     return result
 
 
+@router.post(
+    "/{agent_id}/channels/jivo/prepare",
+    response_model=JivoPrepareRead,
+    summary="Подготовить канал Jivo (токен + webhook-URL)",
+    description=(
+        "Идемпотентно создаёт draft-канал Jivo с уникальным токеном и возвращает webhook-URL "
+        "для кабинета Jivo. ID провайдера и путь к ответу заполняются затем через PUT /channels."
+    ),
+)
+async def prepare_jivo_channel(
+    agent_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> JivoPrepareRead:
+    agent = await get_agent_or_404(agent_id, db, user)
+    stmt = (
+        select(Channel)
+        .join(AgentChannel, AgentChannel.channel_id == Channel.id)
+        .where(
+            AgentChannel.agent_id == agent_id,
+            Channel.type == "jivo",
+            Channel.is_deleted.is_(False),
+        )
+        .order_by(Channel.created_at.desc())
+        .limit(1)
+    )
+    channel = (await db.execute(stmt)).scalar_one_or_none()
+    if channel is None:
+        channel = Channel(type="jivo", jivo_provider_token=_generate_webhook_token())
+        db.add(channel)
+        await db.flush()
+        db.add(AgentChannel(agent_id=agent.id, channel_id=channel.id))
+        await db.commit()
+        await db.refresh(channel)
+        await write_audit(db, user, "agent.channel.jivo.prepare", "agent", str(agent.id))
+    webhook_url = _build_public_webhook_url(
+        _build_jivo_webhook_endpoint(channel.jivo_provider_token or "")
+    )
+    return JivoPrepareRead(
+        webhook_url=webhook_url,
+        provider_token=channel.jivo_provider_token or "",
+        provider_id=channel.jivo_provider_id,
+        reply_base_url=channel.jivo_reply_base_url,
+    )
+
+
 @router.put(
     "/{agent_id}/channels",
     response_model=ChannelRead,
@@ -635,6 +692,11 @@ async def update_channel(
             channel.widget_settings = payload.widget_settings.model_dump()
         if payload.widget_allowed_origins is not None:
             channel.widget_allowed_origins = payload.widget_allowed_origins
+    elif resolved_type == "jivo":
+        if payload.jivo_provider_id is not None:
+            channel.jivo_provider_id = payload.jivo_provider_id.strip() or None
+        if payload.jivo_reply_base_url is not None:
+            channel.jivo_reply_base_url = payload.jivo_reply_base_url.strip().rstrip("/") or None
     await db.commit()
     await db.refresh(channel)
     await write_audit(db, user, "agent.channel.update", "agent", str(agent_id))

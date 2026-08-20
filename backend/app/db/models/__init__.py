@@ -53,6 +53,7 @@ from app.db.models.knowledge_index_job import KnowledgeIndexJob
 from app.db.models.unified_graph_rebuild_job import UnifiedGraphRebuildJob
 from app.db.models.user_table import UserTable, UserTableAttribute, UserTableRecord
 from app.db.models.script_flow import ScriptFlow
+from app.db.models.expert_skill import ExpertSkill
 from app.db.models.script_flow_graph_diagnostic import ScriptFlowGraphDiagnostic
 from app.db.models.script_flow_graph_community import ScriptFlowGraphCommunity
 from app.db.models.script_flow_graph_node import ScriptFlowGraphNode
@@ -129,6 +130,7 @@ __all__ = [
     "UserTableAttribute",
     "UserTableRecord",
     "ScriptFlow",
+    "ExpertSkill",
     "ScriptFlowGraphDiagnostic",
     "ScriptFlowGraphCommunity",
     "ScriptFlowGraphNode",

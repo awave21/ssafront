@@ -460,11 +460,14 @@ class SqnsServicesSyncHandler:
                 "category": stmt.excluded.category,
                 "price": stmt.excluded.price,
                 "duration_seconds": stmt.excluded.duration_seconds,
-                "description": stmt.excluded.description,
+                # description НЕ обновляем из SQNS: на первом синке он засеивается
+                # (в INSERT выше), а дальше им владеет эксперт через UI
+                # (SqnsServiceUpdate.description) — по образцу sqns_resources.information.
+                # Иначе экспертные заметки/описания затирались бы каждый час.
                 "raw_data": stmt.excluded.raw_data,
                 "synced_at": stmt.excluded.synced_at,
                 # Услуга снова пришла из SQNS — снимаем флаг stale, сохраняя
-                # локальные is_enabled/priority.
+                # локальные is_enabled/priority/description.
                 "stale_since": None,
                 "updated_at": synced_at,
             },

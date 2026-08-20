@@ -59,31 +59,38 @@
       <!-- Table -->
       <div class="rounded-3xl border border-slate-100 bg-white shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]">
         <div class="overflow-x-auto">
-          <table class="w-full text-xs">
+          <table class="min-w-full text-xs motivation-table">
             <thead>
               <tr class="border-b border-slate-100 text-left">
-                <th class="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-slate-400">Сотрудник</th>
-                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Визиты</th>
-                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Первичных</th>
-                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Услуги</th>
-                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Товары</th>
-                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Итого выручка</th>
-                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Ср. чек перв.</th>
-                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Ср. чек вторич.</th>
-                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Ср. чек общий</th>
-                <th class="px-3 py-3 text-center text-[10px] font-black uppercase tracking-wider text-slate-400">Уровень</th>
-                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">% вторич.</th>
-                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Бонус перв.</th>
-                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400">Бонус вторич.</th>
-                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-emerald-600">Итого бонус</th>
+                <th class="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[200px]">Сотрудник</th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[80px]">Визиты</th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[90px]">Первичных</th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[110px]">Услуги</th>
+                <th
+                  class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider whitespace-nowrap min-w-[110px]"
+                  :class="overview.rule.include_commodities ? 'text-slate-400' : 'text-slate-300'"
+                >
+                  Товары
+                </th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[130px]">Итого выручка</th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[120px]">Ср. чек перв.</th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[120px]">Ср. чек вторич.</th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[120px]">Ср. чек общий</th>
+                <th class="px-3 py-3 text-center text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[110px]">Уровень</th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[90px]">% перв.</th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[90px]">% вторич.</th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[120px]">Бонус перв.</th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap min-w-[120px]">Бонус вторич.</th>
+                <th class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wider text-emerald-600 whitespace-nowrap min-w-[120px]">Итого бонус</th>
               </tr>
             </thead>
             <tbody>
               <tr
                 v-for="member in sortedItems"
                 :key="member.resource_external_id"
-                class="border-b border-slate-50 transition-colors last:border-0 hover:bg-slate-50/60"
+                class="border-b border-slate-50 transition-colors last:border-0 hover:bg-slate-50/60 cursor-pointer"
                 :class="{ 'opacity-50': member.is_fired }"
+                @click="$emit('open-detail', member)"
               >
                 <td class="px-4 py-3">
                   <div class="font-semibold text-slate-800">{{ member.full_name }}</div>
@@ -93,7 +100,12 @@
                 <td class="px-3 py-3 text-right font-mono text-slate-600">{{ member.arrived_total }}</td>
                 <td class="px-3 py-3 text-right font-mono text-slate-600">{{ member.primary_visits }}</td>
                 <td class="px-3 py-3 text-right font-mono text-slate-700">{{ formatMoney(member.services_revenue) }}</td>
-                <td class="px-3 py-3 text-right font-mono text-slate-600">{{ formatMoney(member.commodities_revenue) }}</td>
+                <td
+                  class="px-3 py-3 text-right font-mono"
+                  :class="overview.rule.include_commodities ? 'text-slate-700' : 'text-slate-300'"
+                >
+                  {{ formatMoney(member.commodities_revenue) }}
+                </td>
                 <td class="px-3 py-3 text-right font-mono font-semibold text-slate-800">{{ formatMoney(member.revenue_total) }}</td>
                 <td class="px-3 py-3 text-right font-mono text-slate-600">{{ formatMoney(member.primary_avg_check) }}</td>
                 <td class="px-3 py-3 text-right font-mono text-slate-600">{{ formatMoney(member.repeat_avg_check) }}</td>
@@ -104,6 +116,7 @@
                     :class="tierClass(member.tier)"
                   >{{ tierLabel(member.tier) }}</span>
                 </td>
+                <td class="px-3 py-3 text-right font-mono text-slate-600">{{ member.applied_primary_pct }}%</td>
                 <td class="px-3 py-3 text-right font-mono text-slate-600">{{ member.applied_repeat_pct }}%</td>
                 <td class="px-3 py-3 text-right font-mono text-slate-700">{{ formatMoney(member.bonus_primary) }}</td>
                 <td class="px-3 py-3 text-right font-mono text-slate-700">{{ formatMoney(member.bonus_repeat) }}</td>
@@ -120,9 +133,15 @@
                   {{ overview.items.reduce((s, m) => s + m.primary_visits, 0) }}
                 </td>
                 <td class="px-3 py-3 text-right font-mono font-bold text-slate-700">{{ formatMoney(overview.totals.services_revenue) }}</td>
-                <td class="px-3 py-3 text-right font-mono font-bold text-slate-600">{{ formatMoney(overview.totals.commodities_revenue) }}</td>
+                <td
+                  class="px-3 py-3 text-right font-mono font-bold"
+                  :class="overview.rule.include_commodities ? 'text-slate-700' : 'text-slate-300'"
+                >
+                  {{ formatMoney(overview.totals.commodities_revenue) }}
+                </td>
                 <td class="px-3 py-3 text-right font-mono font-bold text-slate-800">{{ formatMoney(overview.totals.revenue_total) }}</td>
                 <td colspan="4"></td>
+                <td></td>
                 <td></td>
                 <td class="px-3 py-3 text-right font-mono font-bold text-slate-700">
                   {{ formatMoney(overview.items.reduce((s, m) => s + m.bonus_primary, 0)) }}
@@ -141,19 +160,19 @@
       <div class="flex flex-wrap gap-4 text-xs text-slate-500">
         <div class="flex items-center gap-1.5">
           <span class="inline-block h-2 w-2 rounded-full bg-rose-400"></span>
-          Ниже нормы — ср. чек &lt; {{ formatMoney(overview.rule.avg_check_low) }}, % вторички: {{ overview.rule.repeat_pct_low }}%
+          Ниже нормы — ср. чек &lt; {{ formatMoney(overview.rule.avg_check_low) }}, % перв.: {{ overview.rule.primary_pct_low }}%, % вторич.: {{ overview.rule.repeat_pct_low }}%
         </div>
         <div class="flex items-center gap-1.5">
           <span class="inline-block h-2 w-2 rounded-full bg-slate-400"></span>
-          Норма — {{ formatMoney(overview.rule.avg_check_low) }}–{{ formatMoney(overview.rule.avg_check_high) }}, % вторички: {{ overview.rule.repeat_pct_norm }}%
+          Норма — {{ formatMoney(overview.rule.avg_check_low) }}–{{ formatMoney(overview.rule.avg_check_high) }}, % перв.: {{ overview.rule.primary_pct_norm }}%, % вторич.: {{ overview.rule.repeat_pct_norm }}%
         </div>
         <div class="flex items-center gap-1.5">
           <span class="inline-block h-2 w-2 rounded-full bg-emerald-400"></span>
-          Выше нормы — ср. чек &gt; {{ formatMoney(overview.rule.avg_check_high) }}, % вторички: {{ overview.rule.repeat_pct_high }}%
+          Выше нормы — ср. чек &gt; {{ formatMoney(overview.rule.avg_check_high) }}, % перв.: {{ overview.rule.primary_pct_high }}%, % вторич.: {{ overview.rule.repeat_pct_high }}%
         </div>
         <div class="flex items-center gap-1.5">
           <span class="inline-block h-2 w-2 rounded-full bg-sky-400"></span>
-          Нет первичных — % вторички: {{ overview.rule.repeat_pct_norm }}%
+          Нет первичных — % перв./вторич.: {{ overview.rule.primary_pct_norm }}% / {{ overview.rule.repeat_pct_norm }}%
         </div>
       </div>
     </template>
@@ -188,6 +207,10 @@ const props = defineProps<{
   saveRule: (payload: Partial<MotivationRule>) => Promise<MotivationRule | undefined>
 }>()
 
+defineEmits<{
+  (e: 'open-detail', member: MotivationMember): void
+}>()
+
 const ruleSheetOpen = ref(false)
 
 const sortedItems = computed<MotivationMember[]>(() => {
@@ -195,11 +218,14 @@ const sortedItems = computed<MotivationMember[]>(() => {
   return [...props.overview.items].sort((a, b) => b.bonus_total - a.bonus_total)
 })
 
+const moneyFormatter = new Intl.NumberFormat('ru-RU', {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+})
+
 function formatMoney(v: number): string {
   if (v === 0) return '—'
-  if (Math.abs(v) >= 1_000_000) return (v / 1_000_000).toFixed(1) + ' млн ₽'
-  if (Math.abs(v) >= 10_000) return Math.round(v / 1000) + ' тыс ₽'
-  return Math.round(v).toLocaleString('ru-RU') + ' ₽'
+  return moneyFormatter.format(Number.isFinite(v) ? v : 0) + ' ₽'
 }
 
 function tierLabel(tier: MotivationTier): string {
@@ -227,3 +253,25 @@ async function onRuleSaved(rule: MotivationRule) {
   await props.saveRule(rule)
 }
 </script>
+
+<style scoped>
+/* Ручное изменение ширины колонок: тянем за правый край заголовка */
+.motivation-table {
+  table-layout: fixed;
+  width: max-content;
+}
+.motivation-table th {
+  position: relative;
+  resize: horizontal;
+  overflow: auto;
+}
+/* Ячейки тела не должны ломать колоночную сетку */
+.motivation-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.motivation-table td:first-child {
+  white-space: normal;
+}
+</style>

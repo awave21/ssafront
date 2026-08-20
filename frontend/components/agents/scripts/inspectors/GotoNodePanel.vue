@@ -15,7 +15,16 @@
         </p>
       </div>
       <div class="space-y-1">
-        <label class="insp-label">К какой теме или сценарию перейти</label>
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>К какой теме или сценарию перейти</span>
+          <FieldHelpIcons
+            field-key="goto.target_flow_id"
+            node-type="goto"
+            :node-id="nodeId"
+            :current-node-data="currentNodeData"
+            :ai-enabled="false"
+          />
+        </label>
         <select
           class="insp-input"
           :value="localTargetFlowId ?? ''"
@@ -38,7 +47,16 @@
         </p>
       </div>
       <div class="space-y-1">
-        <label class="insp-label">Внутренний шаг в целевом сценарии (необязательно)</label>
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>Внутренний шаг в целевом сценарии (необязательно)</span>
+          <FieldHelpIcons
+            field-key="goto.target_node_ref"
+            node-type="goto"
+            :node-id="nodeId"
+            :current-node-data="currentNodeData"
+            :ai-enabled="false"
+          />
+        </label>
         <input
           v-model="localTargetNodeRef"
           type="text"
@@ -49,7 +67,17 @@
         >
       </div>
       <div class="space-y-1">
-        <label class="insp-label">Как мягко перевести разговор</label>
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>Как мягко перевести разговор</span>
+          <FieldHelpIcons
+            field-key="goto.transition_phrase"
+            node-type="goto"
+            :node-id="nodeId"
+            :current-node-data="currentNodeData"
+            :current-value="localTransitionPhrase"
+            @ai-fill="(t: string) => applyAi('transition_phrase', t)"
+          />
+        </label>
         <textarea
           v-model="localTransitionPhrase"
           rows="2"
@@ -60,7 +88,17 @@
         />
       </div>
       <div class="space-y-1">
-        <label class="insp-label">Когда такой переход уместен</label>
+        <label class="insp-label inline-flex items-center gap-2">
+          <span>Когда такой переход уместен</span>
+          <FieldHelpIcons
+            field-key="goto.trigger_situation"
+            node-type="goto"
+            :node-id="nodeId"
+            :current-node-data="currentNodeData"
+            :current-value="localTriggerSituation"
+            @ai-fill="(t: string) => applyAi('trigger_situation', t)"
+          />
+        </label>
         <textarea
           v-model="localTriggerSituation"
           rows="2"
@@ -77,6 +115,7 @@
 <script setup lang="ts">
 import { computed, inject, type ComputedRef } from 'vue'
 import { SCRIPT_FLOW_INSPECTOR_KEY } from '~/composables/useScriptFlowInspectorModel'
+import FieldHelpIcons from './FieldHelpIcons.vue'
 
 type GotoOpt = { id: string; name: string; flow_status: string }
 
@@ -88,6 +127,7 @@ const gotoFlowOptionsRef = inject<ComputedRef<GotoOpt[]>>(
 const gotoOptions = computed(() => gotoFlowOptionsRef.value)
 
 const {
+  nodeId,
   localTransitionPhrase,
   localTriggerSituation,
   localTargetFlowId,
@@ -103,6 +143,25 @@ const focusField = (k: string) => {
 const onTargetFlowChange = (e: Event) => {
   const v = (e.target as HTMLSelectElement).value.trim()
   localTargetFlowId.value = v.length ? v : null
+  flushNode()
+}
+
+const currentNodeData = computed(() => ({
+  target_flow_id: localTargetFlowId.value,
+  target_node_ref: localTargetNodeRef.value,
+  transition_phrase: localTransitionPhrase.value,
+  trigger_situation: localTriggerSituation.value,
+}))
+
+const FIELD_REFS: Record<string, { value: string }> = {
+  transition_phrase: localTransitionPhrase,
+  trigger_situation: localTriggerSituation,
+}
+
+const applyAi = (field: string, text: string) => {
+  const ref = FIELD_REFS[field]
+  if (!ref) return
+  ref.value = text
   flushNode()
 }
 </script>

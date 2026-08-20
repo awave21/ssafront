@@ -18,16 +18,27 @@ type AgentForm = {
   model: string
   timezone: string
   manager_pause_minutes: number
+  debounce_enabled: boolean
+  debounce_delay_seconds: number
+  admin_notification_enabled: boolean
+  admin_notification_bot_token: string
+  admin_notification_chat_id: string
   status: AgentStatus
   is_disabled: boolean
   llm_params: {
     temperature: number
     max_tokens: number
+    /**
+     * Уровень рассуждений для reasoning-моделей (gpt-5*, o3*, o4*).
+     * PydanticAI пробрасывает как openai_reasoning_effort → reasoning_effort в OpenAI API.
+     * null / undefined = «Отключено» (ключ не пробрасывается).
+     */
+    openai_reasoning_effort?: 'low' | 'medium' | 'high' | null
   }
 }
 
-type ChannelTypePath = 'telegram' | 'telegram_phone' | 'whatsapp' | 'max' | 'web_widget'
-type ChannelTypePublic = 'Telegram_Bot' | 'Telegram_Phone' | 'Whatsapp_Phone' | 'Max_Phone' | 'Web_Widget'
+type ChannelTypePath = 'telegram' | 'telegram_phone' | 'whatsapp' | 'max' | 'web_widget' | 'jivo'
+type ChannelTypePublic = 'Telegram_Bot' | 'Telegram_Phone' | 'Whatsapp_Phone' | 'Max_Phone' | 'Web_Widget' | 'Jivo'
 type PhoneChannelTypePath = 'telegram_phone' | 'whatsapp' | 'max'
 
 export type WidgetSettings = {
@@ -46,6 +57,20 @@ export type WebWidgetChannel = {
   widget_api_key_last4?: string | null
 }
 
+export type JivoChannel = {
+  id: string
+  provider_id: string | null
+  reply_base_url: string | null
+  provider_token: string | null
+}
+
+export type JivoPrepareResult = {
+  webhook_url: string
+  provider_token: string
+  provider_id: string | null
+  reply_base_url: string | null
+}
+
 type AgentChannelRecord = {
   id: string
   type: ChannelTypePath
@@ -56,6 +81,9 @@ type AgentChannelRecord = {
   widget_settings?: WidgetSettings | null
   widget_allowed_origins?: string[] | null
   widget_api_key_last4?: string | null
+  jivo_provider_id?: string | null
+  jivo_reply_base_url?: string | null
+  jivo_provider_token?: string | null
 }
 
 type ChannelAuthQrResponse = {
@@ -469,11 +497,17 @@ const createEmptyForm = (): AgentForm => ({
   model: '',
   timezone: 'Europe/Moscow',
   manager_pause_minutes: 10,
+  debounce_enabled: true,
+  debounce_delay_seconds: 8,
+  admin_notification_enabled: false,
+  admin_notification_bot_token: '',
+  admin_notification_chat_id: '',
   status: 'draft',
   is_disabled: false,
   llm_params: {
     temperature: 0.7,
-    max_tokens: 1000
+    max_tokens: 1000,
+    openai_reasoning_effort: null,
   }
 })
 
@@ -486,11 +520,19 @@ const buildForm = (agent: Agent): AgentForm => ({
   manager_pause_minutes: Number.isFinite(Number(agent.manager_pause_minutes))
     ? Math.min(1440, Math.max(1, Number(agent.manager_pause_minutes)))
     : 10,
+  debounce_enabled: agent.debounce_enabled ?? true,
+  debounce_delay_seconds: Number.isFinite(Number(agent.debounce_delay_seconds))
+    ? Math.min(30, Math.max(0, Number(agent.debounce_delay_seconds)))
+    : 8,
+  admin_notification_enabled: Boolean(agent.admin_notification_enabled ?? false),
+  admin_notification_bot_token: String(agent.admin_notification_bot_token ?? ''),
+  admin_notification_chat_id: String(agent.admin_notification_chat_id ?? ''),
   status: agent.status,
   is_disabled: Boolean(agent.is_disabled),
   llm_params: {
     temperature: agent.llm_params?.temperature ?? 0.7,
-    max_tokens: agent.llm_params?.max_tokens ?? 1000
+    max_tokens: agent.llm_params?.max_tokens ?? 1000,
+    openai_reasoning_effort: (agent.llm_params as any)?.openai_reasoning_effort ?? null,
   }
 })
 
@@ -537,6 +579,15 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
   const telegramPhoneChannel = computed(() => channels.value.find((ch) => ch.type === 'telegram_phone') ?? null)
   const whatsappPhoneChannel = computed(() => channels.value.find((ch) => ch.type === 'whatsapp') ?? null)
   const maxPhoneChannel = computed(() => channels.value.find((ch) => ch.type === 'max') ?? null)
+  const jivoChannel = computed<JivoChannel | null>(() => {
+    const jv = channels.value.find((ch) => ch.type === 'jivo')
+    return jv ? {
+      id: jv.id,
+      provider_id: jv.jivo_provider_id ?? null,
+      reply_base_url: jv.jivo_reply_base_url ?? null,
+      provider_token: jv.jivo_provider_token ?? null,
+    } : null
+  })
   const isLoadingChannels = ref(false)
   const channelsLoaded = ref(false)
 
@@ -874,6 +925,37 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     await apiFetch(`/agents/${agent.value.id}/channels/${channelType}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token.value}` }
+    })
+    await fetchChannels()
+    return true
+  }
+
+  const prepareJivoChannel = async (): Promise<JivoPrepareResult | null> => {
+    if (!agent.value) return null
+    const result = await apiFetch<JivoPrepareResult>(
+      `/agents/${agent.value.id}/channels/jivo/prepare`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token.value}` }
+      }
+    )
+    await fetchChannels()
+    return result
+  }
+
+  const finalizeJivoChannel = async (providerId: string, replyBaseUrl: string) => {
+    if (!agent.value) return false
+    await apiFetch(`/agents/${agent.value.id}/channels`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token.value}`,
+        'Content-Type': 'application/json'
+      },
+      body: {
+        type: 'Jivo',
+        jivo_provider_id: providerId,
+        jivo_reply_base_url: replyBaseUrl,
+      }
     })
     await fetchChannels()
     return true
@@ -1440,6 +1522,77 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
       }
     )
 
+    // Auto-save debounce toggle immediately
+    watch(
+      () => form.value.debounce_enabled,
+      async (newEnabled, oldEnabled) => {
+        if (!agent.value || !isLoaded.value) return
+        if (newEnabled === oldEnabled) return
+        if (newEnabled === Boolean(agent.value.debounce_enabled)) return
+
+        await autoSaveField({ debounce_enabled: newEnabled })
+      }
+    )
+
+    // Auto-save debounce delay immediately
+    watch(
+      () => form.value.debounce_delay_seconds,
+      async (newDelay, oldDelay) => {
+        if (!agent.value || !isLoaded.value) return
+        if (newDelay === oldDelay) return
+
+        const normalizedDelay = Number.isFinite(Number(newDelay))
+          ? Math.min(30, Math.max(0, Number(newDelay)))
+          : 8
+        if (normalizedDelay !== newDelay) {
+          form.value.debounce_delay_seconds = normalizedDelay
+          return
+        }
+
+        const currentDelay = Number.isFinite(Number(agent.value.debounce_delay_seconds))
+          ? Number(agent.value.debounce_delay_seconds)
+          : 8
+        if (normalizedDelay === currentDelay) return
+
+        await autoSaveField({ debounce_delay_seconds: normalizedDelay })
+      }
+    )
+
+    // Auto-save admin notifications: toggle
+    watch(
+      () => form.value.admin_notification_enabled,
+      async (newVal, oldVal) => {
+        if (!agent.value || !isLoaded.value) return
+        if (newVal === oldVal) return
+        if (newVal === Boolean(agent.value.admin_notification_enabled)) return
+        await autoSaveField({ admin_notification_enabled: newVal })
+      }
+    )
+
+    // Auto-save admin notification bot token (with tiny debounce via microtask chain)
+    watch(
+      () => form.value.admin_notification_bot_token,
+      async (newVal, oldVal) => {
+        if (!agent.value || !isLoaded.value) return
+        if (newVal === oldVal) return
+        const current = String(agent.value.admin_notification_bot_token ?? '')
+        if (newVal === current) return
+        await autoSaveField({ admin_notification_bot_token: newVal || null })
+      }
+    )
+
+    // Auto-save admin notification chat id
+    watch(
+      () => form.value.admin_notification_chat_id,
+      async (newVal, oldVal) => {
+        if (!agent.value || !isLoaded.value) return
+        if (newVal === oldVal) return
+        const current = String(agent.value.admin_notification_chat_id ?? '')
+        if (newVal === current) return
+        await autoSaveField({ admin_notification_chat_id: newVal || null })
+      }
+    )
+
     // Auto-save disabled state immediately
     watch(
       () => form.value.is_disabled,
@@ -1525,10 +1678,13 @@ export const useAgentEditorStore = defineStore('agentEditor', () => {
     ensureToolsLoaded,
     toggleTool,
     webWidgetChannel,
+    jivoChannel,
     fetchChannels,
     ensureChannelsLoaded,
     connectChannel,
     disconnectChannel,
+    prepareJivoChannel,
+    finalizeJivoChannel,
     updateWidgetSettings,
     rotateWebWidgetKey,
     fetchChannelAuthQr,

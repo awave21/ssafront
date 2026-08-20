@@ -328,6 +328,7 @@
                         <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
                       </button>
                     </TableHead>
+                    <TableHead className="w-[260px]">Описание</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -339,9 +340,10 @@
                     <TableCell><div class="h-4 w-16 bg-slate-100 rounded"></div></TableCell>
                     <TableCell><div class="h-6 w-10 bg-slate-100 rounded-full"></div></TableCell>
                     <TableCell><div class="h-8 w-16 bg-slate-100 rounded"></div></TableCell>
+                    <TableCell><div class="h-8 w-40 bg-slate-100 rounded"></div></TableCell>
                   </TableRow>
                   <TableRow v-else-if="services.length === 0">
-                    <TableCell :colspan="7" className="p-12 text-center text-slate-400 italic">
+                    <TableCell :colspan="8" className="p-12 text-center text-slate-400 italic">
                       Услуги не найдены
                     </TableCell>
                   </TableRow>
@@ -364,7 +366,6 @@
                     </TableCell>
                     <TableCell>
                       <p class="text-sm font-bold text-slate-900">{{ service.name }}</p>
-                      <p v-if="service.description" class="text-[10px] text-slate-500 mt-0.5 line-clamp-1">{{ service.description }}</p>
                     </TableCell>
                     <TableCell>
                       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600">
@@ -399,6 +400,17 @@
                         class="w-16 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-mono focus:ring-1 focus:ring-indigo-500 focus:bg-white transition-all"
                         min="0"
                         max="100"
+                      />
+                    </TableCell>
+                    <TableCell className="w-[260px] max-w-[260px]">
+                      <SqnsInfoEditCell
+                        :value="service.description"
+                        title="Описание услуги"
+                        label="Описание для агента"
+                        :entity-name="service.name"
+                        placeholder="Например: витринная услуга, цена за одну зону; когда предлагать. Переживает синхронизацию и попадает в подбор."
+                        hint="Экспертное описание не затирается синхронизацией SQNS и используется в семантическом подборе услуг."
+                        :on-save="(v: string) => saveServiceDescription(service, v)"
                       />
                     </TableCell>
                   </TableRow>
@@ -489,7 +501,7 @@
                         <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
                       </button>
                     </TableHead>
-                    <TableHead>
+                    <TableHead className="w-[260px]">
                       <button @click="toggleSort(specialistsTable, 'information')" class="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors">
                         Информация
                         <ArrowUpDown class="h-3.5 w-3.5 text-slate-400" />
@@ -542,22 +554,15 @@
                         />
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <div class="flex items-center justify-between gap-2">
-                        <p class="text-xs text-slate-500 line-clamp-1">
-                          {{ specialist.information || '—' }}
-                        </p>
-                        <Button
-                          @click="openSpecialistInformationSheet(specialist)"
-                          variant="outline"
-                          size="sm"
-                          class="h-8 w-8 rounded-md p-0"
-                          aria-label="Редактировать информацию"
-                          title="Редактировать информацию"
-                        >
-                          <Pencil class="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
+                    <TableCell className="w-[260px] max-w-[260px]">
+                      <SqnsInfoEditCell
+                        :value="specialist.information"
+                        title="Информация о специалисте"
+                        label="Информация"
+                        :entity-name="specialist.name"
+                        placeholder="Введите информацию о сотруднике"
+                        :on-save="(v: string) => saveSpecialistInformation(specialist, v)"
+                      />
                     </TableCell>
                   </TableRow>
                 </TableBody>
@@ -686,50 +691,6 @@
         </TabsContent>
       </Tabs>
     </div>
-
-    <Sheet
-      :open="specialistInformationSheetOpen"
-      @update:open="(open) => { if (!open) closeSpecialistInformationSheet() }"
-    >
-      <SheetContent side="right" class-name="w-full sm:max-w-xl flex flex-col">
-        <SheetHeader>
-          <SheetTitle>Информация о специалисте</SheetTitle>
-        </SheetHeader>
-
-        <div class="flex-1 overflow-y-auto p-6 space-y-4">
-          <p v-if="selectedSpecialistForInformation" class="text-sm text-slate-600">
-            {{ selectedSpecialistForInformation.name }}
-          </p>
-          <div class="space-y-2">
-            <label class="text-sm font-medium text-slate-700">Информация</label>
-            <Textarea
-              v-model="specialistInformationDraft"
-              rows="8"
-              placeholder="Введите информацию о сотруднике"
-              class="resize-none"
-            />
-          </div>
-        </div>
-
-        <div class="border-t border-slate-200 bg-white px-6 py-4 flex items-center justify-end gap-2">
-          <button
-            @click="closeSpecialistInformationSheet"
-            class="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors"
-            :disabled="Boolean(savingSpecialistInformationForId)"
-          >
-            Отмена
-          </button>
-          <button
-            @click="handleSaveSpecialistInformation"
-            class="px-5 py-2 bg-indigo-600 text-white rounded-md text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1.5"
-            :disabled="Boolean(savingSpecialistInformationForId)"
-          >
-            <Loader2 v-if="savingSpecialistInformationForId" class="h-4 w-4 animate-spin" />
-            {{ savingSpecialistInformationForId ? 'Сохранение...' : 'Сохранить' }}
-          </button>
-        </div>
-      </SheetContent>
-    </Sheet>
 
     <Sheet
       :open="toolEditorOpen"
@@ -893,10 +854,6 @@ const allRecordsSearch = ref('')
 const allRecordsPageSize = ref(50)
 const allRecordsPageOffset = ref(0)
 const specialistSearch = ref('')
-const specialistInformationSheetOpen = ref(false)
-const selectedSpecialistForInformation = ref<SqnsSpecialist | null>(null)
-const specialistInformationDraft = ref('')
-const savingSpecialistInformationForId = ref<string | null>(null)
 const togglingSpecialistIds = ref<Set<string>>(new Set())
 
 // Tools State
@@ -942,6 +899,7 @@ const formattedSyncAt = computed(() => {
 const sqnsToolsList = computed(() => {
   const tools = store.sqnsStatus?.sqnsTools ?? []
   const nameMap: Record<string, string> = {
+    'resolve_clinic_facts': 'Подбор по смыслу (услуги + врачи)',
     'sqns_list_resources': 'Сотрудники',
     'sqns_list_services': 'Услуги',
     'sqns_find_client': 'Поиск клиента',
@@ -1226,6 +1184,19 @@ const handleUpdatePriority = async (service: any) => {
   }
 }
 
+// Сохранение описания услуги (вызывается из SqnsInfoEditCell). Пробрасываем
+// ошибку, чтобы компонент оставил панель открытой для повторной попытки.
+const saveServiceDescription = async (service: any, value: string) => {
+  try {
+    await updateSqnsService(props.agentId, service.id, { description: value || null })
+    service.description = value || null
+    toastSuccess('Описание обновлено', `Для услуги "${service.name}"`)
+  } catch (err: any) {
+    toastError('Ошибка', getReadableErrorMessage(err, 'Не удалось сохранить описание услуги'))
+    throw err
+  }
+}
+
 const bulkServicesInFlight = ref(false)
 
 const handleBulkUpdate = async (is_enabled: boolean) => {
@@ -1314,36 +1285,15 @@ const handleToggleSpecialistActive = async (specialist: SqnsSpecialist) => {
   }
 }
 
-const openSpecialistInformationSheet = (specialist: SqnsSpecialist) => {
-  selectedSpecialistForInformation.value = specialist
-  specialistInformationDraft.value = specialist.information ?? ''
-  specialistInformationSheetOpen.value = true
-}
-
-const closeSpecialistInformationSheet = () => {
-  specialistInformationSheetOpen.value = false
-  selectedSpecialistForInformation.value = null
-  specialistInformationDraft.value = ''
-}
-
-const handleSaveSpecialistInformation = async () => {
-  const specialist = selectedSpecialistForInformation.value
-  if (!specialist?.id) return
-
-  const infoValue = specialistInformationDraft.value.trim()
-  savingSpecialistInformationForId.value = specialist.id
-
+// Сохранение информации специалиста (вызывается из SqnsInfoEditCell).
+const saveSpecialistInformation = async (specialist: SqnsSpecialist, value: string) => {
   try {
-    await updateSqnsSpecialist(props.agentId, specialist.id, {
-      information: infoValue,
-    })
-    specialist.information = infoValue ? infoValue : null
-    toastSuccess('Информация обновлена', `Для сотрудника "${specialist.name}" сохранено описание`)
-    closeSpecialistInformationSheet()
+    await updateSqnsSpecialist(props.agentId, specialist.id, { information: value })
+    specialist.information = value ? value : null
+    toastSuccess('Информация обновлена', `Для сотрудника "${specialist.name}"`)
   } catch (err: any) {
     toastError('Ошибка', getReadableErrorMessage(err, 'Не удалось сохранить информацию о специалисте'))
-  } finally {
-    savingSpecialistInformationForId.value = null
+    throw err
   }
 }
 

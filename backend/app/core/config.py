@@ -186,6 +186,24 @@ class Settings(BaseSettings):
     neo4j_password: str | None = Field(default=None, validation_alias="NEO4J_PASSWORD")
     neo4j_database: str | None = Field(default=None, validation_alias="NEO4J_DATABASE")
 
+    unified_graph_data_source: str = Field(
+        default="neo4j",
+        validation_alias="UNIFIED_GRAPH_DATA_SOURCE",
+        description=(
+            "Откуда UI берёт данные для unified-graph превью и /ask. "
+            "'neo4j' (по умолчанию) — единый источник правды (то же, что видит LLM); "
+            "'postgres' — fallback на легаси-таблицы agent_unified_graph_*."
+        ),
+    )
+    unified_graph_retriever_min_score: float = Field(
+        default=0.3,
+        validation_alias="UNIFIED_GRAPH_RETRIEVER_MIN_SCORE",
+        description=(
+            "Минимальный нормализованный score (score / max_score) для попадания узла в выдачу "
+            "HybridGraphRetriever. Значение 0.0 отключает фильтрацию."
+        ),
+    )
+
     microsoft_graphrag_workspace_root: str | None = Field(
         default=None,
         validation_alias="MICROSOFT_GRAPHRAG_WORKSPACE_ROOT",
@@ -206,9 +224,14 @@ class Settings(BaseSettings):
         validation_alias="MICROSOFT_GRAPHRAG_WEBHOOK_TIMEOUT_SECONDS",
     )
     microsoft_graphrag_auto_dispatch_corpus: bool = Field(
-        default=True,
+        default=False,
         validation_alias="MICROSOFT_GRAPHRAG_AUTO_DISPATCH_CORPUS",
-        description="После синхронизации SQNS, обновления БЗ и индекса сценария автоматически отправлять корпус в GraphRAG.",
+        description=(
+            "После синхронизации SQNS, обновления БЗ и индекса сценария автоматически отправлять "
+            "корпус в Microsoft GraphRAG. По умолчанию False: рантайм тактик использует граф потоков "
+            "(FlowNode/GraphNode), а Microsoft-слой (MicrosoftGraphNode) не в вектор-индексе и только "
+            "раздувает Neo4j. Включать, только если явно нужен Microsoft GraphRAG."
+        ),
     )
     microsoft_graphrag_subprocess_timeout_seconds: float = Field(
         default=7200.0,
@@ -523,6 +546,119 @@ class Settings(BaseSettings):
         ge=1,
         le=50,
         validation_alias="SCRIPT_FLOW_INDEX_BATCH_SIZE",
+    )
+    script_flow_index_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=16,
+        validation_alias="SCRIPT_FLOW_INDEX_CONCURRENCY",
+        description="Сколько потоков обрабатывать параллельно в одном цикле воркера.",
+    )
+    script_flow_graph_sync_enabled: bool = Field(
+        default=True,
+        validation_alias="SCRIPT_FLOW_GRAPH_SYNC_ENABLED",
+        description=(
+            "Синхронизировать ли script flow канвас и GraphRAG в Neo4j при индексации. "
+            "False — временно отключить графовый путь тактик (код и данные сохраняются; "
+            "поиск тактик идёт через pgvector по script_flow_node_indexes)."
+        ),
+    )
+    script_flow_graphrag_extended: bool = Field(
+        default=False,
+        validation_alias="SCRIPT_FLOW_GRAPHRAG_EXTENDED",
+        description=(
+            "Создавать ли расширенный семантический слой при graphrag-синке потоков: "
+            "GraphCommunity, GraphDiagnostic и рёбра GRAPH_RELATION. По умолчанию False — "
+            "для тактик достаточно GraphNode + HAS_SEMANTIC, а расширенный слой не в вектор-индексе "
+            "и только раздувает Neo4j. Переиндексация с False удаляет старые communities/relations."
+        ),
+    )
+    expert_tactics_min_score: float = Field(
+        default=0.28,
+        ge=0.0,
+        le=1.0,
+        validation_alias="EXPERT_TACTICS_MIN_SCORE",
+        description=(
+            "Минимальная косинусная близость (1 - distance) для попадания узла в выдачу "
+            "search_expert_tactics. Ниже порога тактика не подставляется — агент отвечает "
+            "по основному системному промпту. 0.0 отключает отсечку."
+        ),
+    )
+    tactic_coverage_relevant_threshold: float = Field(
+        default=0.45,
+        ge=0.0,
+        le=1.0,
+        validation_alias="TACTIC_COVERAGE_RELEVANT_THRESHOLD",
+        description=(
+            "Порог 'релевантного' совпадения в аналитике покрытия тактик (страница coverage). "
+            "Откалиброван под косинус pgvector-движка (сильные совпадения ~0.45+), а не под "
+            "старый графовый масштаб 0.70."
+        ),
+    )
+    tactic_coverage_weak_threshold: float = Field(
+        default=0.30,
+        ge=0.0,
+        le=1.0,
+        validation_alias="TACTIC_COVERAGE_WEAK_THRESHOLD",
+        description=(
+            "Нижняя граница 'слабого' совпадения в аналитике покрытия: ниже — нерелевантно "
+            "(кандидат в пробелы). Обычно ≈ expert_tactics_min_score."
+        ),
+    )
+    runtime_expert_skill_tool_enabled: bool = Field(
+        default=False,
+        validation_alias="RUNTIME_EXPERT_SKILL_TOOL_ENABLED",
+        description=(
+            "Тул use_expert_skill: модель САМА выбирает навык по каталогу (как Claude Skills) "
+            "и подгружает его инструкцию по вызову. Альтернатива детерминированному навык-слою. "
+            "Регистрируется, только если у агента есть опубликованные навыки. По умолчанию False."
+        ),
+    )
+    runtime_skill_layer_enabled: bool = Field(
+        default=False,
+        validation_alias="RUNTIME_SKILL_LAYER_ENABLED",
+        description=(
+            "Навык-слой в рантайме: если активная услуга диалога известна (из "
+            "resolve_clinic_facts), подгружать skill_doc её потока-навыка целиком в "
+            "system_prompt_override — вместо пофрагментной RAG-выборки тактик. Навык "
+            "формирует поведение голосом эксперта, факты остаются жёсткими (из тулов). "
+            "По умолчанию False — включать точечно."
+        ),
+    )
+    skill_distiller_model: str = Field(
+        default="openai:gpt-5.1",
+        validation_alias="SKILL_DISTILLER_MODEL",
+        description=(
+            "Модель для дистилляции навыка (skill_doc) из compiled_text потока. "
+            "Reasoning-модель (по умолчанию gpt-5.1) — офлайн-задача при публикации, "
+            "не в горячем пути рантайма. Строго extractive: не выдумывает реплики за эксперта."
+        ),
+    )
+    skill_distiller_reasoning_effort: str = Field(
+        default="low",
+        validation_alias="SKILL_DISTILLER_REASONING_EFFORT",
+        description=(
+            "reasoning_effort для дистилляции навыка (none|low|medium|high для gpt-5.1). "
+            "low — баланс полноты извлечения и стоимости (~$0.08/услуга)."
+        ),
+    )
+    skill_chat_model: str = Field(
+        default="openai:gpt-4.1",
+        validation_alias="SKILL_CHAT_MODEL",
+        description=(
+            "Модель интерактивного ассистента сборки навыка (чат). Возвращает только "
+            "дельту (новые обработки/пробелы), поэтому выход маленький и быстрый. По "
+            "умолчанию gpt-4.1 (без reasoning). Можно вернуть gpt-5.1 через env, если "
+            "нужно более качественное извлечение на сложных репликах."
+        ),
+    )
+    skill_chat_reasoning_effort: str = Field(
+        default="none",
+        validation_alias="SKILL_CHAT_REASONING_EFFORT",
+        description=(
+            "reasoning_effort для чат-ассистента (none|low|medium|high). По умолчанию none — "
+            "чат интерактивный, важна скорость ответа."
+        ),
     )
     runtime_script_flow_strict_entry_default: bool = Field(
         default=False,

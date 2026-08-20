@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.db.models.agent import Agent
 from app.db.models.dialog_tag import DialogTag
 from app.db.models.function_post_action import FunctionPostAction
 from app.db.models.function_rule import FunctionRule
@@ -27,6 +28,7 @@ from app.schemas.auth import AuthContext
 from app.core.config import get_settings
 from app.services.agent_user_state import upsert_agent_user_state
 from app.services.dialog_state import set_dialog_status, upsert_dialog_status_flush_only
+from app.services.ops_alerts import send_manager_pause_alert
 from app.services.semantic_matcher import semantic_match_text
 from app.services.tool_executor import _ensure_allowed_domain, execute_tool_call
 from app.utils.idempotency import generate_idempotency_key
@@ -950,6 +952,60 @@ async def run_rules_for_phase(
             condition = await evaluate_after_scenario_condition(db, rule, session_id=session_id)
         elif rule.condition_type == "semantic" and (not semantic_allowed or not rule.allow_semantic):
             condition = ConditionResult(matched=False, score=0.0, reason="semantic disabled by feature flag")
+        elif rule.condition_type == "semantic":
+            # Приоритет: OpenAI-эмбеддинги (cosine similarity, точнее и устойчивее к переформулировкам).
+            # Fallback на Jaccard если ключ тенанта не настроен или эмбеддинг упал.
+            cfg = rule.condition_config or {}
+            threshold = float(cfg.get("semantic_threshold", 0.75))
+            examples = cfg.get("examples")
+            intents = cfg.get("intents")
+            try:
+                from app.services.tenant_llm_config import get_decrypted_api_key
+                from app.services.semantic_matcher import semantic_match_text_embedded
+                openai_key = await get_decrypted_api_key(db, tenant_id)
+                if openai_key:
+                    result = await semantic_match_text_embedded(
+                        message,
+                        examples=examples if isinstance(examples, list) else None,
+                        intents=intents if isinstance(intents, list) else None,
+                        threshold=threshold,
+                        openai_api_key=openai_key,
+                        db=db,
+                        tenant_id=tenant_id,
+                        charge_source_id=str(rule.id),
+                    )
+                    matcher_used = "embedded"
+                else:
+                    fallback_threshold = float(cfg.get("semantic_threshold_jaccard", 0.4))
+                    result = semantic_match_text(
+                        message,
+                        intents=intents if isinstance(intents, list) else None,
+                        examples=examples if isinstance(examples, list) else None,
+                        threshold=fallback_threshold,
+                    )
+                    matcher_used = "jaccard_no_key"
+            except Exception as _sem_exc:  # noqa: BLE001
+                logger.warning(
+                    "semantic_embedded_matcher_failed_falling_back_to_jaccard",
+                    rule_id=str(rule.id), error=str(_sem_exc),
+                )
+                fallback_threshold = float(cfg.get("semantic_threshold_jaccard", 0.4))
+                result = semantic_match_text(
+                    message,
+                    intents=intents if isinstance(intents, list) else None,
+                    examples=examples if isinstance(examples, list) else None,
+                    threshold=fallback_threshold,
+                )
+                matcher_used = "jaccard_error_fallback"
+            details = {"threshold": threshold, "matcher": matcher_used}
+            if result.intent:
+                details["intent"] = result.intent
+            condition = ConditionResult(
+                matched=result.matched and rule.allow_semantic,
+                score=result.score,
+                reason=result.reason,
+                details=details,
+            )
         else:
             condition = evaluate_condition(rule, message=message, context=context_data)
         status = "skipped"
@@ -967,6 +1023,32 @@ async def run_rules_for_phase(
                         user=user,
                     )
                     context_data["should_pause"] = True
+                    # MVP: если у агента настроены уведомления менеджеру — отправить
+                    try:
+                        agent_obj = await db.get(Agent, agent_id)
+                        if agent_obj is not None and getattr(agent_obj, "admin_notification_enabled", False):
+                            last_client_msg = str(context_data.get("last_user_message") or "").strip() or None
+                            last_agent_msg = None
+                            if phase == "agent_message":
+                                last_agent_msg = str(message or "").strip() or None
+                            elif phase in ("client_message", "pre_run"):
+                                last_client_msg = last_client_msg or (str(message or "").strip() or None)
+                            await send_manager_pause_alert(
+                                bot_token=agent_obj.admin_notification_bot_token,
+                                chat_id=agent_obj.admin_notification_chat_id,
+                                agent_name=agent_obj.name,
+                                session_id=session_id,
+                                reason=f"правило «{rule.name}»",
+                                last_client_message=last_client_msg,
+                                last_agent_message=last_agent_msg,
+                            )
+                    except Exception as _alert_exc:  # noqa: BLE001
+                        logger.warning(
+                            "manager_pause_alert_dispatch_failed",
+                            agent_id=str(agent_id),
+                            rule_id=str(rule.id),
+                            error=str(_alert_exc),
+                        )
                 elif rule.behavior_after_execution == "augment_prompt":
                     instruction = str((rule.condition_config or {}).get("augment_prompt", "")).strip()
                     if instruction:

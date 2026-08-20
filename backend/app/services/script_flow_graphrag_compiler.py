@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from app.db.models.script_flow import ScriptFlow
 from app.db.models.script_flow_graph_community import ScriptFlowGraphCommunity
@@ -21,6 +22,68 @@ class ScriptFlowGraphRAGPayload:
     preview: ScriptFlowGraphPreview
 
 
+def _flow_topic_suffix(flow: ScriptFlow) -> str:
+    fd = flow.flow_definition if isinstance(flow.flow_definition, dict) else {}
+    nodes = fd.get("nodes") if isinstance(fd.get("nodes"), list) else []
+    for n in nodes or []:
+        if not isinstance(n, dict):
+            continue
+        data = n.get("data") if isinstance(n.get("data"), dict) else {}
+        node_type = str(n.get("type") or data.get("nodeType") or "").lower().strip()
+        if node_type != "trigger":
+            continue
+        kh: Any = data.get("keyword_hints")
+        if isinstance(kh, list):
+            kws = [str(k).strip() for k in kh if str(k).strip()]
+            if kws:
+                return ", ".join(kws[:2])
+    return (flow.name or "").strip()
+
+
+def _apply_topic_suffix(title: str | None, suffix: str) -> str:
+    base = (title or "").strip()
+    if not base:
+        return ""
+    if not suffix:
+        return base
+    return f"{base} · {suffix}"
+
+
+def _build_canvas_stage_map(flow: ScriptFlow) -> dict[str, str]:
+    fd = flow.flow_definition if isinstance(flow.flow_definition, dict) else {}
+    nodes = fd.get("nodes") if isinstance(fd.get("nodes"), list) else []
+    out: dict[str, str] = {}
+    for n in nodes or []:
+        if not isinstance(n, dict):
+            continue
+        nid = str(n.get("id") or "").strip()
+        data = n.get("data") if isinstance(n.get("data"), dict) else {}
+        stage = str(data.get("stage") or "").strip()
+        if nid and stage:
+            out[nid] = stage
+    return out
+
+
+def _enrich_properties_with_stage(
+    props: dict[str, Any] | None,
+    source_node_ids: list[str] | None,
+    stage_map: dict[str, str],
+) -> dict[str, Any]:
+    enriched = dict(props or {})
+    if not stage_map or not source_node_ids:
+        return enriched
+    seen: set[str] = set()
+    stages: list[str] = []
+    for sid in source_node_ids:
+        st = stage_map.get(str(sid))
+        if st and st not in seen:
+            seen.add(st)
+            stages.append(st)
+    if stages:
+        enriched["stage_hint"] = ", ".join(stages)
+    return enriched
+
+
 async def compile_script_flow_graphrag_payload(
     flow: ScriptFlow,
     *,
@@ -32,6 +95,7 @@ async def compile_script_flow_graphrag_payload(
     entities, relations, debug = await extractor.extract(
         flow_definition=flow.flow_definition if isinstance(flow.flow_definition, dict) else {},
         flow_metadata=flow.flow_metadata if isinstance(flow.flow_metadata, dict) else {},
+        flow_name=flow.name or None,
         openai_api_key=openai_api_key,
         model_name=extraction_model,
     )
@@ -43,6 +107,8 @@ async def compile_script_flow_graphrag_payload(
         model_name=summary_model,
     )
 
+    topic_suffix = _flow_topic_suffix(flow)
+    stage_map = _build_canvas_stage_map(flow)
     node_rows = [
         ScriptFlowGraphNode(
             tenant_id=flow.tenant_id,
@@ -52,10 +118,10 @@ async def compile_script_flow_graphrag_payload(
             graph_node_id=item.graph_node_id,
             node_kind=item.node_kind.value,
             entity_type=item.entity_type,
-            title=item.title,
+            title=_apply_topic_suffix(item.title, topic_suffix),
             description=item.description,
             source_node_ids=item.source_node_ids,
-            properties=item.properties,
+            properties=_enrich_properties_with_stage(item.properties, item.source_node_ids, stage_map),
             community_key=item.community_key,
         )
         for item in entities

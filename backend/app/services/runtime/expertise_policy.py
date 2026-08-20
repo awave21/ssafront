@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-def build_microsoft_graphrag_tool_description() -> str:
+def build_graphrag_tool_description() -> str:
     return (
         "Вызывай, когда нужно понять смысл запроса клиента: подобрать услугу, направление, категорию, специалиста, "
         "использовать знания клиники или уточнить запись до перехода к операционным действиям. "

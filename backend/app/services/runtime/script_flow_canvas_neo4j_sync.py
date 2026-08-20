@@ -14,7 +14,7 @@ from app.core.config import get_settings
 from app.db.models.script_flow import ScriptFlow
 from app.db.models.script_flow_edge_index import ScriptFlowEdgeIndex
 from app.db.models.script_flow_node_index import ScriptFlowNodeIndex
-from app.services.directory.service import create_embedding
+from app.services.directory.service import create_embeddings_batch
 from app.services.runtime.neo4j_client import get_neo4j_driver
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,7 +61,8 @@ def _write_canvas(
                 flow_id:   $flow_id,
                 node_id:   $node_id
             })
-            SET n.flow_version   = $flow_version,
+            SET n:Searchable,
+                n.flow_version   = $flow_version,
                 n.flow_name      = $flow_name,
                 n.node_type      = $node_type,
                 n.stage          = $stage,
@@ -123,22 +124,53 @@ async def sync_script_flow_canvas_to_neo4j(
     flow_id = str(flow.id)
     flow_version = int(flow.published_version or 0)
 
-    # Compute embeddings async before entering sync Neo4j transaction.
-    node_rows: list[dict[str, Any]] = []
-    for node in nodes:
-        text = (node.content_text or node.title or "").strip()
-        embedding: list[float] | None = None
-        if text and openai_api_key:
-            embedding = await create_embedding(
-                text,
-                openai_api_key=openai_api_key,
-                db=db,
-                tenant_id=flow.tenant_id,
-                charge_source_type="embedding.script_flow_canvas",
-                charge_source_id=f"{flow.id}:{node.node_id}",
-                charge_metadata={"agent_id": agent_id, "flow_id": flow_id},
-            )
-        node_rows.append({
+    # Build parent_title map: для каждой ноды находим её предка по NEXT_STEP_TO.
+    # Это даёт «context-aware embedding» — нода знает откуда она по сценарию.
+    title_by_node_id: dict[str, str] = {n.node_id: (n.title or "") for n in nodes}
+    parent_title_by_node_id: dict[str, str] = {}
+    for e in edges:
+        # source → target: parent для target — это source
+        src_title = title_by_node_id.get(e.source_node_id)
+        if src_title and e.target_node_id not in parent_title_by_node_id:
+            parent_title_by_node_id[e.target_node_id] = src_title
+
+    flow_name = flow.name or ""
+
+    def _build_enriched_text(node: ScriptFlowNodeIndex) -> str:
+        parts: list[str] = []
+        if flow_name:
+            parts.append(f"Поток: {flow_name}")
+        if node.stage:
+            parts.append(f"Этап: {node.stage}")
+        if node.node_type:
+            parts.append(f"Тип ноды: {node.node_type}")
+        parent_title = parent_title_by_node_id.get(node.node_id)
+        if parent_title:
+            parts.append(f"Предыдущий шаг: {parent_title}")
+        if node.title:
+            parts.append(f"Тема: {node.title}")
+        if node.content_text:
+            parts.append(node.content_text)
+        return "\n".join(parts).strip()
+
+    # Batch all canvas embeddings into one OpenAI request — теперь с обогащённым текстом.
+    embedding_texts = [_build_enriched_text(n) for n in nodes]
+    embeddings: list[list[float] | None] = (
+        await create_embeddings_batch(
+            embedding_texts,
+            openai_api_key=openai_api_key,
+            db=db,
+            tenant_id=flow.tenant_id,
+            charge_source_type="embedding.script_flow_canvas",
+            charge_source_id=str(flow.id),
+            charge_metadata={"agent_id": agent_id, "flow_id": flow_id},
+        )
+        if nodes and openai_api_key
+        else [None] * len(nodes)
+    )
+
+    node_rows: list[dict[str, Any]] = [
+        {
             "node_id": node.node_id,
             "node_type": node.node_type or "",
             "stage": node.stage or "",
@@ -147,8 +179,10 @@ async def sync_script_flow_canvas_to_neo4j(
             "service_ids": list(node.service_ids or []),
             "employee_ids": list(node.employee_ids or []),
             "is_searchable": bool(node.is_searchable),
-            "embedding": embedding,
-        })
+            "embedding": embeddings[i] if i < len(embeddings) else None,
+        }
+        for i, node in enumerate(nodes)
+    ]
 
     edge_rows: list[dict[str, Any]] = [
         {
@@ -162,7 +196,6 @@ async def sync_script_flow_canvas_to_neo4j(
     database = settings.neo4j_database or None
 
     def _write(tx: Any) -> None:
-        _ensure_vector_index(tx)
         _write_canvas(
             tx,
             tenant_id=tenant_id,

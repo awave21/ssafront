@@ -37,7 +37,17 @@
           </p>
         </div>
         <div class="space-y-1">
-          <label class="insp-label">Основной вопрос клиенту</label>
+          <label class="insp-label inline-flex items-center gap-2">
+            <span>Основной вопрос клиенту</span>
+            <FieldHelpIcons
+              field-key="question.good_question"
+              node-type="question"
+              :node-id="nodeId"
+              :current-node-data="currentNodeData"
+              :current-value="localGoodQuestion"
+              @ai-fill="(t: string) => applyAi('good_question', t)"
+            />
+          </label>
           <textarea
             v-model="localGoodQuestion"
             class="insp-input"
@@ -47,7 +57,16 @@
           />
         </div>
         <div class="space-y-1">
-          <label class="insp-label">Какой ответ ожидаем</label>
+          <label class="insp-label inline-flex items-center gap-2">
+            <span>Какой ответ ожидаем</span>
+            <FieldHelpIcons
+              field-key="question.expected_answer_type"
+              node-type="question"
+              :node-id="nodeId"
+              :current-node-data="currentNodeData"
+              :ai-enabled="false"
+            />
+          </label>
           <select
             v-model="localExpectedAnswerType"
             class="insp-input"
@@ -68,7 +87,17 @@
           </select>
         </div>
         <div class="space-y-1">
-          <label class="insp-label">Зачем задаем этот вопрос</label>
+          <label class="insp-label inline-flex items-center gap-2">
+            <span>Зачем задаем этот вопрос</span>
+            <FieldHelpIcons
+              field-key="question.why_we_ask"
+              node-type="question"
+              :node-id="nodeId"
+              :current-node-data="currentNodeData"
+              :current-value="localWhyWeAsk"
+              @ai-fill="(t: string) => applyAi('why_we_ask', t)"
+            />
+          </label>
           <textarea
             v-model="localWhyWeAsk"
             class="insp-input"
@@ -78,7 +107,17 @@
           />
         </div>
         <div class="space-y-1">
-          <label class="insp-label">Другие удачные формулировки</label>
+          <label class="insp-label inline-flex items-center gap-2">
+            <span>Другие удачные формулировки</span>
+            <FieldHelpIcons
+              field-key="question.alternative_phrasings"
+              node-type="question"
+              :node-id="nodeId"
+              :current-node-data="currentNodeData"
+              :current-value="localAlternativePhrasingsStr"
+              @ai-fill="(t: string) => applyAi('alternative_phrasings', t)"
+            />
+          </label>
           <textarea
             v-model="localAlternativePhrasingsStr"
             class="insp-input font-mono text-[11px]"
@@ -96,12 +135,14 @@
 </template>
 
 <script setup lang="ts">
-import { inject } from 'vue'
+import { computed, inject } from 'vue'
 import { SCRIPT_FLOW_INSPECTOR_KEY } from '~/composables/useScriptFlowInspectorModel'
 import InspectorContextFields from './InspectorContextFields.vue'
 import InspectorKgLinks from './InspectorKgLinks.vue'
+import FieldHelpIcons from './FieldHelpIcons.vue'
 
 const {
+  nodeId,
   localGoodQuestion,
   localWhyWeAsk,
   localAlternativePhrasingsStr,
@@ -117,5 +158,28 @@ const setAxisTab = (t: 'context' | 'content') => {
 
 const focusField = (k: string) => {
   lastFocusedField.value = k
+}
+
+const currentNodeData = computed(() => ({
+  good_question: localGoodQuestion.value,
+  why_we_ask: localWhyWeAsk.value,
+  alternative_phrasings: localAlternativePhrasingsStr.value
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean),
+  expected_answer_type: localExpectedAnswerType.value,
+}))
+
+const FIELD_REFS: Record<string, { value: string }> = {
+  good_question: localGoodQuestion,
+  why_we_ask: localWhyWeAsk,
+  alternative_phrasings: localAlternativePhrasingsStr,
+}
+
+const applyAi = (field: string, text: string) => {
+  const ref = FIELD_REFS[field]
+  if (!ref) return
+  ref.value = text
+  flushNode()
 }
 </script>

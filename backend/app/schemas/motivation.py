@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field
 
 
 class MotivationRuleResponse(BaseModel):
-    primary_pct: float = Field(description="% от выручки первичных визитов")
+    primary_pct_low: float = Field(description="% с первички при среднем чеке ниже нормы")
+    primary_pct_norm: float = Field(description="% с первички при нормальном среднем чеке")
+    primary_pct_high: float = Field(description="% с первички при высоком среднем чеке")
     repeat_pct_low: float = Field(description="% со вторички при среднем чеке ниже нормы")
     repeat_pct_norm: float = Field(description="% со вторички при нормальном среднем чеке")
     repeat_pct_high: float = Field(description="% со вторички при высоком среднем чеке")
@@ -18,7 +20,9 @@ class MotivationRuleResponse(BaseModel):
 
 
 class MotivationRuleUpdate(BaseModel):
-    primary_pct: float | None = None
+    primary_pct_low: float | None = None
+    primary_pct_norm: float | None = None
+    primary_pct_high: float | None = None
     repeat_pct_low: float | None = None
     repeat_pct_norm: float | None = None
     repeat_pct_high: float | None = None
@@ -57,6 +61,7 @@ class MotivationMember(BaseModel):
     total_avg_check: float = 0.0
 
     tier: MotivationTier = "norm"
+    applied_primary_pct: float = 0.0
     applied_repeat_pct: float = 0.0
 
     bonus_primary: float = 0.0
