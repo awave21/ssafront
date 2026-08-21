@@ -117,29 +117,79 @@
           </template>
         </template>
 
-        <!-- ═══ Проверка ═══ -->
-        <template v-else-if="activeTab === 'review'">
-          <div class="rounded-3xl border border-slate-100 bg-white p-5 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]">
-            <h3 class="text-sm font-semibold text-foreground">Проверка ответов агента</h3>
-            <p class="mt-1 text-xs text-muted-foreground">
-              Эксперт смотрит реальные ответы и отмечает «так можно / так нельзя» с исправлением.
-              Проверка живёт внутри навыка — выберите, по какому пройтись:
-            </p>
-            <div class="mt-3 space-y-2">
-              <NuxtLink
-                v-for="skill in publishedSkills"
-                :key="skill.id"
-                :to="`/agents/${agentId}/skills/${skill.id}/review`"
-                class="flex items-center gap-3 rounded-2xl border border-slate-100 px-4 py-3 transition-colors hover:bg-slate-50"
-              >
-                <GraduationCap class="h-4 w-4 shrink-0 text-primary" />
-                <span class="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{{ skill.name || 'Навык' }}</span>
-                <ChevronRight class="h-4 w-4 shrink-0 text-slate-300" />
-              </NuxtLink>
-              <p v-if="publishedSkills.length === 0" class="py-4 text-center text-sm text-slate-400">
-                Опубликованных навыков нет — проверять пока нечего
-              </p>
+        <!-- ═══ Навыки (список + вход в редактор и в проверку) ═══ -->
+        <template v-else-if="activeTab === 'skills'">
+          <div
+            v-if="skills.length === 0"
+            class="rounded-3xl border-2 border-dashed border-slate-100 bg-white p-12 text-center"
+          >
+            <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/5">
+              <GraduationCap class="h-8 w-8 text-primary/40" />
             </div>
+            <h3 class="text-lg font-bold text-slate-900">Навыков пока нет</h3>
+            <p class="mx-auto mt-2 max-w-md text-slate-500">
+              Навык — опыт эксперта по услуге: как вести пациента и какими словами.
+              Наполняется в чате с ассистентом.
+            </p>
+            <NuxtLink
+              :to="`/agents/${agentId}/skills`"
+              class="mt-5 inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Создать навык
+            </NuxtLink>
+          </div>
+
+          <div v-else class="space-y-2">
+            <div
+              v-for="skill in skills"
+              :key="skill.id"
+              class="group relative overflow-hidden rounded-3xl border border-slate-100 bg-white p-4 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] transition-shadow duration-500 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)]"
+            >
+              <div
+                class="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-primary/5 transition-transform duration-700 group-hover:scale-150"
+              />
+              <div class="relative flex flex-wrap items-center gap-3">
+                <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/5">
+                  <GraduationCap class="h-4 w-4 text-primary" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-semibold text-foreground">{{ skill.name || 'Навык' }}</p>
+                  <span
+                    class="mt-0.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                    :class="skill.status === 'published' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'"
+                  >
+                    <span
+                      class="h-1 w-1 rounded-full"
+                      :class="skill.status === 'published' ? 'bg-green-500' : 'bg-amber-500'"
+                    />
+                    {{ skill.status === 'published' ? 'опубликован — звучит в ответах' : 'черновик' }}
+                  </span>
+                </div>
+                <div class="flex shrink-0 gap-2">
+                  <NuxtLink
+                    :to="`/agents/${agentId}/skills/${skill.id}`"
+                    class="rounded-xl bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+                  >
+                    Наполнить
+                  </NuxtLink>
+                  <NuxtLink
+                    v-if="skill.status === 'published'"
+                    :to="`/agents/${agentId}/skills/${skill.id}/review`"
+                    class="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
+                  >
+                    Проверка ответов
+                  </NuxtLink>
+                </div>
+              </div>
+            </div>
+
+            <NuxtLink
+              :to="`/agents/${agentId}/skills`"
+              class="flex items-center justify-center gap-1.5 rounded-2xl border border-dashed border-slate-200 px-4 py-3 text-sm text-slate-500 transition-colors hover:bg-slate-50"
+            >
+              Все навыки, корзина и создание
+              <ChevronRight class="h-4 w-4" />
+            </NuxtLink>
           </div>
         </template>
 
@@ -246,7 +296,7 @@ const authHeaders = () => ({ Authorization: `Bearer ${token.value}` })
 
 const tabs = [
   { id: 'library', label: 'Библиотека' },
-  { id: 'review', label: 'Проверка' },
+  { id: 'skills', label: 'Навыки' },
   { id: 'log', label: 'Журнал' },
   { id: 'training', label: 'Обучение' },
 ] as const
@@ -276,8 +326,6 @@ const loadAll = async () => {
 }
 
 onMounted(loadAll)
-
-const publishedSkills = computed(() => skills.value.filter((s) => s.status === 'published'))
 
 const kindFilter = ref<string>('all')
 const kindChips = computed(() => {
