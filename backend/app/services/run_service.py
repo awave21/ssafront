@@ -40,7 +40,7 @@ from app.services.runtime.context_assembler import (
     select_optional_runtime_tool_categories,
 )
 from app.services.runtime.tool_registry import build_optional_runtime_tools
-from app.services.runtime.skill_layer import build_skill_layer_prompt
+from app.services.runtime.skill_layer import build_skill_layer_prompt, build_style_digest_prompt
 from app.services.runtime.scenario_runtime import apply_dialog_scenario_phases_before_llm
 from app.core.config import get_settings
 from app.services.logfire_cost_reconcile import schedule_logfire_cost_reconcile
@@ -793,6 +793,19 @@ async def execute_agent_run(
             base = (system_prompt_override or agent.system_prompt or "").rstrip()
             system_prompt_override = base + skill_addition
 
+    # Стиль-слой (голос эксперта): компактная выжимка из опубликованных навыков.
+    # Намеренно НЕ через system_prompt_override — сценарные pre-LLM фазы ниже
+    # пересобирают override от agent.system_prompt и затёрли бы добавку (ровно
+    # так молчал навык-слой). Передаётся отдельным параметром в orchestrator,
+    # который приклеивает блок ПОСЛЕ всех пересборок.
+    style_prompt_addition: str | None = None
+    if settings.runtime_style_layer_enabled:
+        try:
+            style_prompt_addition = await build_style_digest_prompt(db, agent_id=agent.id)
+        except Exception:  # noqa: BLE001
+            logger.exception("style_layer_build_failed", session_id=session_id)
+            style_prompt_addition = None
+
     # Same phases as inbound webhooks (webhooks_inbound_agent): dialog_start on first message
     # in session, then client_message / client_return. Test chat (/runs, WS) previously skipped
     # these and only ran agent_message after the model — so «Начало диалога» did not fire in UI.
@@ -833,6 +846,7 @@ async def execute_agent_run(
             openai_api_key=openai_api_key,
             anthropic_api_key=anthropic_api_key,
             system_prompt_override=system_prompt_override,
+            style_prompt_addition=style_prompt_addition,
             extra_tools=extra_runtime_tools or None,
         )
 

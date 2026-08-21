@@ -113,6 +113,7 @@ async def run_agent_with_tools(
     openai_api_key: str | None = None,
     anthropic_api_key: str | None = None,
     system_prompt_override: str | None = None,
+    style_prompt_addition: str | None = None,
     extra_tools: list[PydanticTool] | None = None,
 ) -> AgentRunResult:
     settings = get_settings()
@@ -218,12 +219,19 @@ async def run_agent_with_tools(
     )
     
     # Собираем агента с tools и toolsets.
-    # IMPORTANT: поведение и стиль должны задаваться ТОЛЬКО явным system_prompt
-    # пользователя (или system_prompt_override). Никаких скрытых auto-bridges.
+    # IMPORTANT: поведение задаётся явным system_prompt пользователя (или
+    # system_prompt_override) плюс ровно одной санкционированной добавкой —
+    # стиль-слоем (голос эксперта, style_prompt_addition). Он приклеивается
+    # именно здесь, ПОСЛЕ всех сценарных пересборок override, чтобы фазы
+    # before_llm его не затирали. Других скрытых auto-bridges быть не должно.
     enriched_system_prompt = (
         system_prompt_override if system_prompt_override is not None else agent.system_prompt
     )
     enriched_system_prompt = (enriched_system_prompt or "").strip()
+    if style_prompt_addition:
+        enriched_system_prompt = (
+            enriched_system_prompt + "\n\n" + style_prompt_addition.strip()
+        ).strip()
     agent_tz = getattr(agent, "timezone", None) or "UTC"
     enriched_system_prompt = _enrich_system_prompt_with_datetime(enriched_system_prompt, tz_name=agent_tz)
     pydantic_agent = _build_agent(

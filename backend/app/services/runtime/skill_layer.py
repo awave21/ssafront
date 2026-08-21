@@ -21,6 +21,7 @@ TODO(follow-up): пост-проверка вывода на дословнос�
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import UUID
 
@@ -264,3 +265,194 @@ async def build_skill_layer_prompt(
         skills=len(blocks),
     )
     return "\n\n" + "\n\n".join(blocks)
+
+
+# ── Стиль-слой (голос эксперта) ──────────────────────────────────────────────
+#
+# Отличие от навык-слоя выше: тот подгружает skill_doc ЦЕЛИКОМ (десятки тысяч
+# символов) и только когда услуга диалога определена resolve_clinic_facts —
+# поэтому молчит на первых репликах, где решается тон приветствия. Стиль-слой
+# наоборот: компактная выжимка (фразы «обязательно»/«дословно», запреты,
+# немного образцов) из ВСЕХ опубликованных навыков агента, в каждом запуске,
+# с первой реплики. Полный материал модель по-прежнему может достать сама
+# через тул use_expert_skill.
+
+# Бюджет выжимки в символах: ~1.4 тыс. токенов на запрос. Секции добавляются по
+# приоритету (обязательные → запреты → дословные → образцы → завершения), пока
+# влезают в бюджет; внутри секции фразы не режутся — либо целиком, либо никак.
+# Запреты идут сразу за обязательными: они короткие, а анти-паттерны тона
+# («давайте я вам всё расскажу») — половина претензий эксперта к модели.
+STYLE_DIGEST_MAX_CHARS = 5200
+
+# Образцов интонации («пример») в выжимке не больше стольки — few-shot после
+# 5-7 примеров не улучшается, а бюджет съедает.
+_STYLE_MAX_EXAMPLES = 8
+
+
+def _iter_skill_phrases(
+    skill_doc: dict[str, Any],
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]], list[str], list[str]]:
+    """Разобрать skill_doc на (обязательные, дословные, примеры, запреты, завершения)."""
+    musts: list[tuple[str, str]] = []
+    verbatims: list[tuple[str, str]] = []
+    examples: list[tuple[str, str]] = []
+    forbidden: list[str] = []
+    endings: list[str] = []
+    for o in skill_doc.get("objections") or []:
+        if not isinstance(o, dict):
+            continue
+        trigger = str(o.get("trigger_when") or o.get("situation") or "").strip()
+        for p in o.get("phrases") or []:
+            if not isinstance(p, dict):
+                continue
+            phrase = str(p.get("text") or "").strip()
+            if not phrase:
+                continue
+            level = str(p.get("level") or "").strip().lower()
+            if level == "обязательно":
+                musts.append((trigger, phrase))
+            elif level == "дословно":
+                verbatims.append((trigger, phrase))
+            else:
+                examples.append((trigger, phrase))
+        for f in o.get("forbidden") or []:
+            f_text = str(f).strip()
+            if f_text:
+                forbidden.append(f_text)
+    for e in skill_doc.get("endings") or []:
+        e_text = str(e).strip()
+        if e_text:
+            endings.append(e_text)
+    return musts, verbatims, examples, forbidden, endings
+
+
+def render_style_digest(docs: list[tuple[str, dict[str, Any]]]) -> str | None:
+    """Собрать компактный блок «голос эксперта» из опубликованных skill_doc.
+
+    None — когда стилевого материала нет вообще (агент без навыков).
+    """
+    musts: list[tuple[str, str]] = []
+    verbatims: list[tuple[str, str]] = []
+    examples: list[tuple[str, str]] = []
+    forbidden: list[str] = []
+    endings: list[str] = []
+    seen: set[str] = set()
+
+    def _add_unique(dst: list[tuple[str, str]], items: list[tuple[str, str]]) -> None:
+        for trigger, phrase in items:
+            key = phrase.strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                dst.append((trigger, phrase))
+
+    for _name, skill_doc in docs:
+        if not isinstance(skill_doc, dict):
+            continue
+        m, v, ex, fb, en = _iter_skill_phrases(skill_doc)
+        _add_unique(musts, m)
+        _add_unique(verbatims, v)
+        _add_unique(examples, ex)
+        for f in fb:
+            if f not in forbidden:
+                forbidden.append(f)
+        for e in en:
+            if e not in endings:
+                endings.append(e)
+
+    if not (musts or verbatims or examples):
+        return None
+
+    header = (
+        "## ГОЛОС ЭКСПЕРТА — стиль ответов\n"
+        "Это формулировки и манера живого эксперта клиники. Держись их во ВСЕХ ответах: "
+        "интонация, длина, обороты. Факты (цены, слоты, названия услуг) по-прежнему "
+        "бери только из инструментов — фразы ниже задают КАК говорить, а не ЧТО."
+    )
+
+    def _phrase_line(trigger: str, phrase: str) -> str:
+        return f"— {trigger}: «{phrase}»" if trigger else f"— «{phrase}»"
+
+    # Секции по приоритету; добавляем построчно, пока влезаем в бюджет.
+    sections: list[tuple[str, list[str]]] = []
+    if musts:
+        sections.append((
+            "Обязательные формулировки (используй практически дословно, когда ситуация совпала):",
+            [_phrase_line(t, p) for t, p in musts],
+        ))
+    if forbidden:
+        sections.append((
+            "Запрещено (никогда не пиши):",
+            [f"— {f}" for f in forbidden],
+        ))
+    if verbatims:
+        sections.append((
+            "Фирменные фразы эксперта (говори именно так):",
+            [_phrase_line(t, p) for t, p in verbatims],
+        ))
+    if examples:
+        sections.append((
+            "Образцы интонации (адаптируй под контекст, не копируй факты):",
+            [_phrase_line(t, p) for t, p in examples[:_STYLE_MAX_EXAMPLES]],
+        ))
+    # endings из skill_doc сознательно НЕ включаем: в реальных данных это
+    # протокольные описания исходов («администратор зафиксировал…»), а не фразы —
+    # модель приняла бы их за инструкции процесса.
+    lines: list[str] = [header]
+    used = len(header)
+    for title, items in sections:
+        block: list[str] = ["", title]
+        block_len = sum(len(s) + 1 for s in block)
+        added_any = False
+        for item in items:
+            if used + block_len + len(item) + 1 > STYLE_DIGEST_MAX_CHARS:
+                break
+            block.append(item)
+            block_len += len(item) + 1
+            added_any = True
+        if added_any:
+            lines.extend(block)
+            used += block_len
+
+    return "\n".join(lines).strip()
+
+
+async def build_style_digest_prompt(db: AsyncSession, *, agent_id: UUID) -> str | None:
+    """Загрузить опубликованные навыки агента и собрать стиль-выжимку, либо None."""
+    rows = (
+        await db.execute(
+            text(
+                """
+                SELECT name, skill_doc
+                FROM expert_skills
+                WHERE agent_id = :agent_id
+                  AND status = 'published'
+                  AND is_deleted = false
+                  AND skill_doc IS NOT NULL
+                ORDER BY updated_at DESC NULLS LAST
+                LIMIT 5
+                """
+            ),
+            {"agent_id": agent_id},
+        )
+    ).all()
+    docs: list[tuple[str, dict[str, Any]]] = []
+    for name, skill_doc in rows:
+        # asyncpg может отдать JSONB строкой — разбираем оба варианта.
+        if isinstance(skill_doc, str):
+            try:
+                skill_doc = json.loads(skill_doc)
+            except (TypeError, ValueError):
+                continue
+        if isinstance(skill_doc, dict):
+            docs.append((str(name or ""), skill_doc))
+    if not docs:
+        return None
+    digest = render_style_digest(docs)
+    if digest:
+        logger.info(
+            "style_layer_injected",
+            agent_id=str(agent_id),
+            skills=len(docs),
+            digest_chars=len(digest),
+        )
+    return digest
