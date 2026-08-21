@@ -103,7 +103,6 @@ const tabs = computed<TabDef[]>(() => {
       icon: GitBranch,
       match: [
         `/agents/${id}/scenarios`,
-        `/agents/${id}/scripts`,
       ],
     },
     {

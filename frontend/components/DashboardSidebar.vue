@@ -352,7 +352,6 @@ const agentMenuItems = [
   { id: 'knowledge', name: 'База знаний', icon: Database, path: (id: string) => `/agents/${id}/knowledge` },
   { id: 'knowledge-graph', name: 'Граф знаний', icon: GitBranch, path: (id: string) => `/agents/${id}/knowledge/graph`, group: 'dev' },
   { id: 'scenarios', name: 'Сценарии', icon: ListTree, path: (id: string) => `/agents/${id}/scenarios`, group: 'dev' },
-  { id: 'script-flows', name: 'Потоки эксперта', icon: GitBranch, path: (id: string) => `/agents/${id}/scripts` },
   { id: 'skills', name: 'Навыки', icon: GraduationCap, path: (id: string) => `/agents/${id}/skills` },
   { id: 'functions', name: 'Функции', icon: Code, path: (id: string) => `/agents/${id}/functions`, group: 'dev' },
   { id: 'webhook', name: 'Webhook', icon: Webhook, path: (id: string) => `/agents/${id}/webhook`, group: 'dev' },
