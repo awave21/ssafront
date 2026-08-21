@@ -641,6 +641,37 @@ def append_token_usage_steps(
 # Execute run (common logic for create_run, stream_run, webhooks, ws)
 # ---------------------------------------------------------------------------
 
+def _classify_tool_result(payload: Any) -> tuple[str, dict[str, Any] | None]:
+    """Чем закончился вызов рантайм-тула: success, empty или error.
+
+    Раньше в лог писалась константа "success" — все 211 вызовов в базе значились
+    успешными, и по логу нельзя было отличить сломавшийся инструмент от рабочего.
+    Настоящий признак лежит внутри ответа: рантайм-тулы кладут туда ключ error
+    (sqns) или status='no_match' (поиск по прямым вопросам).
+
+    «empty» — не ошибка: инструмент отработал, но ничего не нашёл. Отличать
+    полезно: пустой поиск лечится наполнением источника, ошибка — починкой.
+    """
+    if not isinstance(payload, dict):
+        return "success", None
+
+    error = payload.get("error")
+    if error:
+        return "error", {"error": str(error)[:300]}
+
+    status = str(payload.get("status") or "").strip().lower()
+    if status and status not in {"ok", "success"}:
+        return "empty", {"tool_status": status}
+
+    # Единственное содержательное поле — пустой список: так выглядит поиск слотов,
+    # не нашедший ни одного окна ({"availableTimeSlots": []}).
+    collections = [value for value in payload.values() if isinstance(value, list)]
+    if collections and all(not value for value in collections) and len(collections) == len(payload):
+        return "empty", None
+
+    return "success", None
+
+
 async def execute_agent_run(
     db: AsyncSession,
     *,
@@ -1087,6 +1118,8 @@ async def execute_agent_run(
         if not tool_name or tool_name in captured_names:
             continue
         args = item.get("args") or {}
+        tool_result = item.get("result")
+        call_status, call_error = _classify_tool_result(tool_result)
         tool_description = str(
             item.get("description") or item.get("when_to_call") or tool_name
         )
@@ -1099,13 +1132,13 @@ async def execute_agent_run(
                 tool_name=tool_name,
                 tool_description=tool_description,
                 tool_settings_url=f"/agents/{agent.id}",
-                status="success",
+                status=call_status,
                 invoked_at=datetime.now(timezone.utc),
                 duration_ms=None,
                 user_info=_to_json_object(user_info),
                 request_payload=_to_json_object(args) if args else None,
-                response_payload=_to_json_object(item.get("result")),
-                error_payload=None,
+                response_payload=_to_json_object(tool_result),
+                error_payload=_to_json_object(call_error),
             )
         )
 
