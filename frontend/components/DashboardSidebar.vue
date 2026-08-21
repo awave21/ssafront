@@ -352,7 +352,9 @@ const agentMenuItems = [
   { id: 'knowledge', name: 'База знаний', icon: Database, path: (id: string) => `/agents/${id}/knowledge` },
   { id: 'knowledge-graph', name: 'Граф знаний', icon: GitBranch, path: (id: string) => `/agents/${id}/knowledge/graph`, group: 'dev' },
   { id: 'scenarios', name: 'Сценарии', icon: ListTree, path: (id: string) => `/agents/${id}/scenarios`, group: 'dev' },
-  { id: 'skills', name: 'Навыки', icon: GraduationCap, path: (id: string) => `/agents/${id}/skills` },
+  // «Эксперт» — витрина стиля (библиотека фраз, проверка, журнал); сами навыки
+  // живут внутри как вкладка и по прежнему пути /skills.
+  { id: 'skills', name: 'Эксперт', icon: GraduationCap, path: (id: string) => `/agents/${id}/expert` },
   { id: 'functions', name: 'Функции', icon: Code, path: (id: string) => `/agents/${id}/functions`, group: 'dev' },
   { id: 'webhook', name: 'Webhook', icon: Webhook, path: (id: string) => `/agents/${id}/webhook`, group: 'dev' },
   { id: 'model', name: 'Модель', icon: Cpu, path: (id: string) => `/agents/${id}/model`, group: 'dev' },

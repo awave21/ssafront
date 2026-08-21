@@ -205,6 +205,96 @@ async def list_deleted_expert_skills(
     return [ExpertSkillRead.model_validate(r) for r in rows]
 
 
+@router.get("/expert-skills/style-library", response_model=dict)
+async def get_style_library(
+    agent_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> dict:
+    """Библиотека стиля: все фразы/запреты эксперта из опубликованных навыков
+    + какие из них реально попали в стиль-слой (звучат в каждом ответе).
+
+    Read-only витрина для раздела «Эксперт»: карточки собираются из skill_doc
+    на лету, отдельного хранилища у v1 нет.
+    """
+    from app.services.runtime.skill_layer import (
+        _iter_skill_phrases,
+        render_style_digest,
+    )
+
+    await get_agent_or_404(agent_id, db, user)
+    settings = get_settings()
+    stmt = (
+        select(ExpertSkill.name, ExpertSkill.skill_doc)
+        .where(
+            ExpertSkill.agent_id == agent_id,
+            ExpertSkill.tenant_id == user.tenant_id,
+            ExpertSkill.status == "published",
+            ExpertSkill.is_deleted.is_(False),
+            ExpertSkill.skill_doc.isnot(None),
+        )
+        .order_by(ExpertSkill.updated_at.desc())
+    )
+    rows = (await db.execute(stmt)).all()
+    docs: list[tuple[str, dict[str, Any]]] = []
+    for name, skill_doc in rows:
+        if isinstance(skill_doc, str):
+            try:
+                skill_doc = json.loads(skill_doc)
+            except (TypeError, ValueError):
+                continue
+        if isinstance(skill_doc, dict):
+            docs.append((str(name or ""), skill_doc))
+
+    digest = render_style_digest(docs) or ""
+    cards: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for skill_name, skill_doc in docs:
+        musts, verbatims, examples, forbidden, _endings = _iter_skill_phrases(skill_doc)
+        for kind, items in (
+            ("обязательно", musts),
+            ("дословно", verbatims),
+            ("пример", examples),
+        ):
+            for trigger, phrase in items:
+                key = phrase.strip().lower()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                cards.append({
+                    "kind": kind,
+                    "trigger": trigger,
+                    "text": phrase,
+                    "skill_name": skill_name,
+                    "in_style_layer": phrase in digest,
+                })
+        for f in forbidden:
+            key = ("forbid:" + f.strip().lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            cards.append({
+                "kind": "запрет",
+                "trigger": "",
+                "text": f,
+                "skill_name": skill_name,
+                "in_style_layer": f in digest,
+            })
+
+    counts: dict[str, int] = {}
+    for c in cards:
+        counts[c["kind"]] = counts.get(c["kind"], 0) + 1
+
+    return {
+        "style_layer_enabled": bool(settings.runtime_style_layer_enabled),
+        "skills_published": len(docs),
+        "digest_chars": len(digest),
+        "in_style_layer_count": sum(1 for c in cards if c["in_style_layer"]),
+        "counts": counts,
+        "cards": cards,
+    }
+
+
 @router.get("/expert-skills", response_model=list[ExpertSkillRead])
 async def list_expert_skills(
     agent_id: UUID,
