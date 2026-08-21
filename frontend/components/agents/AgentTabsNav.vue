@@ -83,7 +83,6 @@ const tabs = computed<TabDef[]>(() => {
       match: [
         `/agents/${id}/knowledge`,
         `/agents/${id}/skills`,
-        `/agents/${id}/expert`,
       ],
     },
     {

@@ -217,6 +217,7 @@ import {
   GitBranch,
   Award,
   Wrench,
+  Quote,
 } from 'lucide-vue-next'
 import {
   TooltipRoot,
@@ -352,9 +353,10 @@ const agentMenuItems = [
   { id: 'knowledge', name: 'База знаний', icon: Database, path: (id: string) => `/agents/${id}/knowledge` },
   { id: 'knowledge-graph', name: 'Граф знаний', icon: GitBranch, path: (id: string) => `/agents/${id}/knowledge/graph`, group: 'dev' },
   { id: 'scenarios', name: 'Сценарии', icon: ListTree, path: (id: string) => `/agents/${id}/scenarios`, group: 'dev' },
-  // «Эксперт» — витрина стиля (библиотека фраз, проверка, журнал); сами навыки
-  // живут внутри как вкладка и по прежнему пути /skills.
-  { id: 'skills', name: 'Эксперт', icon: GraduationCap, path: (id: string) => `/agents/${id}/expert` },
+  // «Эксперт» — витрина стиля (библиотека фраз, проверка, журнал). Отдельный
+  // раздел: к «Источникам знаний» отношения не имеет, навыки живут своим пунктом.
+  { id: 'expert', name: 'Эксперт', icon: Quote, path: (id: string) => `/agents/${id}/expert` },
+  { id: 'skills', name: 'Навыки', icon: GraduationCap, path: (id: string) => `/agents/${id}/skills` },
   { id: 'functions', name: 'Функции', icon: Code, path: (id: string) => `/agents/${id}/functions`, group: 'dev' },
   { id: 'webhook', name: 'Webhook', icon: Webhook, path: (id: string) => `/agents/${id}/webhook`, group: 'dev' },
   { id: 'model', name: 'Модель', icon: Cpu, path: (id: string) => `/agents/${id}/model`, group: 'dev' },

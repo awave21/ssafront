@@ -99,6 +99,16 @@ onUnmounted(() => {
 const route = useRoute()
 const agentId = computed(() => (route.params.id as string) || '')
 
+// Потоки эксперта живут на отдельной странице — тянем их счётчик, чтобы плитка была живой.
+const scriptFlowsApi = agentId.value ? useScriptFlows(agentId.value) : null
+const scriptFlowsCount = computed(() => scriptFlowsApi?.flows.value.length ?? 0)
+const publishedScriptFlows = computed(
+  () => (scriptFlowsApi?.flows.value ?? []).filter((f) => f.flow_status === 'published').length,
+)
+onMounted(() => {
+  scriptFlowsApi?.fetchFlows().catch(() => {})
+})
+
 const activeDirectQuestions = computed(() => props.directQuestions.filter((q) => q.is_enabled).length)
 const totalDirectoryItems = computed(() => props.directories.reduce((acc, d) => acc + (d.items_count ?? 0), 0))
 const totalTableItems = computed(() => props.tables.reduce((acc, d) => acc + (d.records_count ?? 0), 0))
@@ -167,6 +177,12 @@ const tiles = computed<KnowledgeTile[]>(() => [
     sub: `${indexedFiles.value} проиндексировано`,
     desc: 'Регламенты, подготовка к визиту, PDF и другие документы.',
   },
+  {
+    id: 'script_flows', kind: 'route', type: 'dialogue', title: 'Потоки эксперта', icon: GitBranch, accent: 'purple',
+    count: scriptFlowsCount.value,
+    sub: `${publishedScriptFlows.value} опубликовано`,
+    desc: 'Тактики, работа с возражениями и тон диалога на визуальной схеме.',
+  },
 ])
 
 type Section = {
@@ -193,6 +209,11 @@ const SECTION_META = [
     tagClass: 'bg-emerald-50 text-emerald-700', tagIcon: Quote, tagLabel: 'источник ответов',
     desc: 'Регламенты, правила и готовые ответы. Агент отвечает пациенту строго по этим материалам. Если ответа здесь нет — честно скажет, что уточнит у администратора.',
   },
+  {
+    type: 'dialogue', title: 'Сценарии и тактики', dot: 'bg-purple-500',
+    tagClass: 'bg-purple-50 text-purple-700', tagIcon: Lightbulb, tagLabel: 'ориентир, не истина',
+    desc: 'Манера общения: как объяснить процедуру, снять сомнение, ответить на «дорого». Здесь можно писать примеры фраз — но агент НЕ принимает их за истину и не цитирует дословно, а использует как ориентир.',
+  },
 ]
 
 const layout = computed<Section[]>(() => {
@@ -202,10 +223,14 @@ const layout = computed<Section[]>(() => {
       .filter((s) => s.tiles.length > 0)
   }
   // Классический вид: исходные 5 плиток одной сеткой, без заголовков (потоки — только в новом виде).
-  return [{ type: 'classic', tiles: tiles.value }]
+  return [{ type: 'classic', tiles: tiles.value.filter((t) => t.id !== 'script_flows') }]
 })
 
 const onTile = (tile: KnowledgeTile) => {
+  if (tile.kind === 'route') {
+    if (agentId.value) navigateTo(`/agents/${agentId.value}/scripts`)
+    return
+  }
   emit('select', tile.id)
 }
 </script>
