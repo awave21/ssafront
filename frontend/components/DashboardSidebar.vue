@@ -384,7 +384,9 @@ const currentMenuItems = computed<any[]>(() => {
   // включённом dev-mode — dev-разделы без дубля с верхней навигацией.
   // Функции/Сценарии/Webhook/Модель/API-ключи — уже в top-tabs, не дублируем.
   const DEV_IN_TOP_TABS = new Set(['functions', 'scenarios', 'webhook', 'model', 'api-keys'])
-  const ALWAYS_VISIBLE_IN_NEW = new Set(['chat'])
+  // «Эксперт» своей вкладки в top-tabs не имеет и к «Источникам знаний» не относится —
+  // поэтому виден в sidebar наравне с «Чатом».
+  const ALWAYS_VISIBLE_IN_NEW = new Set(['chat', 'expert'])
   const alwaysVisible = resolved.filter(i => ALWAYS_VISIBLE_IN_NEW.has((i as any).id))
   const dev = resolved.filter(
     i => (i as any).group === 'dev' && !DEV_IN_TOP_TABS.has((i as any).id),
