@@ -22,6 +22,7 @@
     </div>
 
     <div v-else-if="knowledgeSubTab === 'direct_questions'">
+      <QaMechanismHint current="direct_questions" />
       <DirectQuestionsList
         :questions="directQuestions"
         :loading="directQuestionsLoading"
@@ -40,6 +41,9 @@
     </div>
 
     <div v-else-if="knowledgeSubTab === 'directories'">
+      <!-- Подсказка только в списке справочников: внутри конкретного справочника
+           выбор механизма уже сделан и напоминание мешало бы работе с записями. -->
+      <QaMechanismHint v-if="!selectedDirectory" current="directories" />
       <div v-if="selectedDirectory">
         <DirectoryDetail
           :directory="selectedDirectory"
@@ -169,6 +173,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import KnowledgeDashboard from '~/components/knowledge/KnowledgeDashboard.vue'
+import QaMechanismHint from '~/components/knowledge/QaMechanismHint.vue'
 import { Database } from 'lucide-vue-next'
 import { navigateTo, useRoute, useRouter } from '#app'
 import AgentKnowledgeWorkspace from '~/components/agents/knowledge-workspace/AgentKnowledgeWorkspace.vue'
