@@ -56,14 +56,57 @@
         </div>
       </div>
 
-      <!-- Concept hint -->
-      <div class="flex items-start gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/50 px-4 py-3 text-sm text-indigo-900">
-        <Sparkles class="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
-        <p>
-          Навык — это <b>продолжение эксперта</b> на конкретную услугу: как вести пациента и какими
-          словами. Навык самостоятелен и не привязан к граф-потоку: наполняйте его в чате или импортируйте
-          из потока разово. Факты — цены, слоты, названия — агент всё равно берёт из инструментов.
-        </p>
+      <!-- Как создать навык -->
+      <div class="overflow-hidden rounded-2xl border border-indigo-100 bg-indigo-50/40">
+        <button
+          type="button"
+          class="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-indigo-900"
+          @click="showGuide = !showGuide"
+        >
+          <Sparkles class="h-4 w-4 shrink-0 text-indigo-500" />
+          <span class="flex-1">
+            <b>Навык — продолжение эксперта</b> на тему: как вести пациента и какими словами.
+            Создайте его в любой модели (ChatGPT, Claude…) и загрузите файлом.
+          </span>
+          <component :is="showGuide ? ChevronsDownUp : ChevronsUpDown" class="h-4 w-4 shrink-0 text-indigo-400" />
+        </button>
+
+        <div v-if="showGuide" class="border-t border-indigo-100 px-4 py-4">
+          <div class="grid gap-3 sm:grid-cols-3">
+            <div class="rounded-xl bg-white px-3 py-2.5">
+              <div class="text-[9px] font-black uppercase tracking-wider text-indigo-600">Шаг 1</div>
+              <p class="mt-1 text-xs text-slate-600">Скопируйте подсказку ниже, вставьте в любую модель вместе со своими примерами ответов.</p>
+            </div>
+            <div class="rounded-xl bg-white px-3 py-2.5">
+              <div class="text-[9px] font-black uppercase tracking-wider text-indigo-600">Шаг 2</div>
+              <p class="mt-1 text-xs text-slate-600">Модель вернёт текст навыка — сохраните его как файл <b>.md</b>.</p>
+            </div>
+            <div class="rounded-xl bg-white px-3 py-2.5">
+              <div class="text-[9px] font-black uppercase tracking-wider text-indigo-600">Шаг 3</div>
+              <p class="mt-1 text-xs text-slate-600">Нажмите <b>«Импорт .md»</b> вверху — навык появится черновиком, проверьте и опубликуйте.</p>
+            </div>
+          </div>
+
+          <div class="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <div class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-3 py-2">
+              <span class="text-[11px] font-bold text-slate-600">Подсказка для модели — скопируйте</span>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                @click="copyGuidePrompt"
+              >
+                <component :is="guideCopied ? Check : Copy" class="h-3.5 w-3.5" />
+                {{ guideCopied ? 'Скопировано' : 'Копировать' }}
+              </button>
+            </div>
+            <pre class="max-h-64 overflow-auto whitespace-pre-wrap px-3 py-3 text-[11px] leading-relaxed text-slate-700">{{ skillPrompt }}</pre>
+          </div>
+
+          <p class="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-700">
+            <ShieldAlert class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            Не вписывайте в навык точные цены, имена врачей и даты — они меняются, агент берёт их из системы. Навык — про манеру и порядок разговора.
+          </p>
+        </div>
       </div>
 
       <!-- Error -->
@@ -311,11 +354,16 @@ import { computed, onMounted, ref } from 'vue'
 import { navigateTo, useRoute } from '#app'
 import {
   AlertTriangle,
+  Check,
+  ChevronsDownUp,
+  ChevronsUpDown,
   CloudOff,
+  Copy,
   Loader2,
   Plus,
   RotateCcw,
   Search,
+  ShieldAlert,
   Sparkles,
   Stethoscope,
   Trash2,
@@ -352,6 +400,45 @@ const {
 } = useExpertSkills(agentId)
 const { fetchSqnsServicesCached } = useAgents()
 const { success: toastSuccess, error: toastError } = useToast()
+
+const showGuide = ref(false)
+const guideCopied = ref(false)
+
+const skillPrompt = `Ты помогаешь оформить НАВЫК общения для администратора клиники.
+Я дам примеры того, как я отвечаю пациентам. Собери из них навык в формате markdown.
+
+Структура файла:
+
+# Навык: <тема, например «Биоревитализация»>
+
+Контекст: <1–2 предложения — о каких услугах и запросах этот навык, чтобы система понимала, когда его подключать>
+
+## Ситуация: <короткое название>
+Когда срабатывает: <слова пациента, по которым видно эту ситуацию>
+Как отвечаю:
+- <фраза 1 — как я реально говорю>
+- <фраза 2>
+Избегать: <обороты, которых тут быть не должно>
+
+(повтори блок «## Ситуация» для каждой типовой ситуации: приветствие, вопрос о цене, возражение «дорого», страх процедуры, «я подумаю», запись)
+
+Правила:
+- Пиши моими словами, живо, как в примерах. Не выдумывай «фирменных» фраз, которых я не говорила.
+- НЕ вставляй точные цены, имена врачей и даты — вместо них пиши «актуально из системы». Эти факты подставит платформа.
+- Один вопрос в одном сообщении. Коротко, тепло, по делу.
+
+Мои примеры:
+<вставьте сюда свои ответы пациентам>`
+
+const copyGuidePrompt = async () => {
+  try {
+    await navigator.clipboard.writeText(skillPrompt)
+    guideCopied.value = true
+    setTimeout(() => { guideCopied.value = false }, 2000)
+  } catch {
+    toastError('Не удалось скопировать — выделите текст вручную')
+  }
+}
 
 const creating = ref(false)
 const publishingId = ref<string | null>(null)
