@@ -288,6 +288,17 @@ STYLE_DIGEST_MAX_CHARS = 5200
 # 5-7 примеров не улучшается, а бюджет съедает.
 _STYLE_MAX_EXAMPLES = 8
 
+# У навыков «не про эту услугу» берём только несколько ключевых фраз: иначе
+# обязательные реплики одной услуги начинают звучать в разговоре про другую.
+# Обрезаем ТОЛЬКО когда услуга диалога известна: пока она не определилась
+# (первые реплики), сузить нечего — режем по общему бюджету.
+_MAX_OTHER_SKILL_PHRASES = 3
+
+# Потолок секции запретов. Запреты общие и короткие, поэтому при нескольких
+# навыках их набираются сотни — без потолка они вытесняют из бюджета сами фразы
+# (проверено на живых данных: 99 строк запретов и 3 фразы).
+_MAX_FORBIDDEN_LINES = 20
+
 
 def _iter_skill_phrases(
     skill_doc: dict[str, Any],
@@ -326,82 +337,152 @@ def _iter_skill_phrases(
     return musts, verbatims, examples, forbidden, endings
 
 
-def render_style_digest(docs: list[tuple[str, dict[str, Any]]]) -> str | None:
+def render_style_digest(
+    docs: list[tuple[str, dict[str, Any]]],
+    *,
+    active_skill_names: set[str] | None = None,
+) -> str | None:
     """Собрать компактный блок «голос эксперта» из опубликованных skill_doc.
+
+    `active_skill_names` — навыки услуги, о которой идёт речь прямо сейчас (по
+    resolve_clinic_facts). Их фразы идут первыми и целиком; у остальных берём
+    несколько ключевых, чтобы обязательные реплики одной услуги не подменяли
+    другую. Запреты тона общие: они не привязаны к услуге и действуют всегда.
 
     None — когда стилевого материала нет вообще (агент без навыков).
     """
-    musts: list[tuple[str, str]] = []
-    verbatims: list[tuple[str, str]] = []
-    examples: list[tuple[str, str]] = []
-    forbidden: list[str] = []
-    endings: list[str] = []
-    seen: set[str] = set()
-
-    def _add_unique(dst: list[tuple[str, str]], items: list[tuple[str, str]]) -> None:
-        for trigger, phrase in items:
-            key = phrase.strip().lower()
-            if key and key not in seen:
-                seen.add(key)
-                dst.append((trigger, phrase))
-
-    for _name, skill_doc in docs:
+    active = active_skill_names or set()
+    parsed: list[dict[str, Any]] = []
+    for name, skill_doc in docs:
         if not isinstance(skill_doc, dict):
             continue
-        m, v, ex, fb, en = _iter_skill_phrases(skill_doc)
-        _add_unique(musts, m)
-        _add_unique(verbatims, v)
-        _add_unique(examples, ex)
-        for f in fb:
-            if f not in forbidden:
-                forbidden.append(f)
-        for e in en:
-            if e not in endings:
-                endings.append(e)
-
-    if not (musts or verbatims or examples):
+        musts, verbatims, examples, forbidden, _endings = _iter_skill_phrases(skill_doc)
+        parsed.append({
+            "name": str(name or ""),
+            "musts": musts,
+            "verbatims": verbatims,
+            "examples": examples,
+            "forbidden": forbidden,
+            "active": str(name or "") in active,
+        })
+    if not parsed:
         return None
 
-    header = (
-        "## ГОЛОС ЭКСПЕРТА — стиль ответов\n"
+    # Активные навыки — первыми: их фразы важнее и должны выигрывать бюджет.
+    parsed.sort(key=lambda sk: not sk["active"])
+    multi = len(parsed) > 1
+    # Сужать выдачу есть смысл, только когда услуга диалога определена.
+    narrowing = multi and any(sk["active"] for sk in parsed)
+
+    seen: set[str] = set()
+
+    def _lines(kind: str, *, only: str = "all") -> list[str]:
+        """Строки секции: only='active' | 'other' | 'all'. Активные — первыми, с дедупом."""
+        out: list[str] = []
+        for sk in parsed:
+            if only == "active" and not sk["active"]:
+                continue
+            if only == "other" and sk["active"]:
+                continue
+            items = sk[kind]
+            if narrowing and not sk["active"]:
+                items = items[:_MAX_OTHER_SKILL_PHRASES]
+            for trigger, phrase in items:
+                key = phrase.strip().lower()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                scope = f"[{sk['name']}] " if multi else ""
+                out.append(f"— {scope}{trigger}: «{phrase}»" if trigger else f"— {scope}«{phrase}»")
+        return out
+
+    # Когда услуга известна — фразы её навыка идут первой секцией целиком, и только
+    # потом обязательные реплики прочих тем. Иначе чужая «обязательная» вытесняла бы
+    # из бюджета фразы того навыка, о котором идёт разговор.
+    active_lines = (_lines("musts", only="active") + _lines("verbatims", only="active")) if narrowing else []
+    other_lines = (_lines("musts", only="other") + _lines("verbatims", only="other")) if narrowing else []
+    musts_lines = [] if narrowing else _lines("musts")
+    verbatim_lines = [] if narrowing else _lines("verbatims")
+    # Образцы интонации — только у навыков услуги, о которой идёт речь: они
+    # длинные, а вне своей темы бесполезны. Если услуга ещё не определилась —
+    # берём образцы первого навыка, чтобы тон был задан с первой реплики.
+    example_sources = [sk for sk in parsed if sk["active"]] or parsed[: (1 if multi else len(parsed))]
+    example_lines: list[str] = []
+    for sk in example_sources:
+        for trigger, phrase in sk["examples"][:_STYLE_MAX_EXAMPLES]:
+            key = phrase.strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            scope = f"[{sk['name']}] " if multi else ""
+            example_lines.append(
+                f"— {scope}{trigger}: «{phrase}»" if trigger else f"— {scope}«{phrase}»"
+            )
+
+    forbidden_lines: list[str] = []
+    seen_forbidden: set[str] = set()
+    for sk in parsed:
+        for f in sk["forbidden"]:
+            key = f.strip().lower()
+            if key and key not in seen_forbidden:
+                seen_forbidden.add(key)
+                forbidden_lines.append(f"— {f}")
+
+    if not (musts_lines or verbatim_lines or active_lines or other_lines or example_lines):
+        return None
+
+    header = [
+        "## ГОЛОС ЭКСПЕРТА — стиль ответов",
         "Это формулировки и манера живого эксперта клиники. Держись их во ВСЕХ ответах: "
         "интонация, длина, обороты. Факты (цены, слоты, названия услуг) по-прежнему "
-        "бери только из инструментов — фразы ниже задают КАК говорить, а не ЧТО."
-    )
+        "бери только из инструментов — фразы ниже задают КАК говорить, а не ЧТО.",
+    ]
+    if multi:
+        header.append(
+            "В квадратных скобках — тема, к которой относится фраза: применяй её, "
+            "только когда разговор именно об этой теме."
+        )
+        active_names = [sk["name"] for sk in parsed if sk["active"]]
+        if active_names:
+            header.append("Сейчас разговор про: " + ", ".join(active_names) + ".")
+    header_text = "\n".join(header)
 
-    def _phrase_line(trigger: str, phrase: str) -> str:
-        return f"— {trigger}: «{phrase}»" if trigger else f"— «{phrase}»"
-
-    # Секции по приоритету; добавляем построчно, пока влезаем в бюджет.
     sections: list[tuple[str, list[str]]] = []
-    if musts:
+    # Запреты идут первыми: они короткие (потолок _MAX_FORBIDDEN_LINES), универсальны
+    # для всех тем и несут комплаенс — их нельзя вытеснять длинными фразами услуги.
+    if forbidden_lines:
+        sections.append(("Запрещено (никогда не пиши):", forbidden_lines[:_MAX_FORBIDDEN_LINES]))
+    if active_lines:
+        sections.append((
+            "Фразы эксперта по текущей теме (используй практически дословно):",
+            active_lines,
+        ))
+    if musts_lines:
         sections.append((
             "Обязательные формулировки (используй практически дословно, когда ситуация совпала):",
-            [_phrase_line(t, p) for t, p in musts],
+            musts_lines,
         ))
-    if forbidden:
+    if other_lines:
         sections.append((
-            "Запрещено (никогда не пиши):",
-            [f"— {f}" for f in forbidden],
+            "Фразы по другим темам (только если разговор перейдёт на них):",
+            other_lines,
         ))
-    if verbatims:
-        sections.append((
-            "Фирменные фразы эксперта (говори именно так):",
-            [_phrase_line(t, p) for t, p in verbatims],
-        ))
-    if examples:
+    if verbatim_lines:
+        sections.append(("Фирменные фразы эксперта (говори именно так):", verbatim_lines))
+    if example_lines:
         sections.append((
             "Образцы интонации (адаптируй под контекст, не копируй факты):",
-            [_phrase_line(t, p) for t, p in examples[:_STYLE_MAX_EXAMPLES]],
+            example_lines,
         ))
     # endings из skill_doc сознательно НЕ включаем: в реальных данных это
     # протокольные описания исходов («администратор зафиксировал…»), а не фразы —
     # модель приняла бы их за инструкции процесса.
-    lines: list[str] = [header]
-    used = len(header)
+
+    lines: list[str] = [header_text]
+    used = len(header_text)
     for title, items in sections:
         block: list[str] = ["", title]
-        block_len = sum(len(s) + 1 for s in block)
+        block_len = sum(len(x) + 1 for x in block)
         added_any = False
         for item in items:
             if used + block_len + len(item) + 1 > STYLE_DIGEST_MAX_CHARS:
@@ -416,43 +497,78 @@ def render_style_digest(docs: list[tuple[str, dict[str, Any]]]) -> str | None:
     return "\n".join(lines).strip()
 
 
-async def build_style_digest_prompt(db: AsyncSession, *, agent_id: UUID) -> str | None:
-    """Загрузить опубликованные навыки агента и собрать стиль-выжимку, либо None."""
+async def build_style_digest_prompt(
+    db: AsyncSession, *, agent_id: UUID, session_id: str | None = None
+) -> str | None:
+    """Загрузить опубликованные навыки агента и собрать стиль-выжимку, либо None.
+
+    Если известен session_id — определяем услугу диалога (по resolve_clinic_facts)
+    и помечаем навыки этой услуги активными: их фразы идут первыми и целиком.
+    """
     rows = (
         await db.execute(
             text(
                 """
-                SELECT name, skill_doc
+                SELECT name, skill_doc, service_external_ids
                 FROM expert_skills
                 WHERE agent_id = :agent_id
                   AND status = 'published'
                   AND is_deleted = false
                   AND skill_doc IS NOT NULL
                 ORDER BY updated_at DESC NULLS LAST
-                LIMIT 5
+                LIMIT 12
                 """
             ),
             {"agent_id": agent_id},
         )
     ).all()
     docs: list[tuple[str, dict[str, Any]]] = []
-    for name, skill_doc in rows:
+    service_ids_by_skill: dict[str, set[str]] = {}
+    for name, skill_doc, service_ids in rows:
         # asyncpg может отдать JSONB строкой — разбираем оба варианта.
         if isinstance(skill_doc, str):
             try:
                 skill_doc = json.loads(skill_doc)
             except (TypeError, ValueError):
                 continue
-        if isinstance(skill_doc, dict):
-            docs.append((str(name or ""), skill_doc))
+        if not isinstance(skill_doc, dict):
+            continue
+        skill_name = str(name or "")
+        docs.append((skill_name, skill_doc))
+        if isinstance(service_ids, str):
+            try:
+                service_ids = json.loads(service_ids)
+            except (TypeError, ValueError):
+                service_ids = []
+        service_ids_by_skill[skill_name] = {
+            str(x) for x in (service_ids or []) if str(x).strip()
+        }
     if not docs:
         return None
-    digest = render_style_digest(docs)
+
+    active_names: set[str] = set()
+    if session_id and len(docs) > 1:
+        try:
+            active_service_ids = set(
+                await find_active_service_ids(db, agent_id=agent_id, session_id=session_id)
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("style_layer_active_service_lookup_failed", agent_id=str(agent_id))
+            active_service_ids = set()
+        if active_service_ids:
+            active_names = {
+                name
+                for name, ids in service_ids_by_skill.items()
+                if ids & active_service_ids
+            }
+
+    digest = render_style_digest(docs, active_skill_names=active_names)
     if digest:
         logger.info(
             "style_layer_injected",
             agent_id=str(agent_id),
             skills=len(docs),
+            active_skills=sorted(active_names),
             digest_chars=len(digest),
         )
     return digest

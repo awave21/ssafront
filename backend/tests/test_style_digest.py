@@ -46,16 +46,20 @@ def test_levels_route_to_sections():
     assert "«Примерная фраза»" in out
 
 
-def test_forbidden_comes_right_after_musts():
+def test_forbidden_go_first_and_are_capped():
+    """Запреты короткие, универсальные и несут комплаенс — идут первой секцией
+    с потолком, чтобы длинные фразы услуги их не вытесняли (проверено на живых
+    данных: без потолка 99 строк запретов оставляли 3 строки фраз)."""
     doc = _doc(objections=[_obj(
         phrases=[
             {"text": "Обязательная", "level": "обязательно"},
             {"text": "Дословная", "level": "дословно"},
         ],
-        forbidden=["как скажете"],
+        forbidden=[f"запрет {i}" for i in range(40)],
     )])
     out = render_style_digest([("Навык", doc)])
-    assert out.find("Обязательные формулировки") < out.find("Запрещено") < out.find("Фирменные фразы")
+    assert out.find("Запрещено") < out.find("Обязательные формулировки") < out.find("Фирменные фразы")
+    assert sum(1 for i in range(40) if f"запрет {i}" in out) == 20
 
 
 def test_phrases_deduplicated_across_docs():
@@ -127,3 +131,74 @@ def test_header_keeps_facts_boundary():
     doc = _doc(objections=[_obj(phrases=[{"text": "Фраза", "level": "пример"}])])
     out = render_style_digest([("Навык", doc)])
     assert "только из инструментов" in out
+
+
+# ── Разделение по услугам: фразы «не про эту услугу» не должны вытеснять нужные ──
+
+
+def _skill(name, musts=(), examples=(), forbidden=()):
+    phrases = [{"text": t, "level": "обязательно"} for t in musts]
+    phrases += [{"text": t, "level": "пример"} for t in examples]
+    return (name, _doc(objections=[_obj(trigger=f"тема {name}", phrases=phrases, forbidden=list(forbidden))]))
+
+
+def test_single_skill_has_no_scope_prefix():
+    out = render_style_digest([_skill("Мезотерапия", musts=["Фраза"])])
+    assert "[Мезотерапия]" not in out
+    assert "«Фраза»" in out
+
+
+def test_multiple_skills_get_scope_prefix():
+    docs = [_skill("Мезотерапия", musts=["Фраза М"]), _skill("Ботулотоксин", musts=["Фраза Б"])]
+    out = render_style_digest(docs)
+    assert "[Мезотерапия]" in out
+    assert "[Ботулотоксин]" in out
+    assert "тема, к которой относится фраза" in out
+
+
+def test_active_skill_comes_first_and_is_announced():
+    docs = [_skill("Мезотерапия", musts=["Фраза М"]), _skill("Ботулотоксин", musts=["Фраза Б"])]
+    out = render_style_digest(docs, active_skill_names={"Ботулотоксин"})
+    assert "Сейчас разговор про: Ботулотоксин." in out
+    assert out.find("Фраза Б") < out.find("Фраза М")
+
+
+def test_inactive_skills_are_trimmed():
+    many = [f"Обязательная {i}" for i in range(10)]
+    docs = [
+        _skill("Активный", musts=["Активная фраза"]),
+        _skill("Прочий", musts=many),
+    ]
+    out = render_style_digest(docs, active_skill_names={"Активный"})
+    kept = sum(1 for m in many if m in out)
+    assert kept == 3, f"у неактивного навыка должно остаться 3 фразы, осталось {kept}"
+    assert "Активная фраза" in out
+
+
+def test_forbidden_stay_global_across_skills():
+    docs = [
+        _skill("Активный", musts=["Ф"], forbidden=["запрет активного"]),
+        _skill("Прочий", musts=["Ф2"], forbidden=["запрет прочего"]),
+    ]
+    out = render_style_digest(docs, active_skill_names={"Активный"})
+    assert "запрет активного" in out
+    assert "запрет прочего" in out, "запреты тона не привязаны к услуге — нужны всегда"
+
+
+def test_examples_only_from_active_skill():
+    docs = [
+        _skill("Активный", musts=["Ф"], examples=["образец активного"]),
+        _skill("Прочий", musts=["Ф2"], examples=["образец прочего"]),
+    ]
+    out = render_style_digest(docs, active_skill_names={"Активный"})
+    assert "образец активного" in out
+    assert "образец прочего" not in out
+
+
+def test_examples_fallback_when_no_active_skill():
+    docs = [
+        _skill("Первый", musts=["Ф"], examples=["образец первого"]),
+        _skill("Второй", musts=["Ф2"], examples=["образец второго"]),
+    ]
+    out = render_style_digest(docs)
+    assert "образец первого" in out, "без определённой услуги тон задаёт первый навык"

@@ -801,7 +801,9 @@ async def execute_agent_run(
     style_prompt_addition: str | None = None
     if settings.runtime_style_layer_enabled:
         try:
-            style_prompt_addition = await build_style_digest_prompt(db, agent_id=agent.id)
+            style_prompt_addition = await build_style_digest_prompt(
+                db, agent_id=agent.id, session_id=session_id
+            )
         except Exception:  # noqa: BLE001
             logger.exception("style_layer_build_failed", session_id=session_id)
             style_prompt_addition = None

@@ -220,18 +220,13 @@ async def run_agent_with_tools(
     
     # Собираем агента с tools и toolsets.
     # IMPORTANT: поведение задаётся явным system_prompt пользователя (или
-    # system_prompt_override) плюс ровно одной санкционированной добавкой —
-    # стиль-слоем (голос эксперта, style_prompt_addition). Он приклеивается
-    # именно здесь, ПОСЛЕ всех сценарных пересборок override, чтобы фазы
-    # before_llm его не затирали. Других скрытых auto-bridges быть не должно.
+    # system_prompt_override). Никаких скрытых auto-bridges внутри этой строки:
+    # платформенный стиль-слой подаётся отдельно — штатными runtime instructions
+    # на вызове run() (см. ниже), а не склейкой в тот же текст.
     enriched_system_prompt = (
         system_prompt_override if system_prompt_override is not None else agent.system_prompt
     )
     enriched_system_prompt = (enriched_system_prompt or "").strip()
-    if style_prompt_addition:
-        enriched_system_prompt = (
-            enriched_system_prompt + "\n\n" + style_prompt_addition.strip()
-        ).strip()
     agent_tz = getattr(agent, "timezone", None) or "UTC"
     enriched_system_prompt = _enrich_system_prompt_with_datetime(enriched_system_prompt, tz_name=agent_tz)
     pydantic_agent = _build_agent(
@@ -376,6 +371,11 @@ async def run_agent_with_tools(
         result = await pydantic_agent.run(
             input_message,
             message_history=message_history,
+            # Runtime instructions (PydanticAI): добавка к инструкциям на конкретный
+            # запуск. Так платформенный стиль-слой не смешивается со строкой промпта
+            # пользователя и не может быть затёрт сценарными фазами; фреймворк сам
+            # дописывает его после статических инструкций и переоценивает каждый run.
+            instructions=(style_prompt_addition.strip() or None) if style_prompt_addition else None,
             usage_limits=UsageLimits(
                 tool_calls_limit=effective_tool_calls_limit,
                 request_limit=effective_request_limit,
