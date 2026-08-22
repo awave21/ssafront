@@ -105,6 +105,78 @@ async def find_active_service_ids(
     return []
 
 
+# Ключи привязки навыка к теме — это внешние идентификаторы (услуги, товара,
+# тарифа, чего угодно в конкретном бизнесе). Ищем их в результатах тулов по
+# полям, чьи имена выглядят как идентификаторы: так связка не зависит ни от
+# домена, ни от имени конкретного инструмента.
+_ID_FIELD_HINTS = ("id", "code", "key", "sku", "external", "ref")
+
+# сколько последних tool-вызовов сессии просматривать в поисках темы разговора
+_ACTIVE_TOPIC_LOOKBACK = 12
+
+
+def _collect_id_like_values(payload: Any) -> set[str]:
+    """Скалярные значения из полей, похожих на идентификаторы (рекурсивно)."""
+    found: set[str] = set()
+
+    def walk(node: Any, field_name: str = "") -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                walk(value, str(key))
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, field_name)
+        elif node is not None and not isinstance(node, bool):
+            name = field_name.lower()
+            if any(h in name for h in _ID_FIELD_HINTS):
+                text = str(node).strip()
+                if text:
+                    found.add(text)
+
+    walk(payload)
+    return found
+
+
+async def find_active_topic_keys(
+    db: AsyncSession, *, agent_id: UUID, session_id: str, keys: set[str]
+) -> set[str]:
+    """Какие ключи привязки навыков встречаются в свежих результатах ЛЮБЫХ тулов.
+
+    Домен-агностично: не знает ни про клинику, ни про SQNS, ни про имя
+    конкретного инструмента. Навык объявляет свои ключи (service_external_ids),
+    рантайм смотрит, упоминал ли их хоть один инструмент в этой сессии. Для
+    агента любой сферы достаточно, чтобы его инструменты возвращали id темы.
+    """
+    if not keys:
+        return set()
+    rows = (
+        await db.execute(
+            text(
+                """
+                SELECT tcl.response_payload
+                FROM tool_call_logs tcl
+                JOIN runs r ON r.id = tcl.run_id
+                WHERE r.agent_id = :aid
+                  AND r.session_id = :sid
+                  AND tcl.response_payload IS NOT NULL
+                ORDER BY tcl.invoked_at DESC
+                LIMIT :lim
+                """
+            ),
+            {"aid": agent_id, "sid": session_id, "lim": _ACTIVE_TOPIC_LOOKBACK},
+        )
+    ).fetchall()
+    found: set[str] = set()
+    for (payload,) in rows:
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (TypeError, ValueError):
+                continue
+        found |= _collect_id_like_values(payload) & keys
+    return found
+
+
 async def load_skill_docs_for_services(
     db: AsyncSession, *, agent_id: UUID, service_external_ids: list[str]
 ) -> list[tuple[str, dict[str, Any]]]:
@@ -502,8 +574,10 @@ async def build_style_digest_prompt(
 ) -> str | None:
     """Загрузить опубликованные навыки агента и собрать стиль-выжимку, либо None.
 
-    Если известен session_id — определяем услугу диалога (по resolve_clinic_facts)
-    и помечаем навыки этой услуги активными: их фразы идут первыми и целиком.
+    Если известен session_id — определяем тему разговора: ищем ключи привязки
+    навыков в результатах любых инструментов сессии (find_active_topic_keys) и
+    помечаем совпавшие навыки активными — их фразы идут первыми и целиком.
+    Механизм домен-агностичен: ни имени инструмента, ни сферы бизнеса не знает.
     """
     rows = (
         await db.execute(
@@ -548,18 +622,19 @@ async def build_style_digest_prompt(
 
     active_names: set[str] = set()
     if session_id and len(docs) > 1:
+        all_keys: set[str] = set()
+        for ids in service_ids_by_skill.values():
+            all_keys |= ids
         try:
-            active_service_ids = set(
-                await find_active_service_ids(db, agent_id=agent_id, session_id=session_id)
+            active_keys = await find_active_topic_keys(
+                db, agent_id=agent_id, session_id=session_id, keys=all_keys
             )
         except Exception:  # noqa: BLE001
-            logger.warning("style_layer_active_service_lookup_failed", agent_id=str(agent_id))
-            active_service_ids = set()
-        if active_service_ids:
+            logger.warning("style_layer_topic_lookup_failed", agent_id=str(agent_id))
+            active_keys = set()
+        if active_keys:
             active_names = {
-                name
-                for name, ids in service_ids_by_skill.items()
-                if ids & active_service_ids
+                name for name, ids in service_ids_by_skill.items() if ids & active_keys
             }
 
     digest = render_style_digest(docs, active_skill_names=active_names)
