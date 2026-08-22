@@ -136,7 +136,6 @@ export const useLayoutState = () => {
   // переключился на классический вид, останется в нём, а новый пользователь
   // и тот, кто ни разу не трогал тумблер, увидят новый интерфейс.
   const knowledgeDashboardActive = useState<boolean>('kb-dashboard-active', () => false)
-  const newInterface = useState<boolean>('new-interface', () => true)
 
   const resetKnowledgeGraphHeaderState = () => {
     knowledgeGraphRebuildAction.value = null
@@ -197,6 +196,5 @@ export const useLayoutState = () => {
     knowledgeGraphRebuildLabel,
     resetKnowledgeGraphHeaderState,
     knowledgeDashboardActive,
-    newInterface,
   }
 }

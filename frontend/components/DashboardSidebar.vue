@@ -243,22 +243,11 @@ const route = useRoute()
 const router = useRouter()
 
 // Use shared layout state
-const { isCollapsed, newInterface } = useLayoutState()
+const { isCollapsed } = useLayoutState()
 const { hasScope } = usePermissions()
 
-// Режим разработчика: прячет технические разделы за тумблером (доступен только в «Новом интерфейсе»).
+// Режим разработчика: прячет технические разделы за тумблером.
 const devMode = useLocalStorage('agent-sidebar-dev-mode', false)
-
-// Persist глобального режима «Новый интерфейс». Сайдбар смонтирован всегда, поэтому храним здесь.
-onMounted(() => {
-  if (import.meta.client) {
-    const saved = localStorage.getItem('new-interface')
-    if (saved === 'true' || saved === 'false') newInterface.value = saved === 'true'
-  }
-})
-watch(newInterface, (v) => {
-  if (import.meta.client) localStorage.setItem('new-interface', String(v))
-})
 
 const emit = defineEmits<{
   close: []
@@ -376,9 +365,7 @@ const currentMenuItems = computed<any[]>(() => {
   const resolved = agentMenuItems
     .filter(item => !('requiresScope' in item && item.requiresScope) || hasScope((item as any).requiresScope))
     .map(item => ({ ...item, path: item.path(agentId) }))
-  // Классический вид: плоский список всех разделов (как раньше на проде).
-  if (!newInterface.value) return resolved
-  // Новый интерфейс: разделы агента вынесены в горизонтальные вкладки (AgentTabsNav).
+  // Разделы агента вынесены в горизонтальные вкладки (AgentTabsNav).
   // В sidebar видны только «базовые» пункты, которые не имеют отдельной вкладки —
   // сейчас это «Чат» (тестовый чат агента). Плюс тумблер «Режим разработчика», а при
   // включённом dev-mode — dev-разделы без дубля с верхней навигацией.

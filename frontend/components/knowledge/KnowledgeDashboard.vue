@@ -87,7 +87,7 @@ const emit = defineEmits<{
 // «Новый интерфейс» — глобальный режим (общий стейт). Кнопка-переключатель живёт в топбаре;
 // persist самого режима — в сайдбаре (он смонтирован всегда). Здесь только сообщаем топбару,
 // что открыт дашборд знаний (чтобы показать кнопку), и читаем режим для раскладки.
-const { knowledgeDashboardActive, newInterface } = useLayoutState()
+const { knowledgeDashboardActive } = useLayoutState()
 
 onMounted(() => {
   knowledgeDashboardActive.value = true
@@ -216,15 +216,11 @@ const SECTION_META = [
   },
 ]
 
-const layout = computed<Section[]>(() => {
-  if (newInterface.value) {
-    return SECTION_META
-      .map((s) => ({ ...s, tiles: tiles.value.filter((t) => t.type === s.type) }))
-      .filter((s) => s.tiles.length > 0)
-  }
-  // Классический вид: исходные 5 плиток одной сеткой, без заголовков (потоки — только в новом виде).
-  return [{ type: 'classic', tiles: tiles.value.filter((t) => t.id !== 'script_flows') }]
-})
+const layout = computed<Section[]>(() =>
+  SECTION_META
+    .map((s) => ({ ...s, tiles: tiles.value.filter((t) => t.type === s.type) }))
+    .filter((s) => s.tiles.length > 0),
+)
 
 const onTile = (tile: KnowledgeTile) => {
   if (tile.kind === 'route') {
