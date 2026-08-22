@@ -166,28 +166,34 @@ import hashlib as _hashlib
 _SKILL_TOPIC_EMBED_CACHE: dict[str, list[float]] = {}
 _SKILL_TOPIC_CACHE_MAX = 512
 
-# Порог косинусной близости сообщения к теме навыка. Подобран под
-# text-embedding-3-small (у directory-порогов тот же ориентир ~0.35–0.45).
-# Ниже порога тема считается неопределённой — общий режим стиля.
-_SEMANTIC_TOPIC_THRESHOLD = 0.38
+# Порог косинусной близости к БЛИЖАЙШЕМУ триггеру навыка (макс-пулинг).
+# Откалиброван на живых навыках FACE CLINIC (text-embedding-3-small):
+# верные темы дают 0.53–0.77 («биоревитализацию» 0.77, «ботокс от морщин» 0.59,
+# «мезотерапия волос» 0.69), неоднозначное «уколы красоты» 0.31 (оба инъекционные)
+# и шум («дорого», «где находитесь») — ниже. 0.45 отделяет уверенную тему от
+# неоднозначной. Ниже порога — общий режим стиля.
+_SEMANTIC_TOPIC_THRESHOLD = 0.45
 # Насколько близко к лидеру должен быть навык, чтобы тоже считаться активным
 # (несколько тем одновременно, напр. «биоревитализация и мезотерапия — что лучше»).
-_SEMANTIC_TIE_GAP = 0.04
+_SEMANTIC_TIE_GAP = 0.06
 
 
-def _skill_topic_text(skill_name: str, skill_doc: dict[str, Any]) -> str:
-    """Текст, представляющий ТЕМУ навыка для эмбеддинга: имя + контекст + триггеры.
-    Это то, с чем семантически сравнивается сообщение клиента."""
-    parts: list[str] = [str(skill_name or "")]
-    context = str(skill_doc.get("context") or "").strip()
-    if context:
-        parts.append(context)
+def _skill_topic_units(skill_name: str, skill_doc: dict[str, Any]) -> list[str]:
+    """Отдельные «единицы темы» навыка для эмбеддинга: имя и каждый триггер по
+    отдельности. Сравнение идёт по МАКСИМУМУ близости к единице, а не к одному
+    усреднённому блобу — иначе короткая реплика тонет среди десятка чужих
+    триггеров (замер: блоб 0.36 против макс-триггер 0.77 на «хочу биоревитализацию»).
+    Контекст-абзац как единицу НЕ берём: он длинный и generic, только разбавляет."""
+    units: list[str] = []
+    name = str(skill_name or "").strip()
+    if name:
+        units.append(name)
     for o in (skill_doc.get("objections") or []):
         if isinstance(o, dict):
             trg = str(o.get("trigger_when") or o.get("situation") or "").strip()
             if trg:
-                parts.append(trg)
-    return "\n".join(p for p in parts if p).strip()
+                units.append(trg)
+    return units
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -235,24 +241,25 @@ async def find_active_skills_semantic(
     for name, doc in docs:
         if not isinstance(doc, dict):
             continue
-        topic = _skill_topic_text(name, doc)
-        if not topic:
-            continue
-        key = _hashlib.sha1(topic.encode("utf-8")).hexdigest()
-        vec = _SKILL_TOPIC_EMBED_CACHE.get(key)
-        if vec is None:
-            vec = await create_embedding(
-                topic,
-                openai_api_key=openai_api_key,
-                db=db,
-                tenant_id=tenant_id,
-                charge_source_type="embedding.skill_topic_doc",
-            )
-            if not vec:
-                continue
-            if len(_SKILL_TOPIC_EMBED_CACHE) < _SKILL_TOPIC_CACHE_MAX:
-                _SKILL_TOPIC_EMBED_CACHE[key] = vec
-        scored.append((_cosine(msg_vec, vec), name))
+        best_unit = 0.0
+        for unit in _skill_topic_units(name, doc):
+            key = _hashlib.sha1(unit.encode("utf-8")).hexdigest()
+            vec = _SKILL_TOPIC_EMBED_CACHE.get(key)
+            if vec is None:
+                vec = await create_embedding(
+                    unit,
+                    openai_api_key=openai_api_key,
+                    db=db,
+                    tenant_id=tenant_id,
+                    charge_source_type="embedding.skill_topic_doc",
+                )
+                if not vec:
+                    continue
+                if len(_SKILL_TOPIC_EMBED_CACHE) < _SKILL_TOPIC_CACHE_MAX:
+                    _SKILL_TOPIC_EMBED_CACHE[key] = vec
+            best_unit = max(best_unit, _cosine(msg_vec, vec))
+        if best_unit > 0.0:
+            scored.append((best_unit, name))
 
     if not scored:
         return None
