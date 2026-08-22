@@ -105,76 +105,78 @@ async def find_active_service_ids(
     return []
 
 
-# Ключи привязки навыка к теме — это внешние идентификаторы (услуги, товара,
-# тарифа, чего угодно в конкретном бизнесе). Ищем их в результатах тулов по
-# полям, чьи имена выглядят как идентификаторы: так связка не зависит ни от
-# домена, ни от имени конкретного инструмента.
-_ID_FIELD_HINTS = ("id", "code", "key", "sku", "external", "ref")
+# Тема разговора определяется по ТЕКСТУ навыка, без идентификаторов и без
+# зависимости от инструментов: у навыка есть имя, контекст и триггеры — реальные
+# формулировки клиентов («Клиент спрашивает про биоревитализацию: "У вас есть…"»).
+# Их и сопоставляем с сообщением. Работает с первой реплики, до любого тула, и
+# одинаково для клиники, автосалона или юрфирмы — материал пишет эксперт, а не код.
 
-# сколько последних tool-вызовов сессии просматривать в поисках темы разговора
-_ACTIVE_TOPIC_LOOKBACK = 12
-
-
-def _collect_id_like_values(payload: Any) -> set[str]:
-    """Скалярные значения из полей, похожих на идентификаторы (рекурсивно)."""
-    found: set[str] = set()
-
-    def walk(node: Any, field_name: str = "") -> None:
-        if isinstance(node, dict):
-            for key, value in node.items():
-                walk(value, str(key))
-        elif isinstance(node, list):
-            for item in node:
-                walk(item, field_name)
-        elif node is not None and not isinstance(node, bool):
-            name = field_name.lower()
-            if any(h in name for h in _ID_FIELD_HINTS):
-                text = str(node).strip()
-                if text:
-                    found.add(text)
-
-    walk(payload)
-    return found
+# Короткие слова выкидываем: «есть», «хочу», «как» темы не различают.
+_MIN_TOKEN_LEN = 5
+# Грубая нормализация русской морфологии: сравниваем по началу слова, чтобы
+# «биоревитализацию» и «биоревитализация» считались одним словом.
+_STEM_LEN = 6
+# Вес совпадения: имя навыка — самый сильный сигнал, контекст — самый слабый.
+_WEIGHT_NAME = 3
+_WEIGHT_TRIGGER = 2
+_WEIGHT_CONTEXT = 1
+# Минимальный балл, ниже которого тема считается неопределённой (общий режим).
+_MIN_TOPIC_SCORE = 3
 
 
-async def find_active_topic_keys(
-    db: AsyncSession, *, agent_id: UUID, session_id: str, keys: set[str]
+def _stems(text: str) -> set[str]:
+    """Значимые слова текста, огрублённые до основы."""
+    out: set[str] = set()
+    word = []
+    for ch in str(text or "").lower():
+        if ch.isalpha() or ch.isdigit():
+            word.append(ch)
+        else:
+            if len(word) >= _MIN_TOKEN_LEN:
+                out.add("".join(word[:_STEM_LEN]))
+            word = []
+    if len(word) >= _MIN_TOKEN_LEN:
+        out.add("".join(word[:_STEM_LEN]))
+    return out
+
+
+def score_skill_match(message: str, skill_name: str, skill_doc: dict[str, Any]) -> int:
+    """Насколько навык относится к сообщению клиента. 0 — не относится."""
+    msg = _stems(message)
+    if not msg:
+        return 0
+    name_stems = _stems(skill_name)
+    trigger_stems: set[str] = set()
+    for o in (skill_doc.get("objections") or []):
+        if isinstance(o, dict):
+            trigger_stems |= _stems(o.get("trigger_when") or o.get("situation") or "")
+    context_stems = _stems(skill_doc.get("context") or "")
+
+    score = 0
+    score += _WEIGHT_NAME * len(msg & name_stems)
+    score += _WEIGHT_TRIGGER * len(msg & (trigger_stems - name_stems))
+    score += _WEIGHT_CONTEXT * len(msg & (context_stems - name_stems - trigger_stems))
+    return score
+
+
+def find_active_skills_by_message(
+    message: str, docs: list[tuple[str, dict[str, Any]]]
 ) -> set[str]:
-    """Какие ключи привязки навыков встречаются в свежих результатах ЛЮБЫХ тулов.
+    """Навыки, к которым относится сообщение клиента. Пусто — тема не ясна.
 
-    Домен-агностично: не знает ни про клинику, ни про SQNS, ни про имя
-    конкретного инструмента. Навык объявляет свои ключи (service_external_ids),
-    рантайм смотрит, упоминал ли их хоть один инструмент в этой сессии. Для
-    агента любой сферы достаточно, чтобы его инструменты возвращали id темы.
+    Берём только лидеров: навык с максимальным баллом и те, кто набрал столько же.
+    Если лидера нет (балл ниже порога) — сужать нечего, работает общий режим.
     """
-    if not keys:
+    scored = [
+        (score_skill_match(message, name, doc), name)
+        for name, doc in docs
+        if isinstance(doc, dict)
+    ]
+    scored = [(sc, name) for sc, name in scored if sc >= _MIN_TOPIC_SCORE]
+    if not scored:
         return set()
-    rows = (
-        await db.execute(
-            text(
-                """
-                SELECT tcl.response_payload
-                FROM tool_call_logs tcl
-                JOIN runs r ON r.id = tcl.run_id
-                WHERE r.agent_id = :aid
-                  AND r.session_id = :sid
-                  AND tcl.response_payload IS NOT NULL
-                ORDER BY tcl.invoked_at DESC
-                LIMIT :lim
-                """
-            ),
-            {"aid": agent_id, "sid": session_id, "lim": _ACTIVE_TOPIC_LOOKBACK},
-        )
-    ).fetchall()
-    found: set[str] = set()
-    for (payload,) in rows:
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except (TypeError, ValueError):
-                continue
-        found |= _collect_id_like_values(payload) & keys
-    return found
+    best = max(sc for sc, _ in scored)
+    return {name for sc, name in scored if sc == best}
 
 
 async def load_skill_docs_for_services(
@@ -570,20 +572,20 @@ def render_style_digest(
 
 
 async def build_style_digest_prompt(
-    db: AsyncSession, *, agent_id: UUID, session_id: str | None = None
+    db: AsyncSession, *, agent_id: UUID, input_message: str | None = None
 ) -> str | None:
     """Загрузить опубликованные навыки агента и собрать стиль-выжимку, либо None.
 
-    Если известен session_id — определяем тему разговора: ищем ключи привязки
-    навыков в результатах любых инструментов сессии (find_active_topic_keys) и
-    помечаем совпавшие навыки активными — их фразы идут первыми и целиком.
-    Механизм домен-агностичен: ни имени инструмента, ни сферы бизнеса не знает.
+    Тему разговора определяем по сообщению клиента и ТЕКСТУ навыков (имя,
+    контекст, триггеры) — без идентификаторов, без обращения к инструментам и
+    без знания сферы бизнеса. Совпавшие навыки активны: их фразы идут первыми
+    и целиком. Тема не ясна (приветствие, общий вопрос) — общий режим.
     """
     rows = (
         await db.execute(
             text(
                 """
-                SELECT name, skill_doc, service_external_ids
+                SELECT name, skill_doc
                 FROM expert_skills
                 WHERE agent_id = :agent_id
                   AND status = 'published'
@@ -597,8 +599,7 @@ async def build_style_digest_prompt(
         )
     ).all()
     docs: list[tuple[str, dict[str, Any]]] = []
-    service_ids_by_skill: dict[str, set[str]] = {}
-    for name, skill_doc, service_ids in rows:
+    for name, skill_doc in rows:
         # asyncpg может отдать JSONB строкой — разбираем оба варианта.
         if isinstance(skill_doc, str):
             try:
@@ -607,35 +608,13 @@ async def build_style_digest_prompt(
                 continue
         if not isinstance(skill_doc, dict):
             continue
-        skill_name = str(name or "")
-        docs.append((skill_name, skill_doc))
-        if isinstance(service_ids, str):
-            try:
-                service_ids = json.loads(service_ids)
-            except (TypeError, ValueError):
-                service_ids = []
-        service_ids_by_skill[skill_name] = {
-            str(x) for x in (service_ids or []) if str(x).strip()
-        }
+        docs.append((str(name or ""), skill_doc))
     if not docs:
         return None
 
     active_names: set[str] = set()
-    if session_id and len(docs) > 1:
-        all_keys: set[str] = set()
-        for ids in service_ids_by_skill.values():
-            all_keys |= ids
-        try:
-            active_keys = await find_active_topic_keys(
-                db, agent_id=agent_id, session_id=session_id, keys=all_keys
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning("style_layer_topic_lookup_failed", agent_id=str(agent_id))
-            active_keys = set()
-        if active_keys:
-            active_names = {
-                name for name, ids in service_ids_by_skill.items() if ids & active_keys
-            }
+    if input_message and len(docs) > 1:
+        active_names = find_active_skills_by_message(input_message, docs)
 
     digest = render_style_digest(docs, active_skill_names=active_names)
     if digest:
