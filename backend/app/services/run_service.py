@@ -805,6 +805,7 @@ async def execute_agent_run(
                 db,
                 agent_id=agent.id,
                 input_message=input_message,
+                message_history=message_history,
                 openai_api_key=openai_api_key,
                 tenant_id=agent.tenant_id,
             )

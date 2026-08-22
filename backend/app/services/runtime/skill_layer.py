@@ -681,11 +681,36 @@ def render_style_digest(
     return "\n".join(lines).strip()
 
 
+def _recent_user_texts(message_history: list[Any] | None, limit: int = 3) -> list[str]:
+    """Последние реплики клиента из истории — для «саммари разговора».
+
+    Тему определяем не по одному последнему сообщению, а по смыслу нескольких
+    последних реплик клиента: на «дорого, подумаю» тема названа раньше, на
+    непрямом «освежить кожу» контекст тоже в предыдущих ходах. Достаём текст
+    user-частей (UserPromptPart у pydantic-ai, либо role=user у dict)."""
+    if not message_history:
+        return []
+    out: list[str] = []
+    for msg in message_history:
+        parts = getattr(msg, "parts", None)
+        if parts is None and isinstance(msg, dict):
+            parts = msg.get("parts")
+        for p in parts or []:
+            kind = getattr(p, "part_kind", None) or (p.get("part_kind") if isinstance(p, dict) else None)
+            if kind != "user-prompt":
+                continue
+            content = getattr(p, "content", None) or (p.get("content") if isinstance(p, dict) else None)
+            if isinstance(content, str) and content.strip():
+                out.append(content.strip())
+    return out[-limit:]
+
+
 async def build_style_digest_prompt(
     db: AsyncSession,
     *,
     agent_id: UUID,
     input_message: str | None = None,
+    message_history: list[Any] | None = None,
     openai_api_key: str | None = None,
     tenant_id: Any = None,
 ) -> str | None:
@@ -731,11 +756,16 @@ async def build_style_digest_prompt(
 
     active_names: set[str] = set()
     topic_method = "none"
-    if input_message and len(docs) > 1:
+    # Запрос для матчинга — «саммари разговора»: последние реплики клиента + текущая.
+    # Так тема ловится и по непрямой реплике, если названа в предыдущих ходах.
+    topic_query = "\n".join(
+        _recent_user_texts(message_history, limit=3) + ([input_message] if input_message else [])
+    ).strip() or (input_message or "")
+    if topic_query and len(docs) > 1:
         semantic: set[str] | None = None
         try:
             semantic = await find_active_skills_semantic(
-                input_message, docs,
+                topic_query, docs,
                 openai_api_key=openai_api_key, db=db, tenant_id=tenant_id,
             )
         except Exception:  # noqa: BLE001
@@ -745,7 +775,7 @@ async def build_style_digest_prompt(
             active_names = semantic          # эмбеддинги отработали (пусто = тема не ясна)
             topic_method = "semantic"
         else:
-            active_names = find_active_skills_by_message(input_message, docs)  # откат
+            active_names = find_active_skills_by_message(topic_query, docs)  # откат
             topic_method = "lexical"
 
     digest = render_style_digest(docs, active_skill_names=active_names)
