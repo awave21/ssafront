@@ -353,6 +353,43 @@ async def create_expert_skill(
     return ExpertSkillRead.model_validate(skill)
 
 
+import re as _re
+
+
+def _parse_markdown_header(md: str) -> tuple[str | None, str | None]:
+    """Достать из .md заголовок навыка и описание, если автор их указал явно.
+
+    Возвращает (name, context). Ищем «# Навык: X» / «# X» как имя и строку
+    «Контекст: …» (возможно многострочную до пустой строки) как описание. Так
+    описание живыми словами клиента, написанное экспертом или внешней моделью,
+    не переписывается нашим дистиллятором — а именно по нему навык находится.
+    """
+    name: str | None = None
+    context: str | None = None
+    lines = md.splitlines()
+    for ln in lines[:8]:
+        m = _re.match(r"^\s*#\s*(?:навык[:\s-]+)?(.+?)\s*$", ln, _re.IGNORECASE)
+        if m and m.group(1).strip():
+            name = m.group(1).strip()
+            break
+    ctx_lines: list[str] = []
+    capturing = False
+    for ln in lines:
+        m = _re.match(r"^\s*(?:контекст|описание)[:\s-]+(.*)$", ln, _re.IGNORECASE)
+        if m:
+            capturing = True
+            if m.group(1).strip():
+                ctx_lines.append(m.group(1).strip())
+            continue
+        if capturing:
+            if not ln.strip() or ln.lstrip().startswith("#"):
+                break
+            ctx_lines.append(ln.strip())
+    if ctx_lines:
+        context = " ".join(ctx_lines).strip()
+    return name, context
+
+
 @router.post("/expert-skills/import-markdown", response_model=ExpertSkillRead, status_code=status.HTTP_201_CREATED)
 async def import_expert_skill_from_markdown(
     agent_id: UUID,
@@ -371,11 +408,16 @@ async def import_expert_skill_from_markdown(
     if not text_md:
         raise _api_error("empty_markdown", "Файл пустой — нечего импортировать.", status.HTTP_422_UNPROCESSABLE_ENTITY)
 
+    # Заголовок и описание из файла имеют приоритет: описание — «маячок» выбора
+    # навыка, и слова клиента в нём знает автор, а не наш дистиллятор.
+    file_name, file_context = _parse_markdown_header(text_md)
+    skill_name = file_name or body.name
+
     skill_doc: dict[str, Any] | None = None
     api_key = await get_decrypted_api_key(db, user.tenant_id)
     if api_key:
         try:
-            raw = await distill_skill(text_md, body.name, openai_api_key=api_key, model=body.model)
+            raw = await distill_skill(text_md, skill_name, openai_api_key=api_key, model=body.model)
             skill_doc = _sanitize_skill_doc(raw) if isinstance(raw, dict) else None
         except Exception:  # noqa: BLE001
             logger.exception("skill_import_markdown_distill_failed", agent_id=str(agent_id))
@@ -383,11 +425,15 @@ async def import_expert_skill_from_markdown(
     else:
         raise _api_error("no_llm_key", "Не настроен ключ модели у тенанта — импорт недоступен.", status.HTTP_400_BAD_REQUEST)
 
+    # Описание из файла (если автор указал «Контекст: …») не даём переписать.
+    if skill_doc is not None and file_context:
+        skill_doc["context"] = file_context
+
     skill = ExpertSkill(
         id=uuid4(),
         tenant_id=user.tenant_id,
         agent_id=agent_id,
-        name=body.name,
+        name=skill_name,
         service_external_ids=[],
         skill_doc=skill_doc,
         status="draft",
