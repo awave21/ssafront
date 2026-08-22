@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
-import { Menu, Check, Play, Trash2, Copy, ChevronRight, Sparkles } from 'lucide-vue-next'
+import { Menu, Check, Play, Trash2, Copy, ChevronRight } from 'lucide-vue-next'
 import { navigateTo } from '#app'
 import { useRoute } from 'vue-router'
 import DashboardSidebar from '~/components/DashboardSidebar.vue'
@@ -36,12 +36,8 @@ const {
     knowledgeGraphRefreshBusy,
     knowledgeGraphRebuildLabel,
     knowledgeDashboardActive,
-    newInterface,
 } = useLayoutState()
 
-const toggleKnowledgeView = () => {
-  newInterface.value = !newInterface.value
-}
 // Кнопка-переключатель «Новый интерфейс» видна на всех страницах выбранного агента.
 const route = useRoute()
 const isAgentDetail = computed(() => (route.name?.toString() || '').startsWith('agents-id'))
@@ -124,6 +120,17 @@ onMounted(() => {
       <!-- TopBar скрывается в fullscreen режиме -->
       <DashboardTopBar v-if="!isPromptFullscreen && !isEditorFullscreen">
         <template #left>
+          <!-- Бургер живёт слева, рядом с кнопкой сворачивания сайдбара. Раньше
+               он был в правом слоте и на планшете оказывался в самом углу,
+               среди кнопок действий, — читалось как «ещё одно действие». -->
+          <button
+            class="lg:hidden -ml-1 shrink-0 rounded-lg p-2 text-foreground hover:bg-muted"
+            aria-label="Открыть меню"
+            @click="isMobileSidebarOpen = true"
+          >
+            <Menu class="w-5 h-5" />
+          </button>
+
           <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
             <nav
               v-if="layoutBreadcrumbSegments?.length"
@@ -164,25 +171,6 @@ onMounted(() => {
           </div>
         </template>
         <template #right>
-          <!-- Кнопка мобильного меню (только на планшете/мобиле) -->
-          <button
-            class="lg:hidden p-2 rounded-lg text-foreground hover:bg-muted"
-            @click="isMobileSidebarOpen = true"
-          >
-            <Menu class="w-5 h-5" />
-          </button>
-
-          <!-- Переключатель вида «База знаний»: новый интерфейс / классический -->
-          <button
-            v-if="isAgentDetail"
-            type="button"
-            :aria-pressed="newInterface"
-            class="mr-1 inline-flex items-center gap-1.5 rounded-xl border border-border bg-background px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
-            @click="toggleKnowledgeView"
-          >
-            <Sparkles class="h-3.5 w-3.5" />
-            {{ newInterface ? 'Классический вид' : 'Новый интерфейс' }}
-          </button>
           <!-- Functions page: show Run, Save, Delete, Status toggle -->
           <template
             v-if="functionsRunAction || functionsSaveAction || functionsDeleteAction || functionsDuplicateAction || functionsToggleStatusAction || functionsCreateAction"

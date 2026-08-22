@@ -57,7 +57,7 @@
               v-model="form.trigger_mode"
               class="mt-1.5 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all duration-300 outline-none"
             >
-              <option v-for="(label, mode) in triggerLabels" :key="mode" :value="mode">
+              <option v-for="(label, mode) in selectableTriggerLabels" :key="mode" :value="mode">
                 {{ label }}
               </option>
             </select>
@@ -205,9 +205,14 @@
           </button>
         </div>
 
-        <div v-if="form.actions.length === 0" class="text-center py-8 border-2 border-dashed border-emerald-100 rounded-xl">
+        <button
+          v-if="form.actions.length === 0"
+          type="button"
+          class="w-full text-center py-8 border-2 border-dashed border-emerald-100 rounded-xl transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50/30"
+          @click="addAction"
+        >
           <p class="text-sm text-slate-400">Действия не добавлены. Сценарий ничего не сделает.</p>
-        </div>
+        </button>
 
         <div v-else class="space-y-3">
           <div
@@ -222,21 +227,17 @@
               <X class="w-3 h-3" />
             </button>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div class="md:col-span-1">
-                <label class="text-xs font-medium text-slate-500 mb-1 block">Тип действия</label>
-                <select
-                  v-model="action.action_type"
-                  class="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all"
-                  @change="ensureActionConfig(action, index)"
-                >
-                  <option v-for="(label, type) in actionLabels" :key="type" :value="type">
-                    {{ label }}
-                  </option>
-                </select>
+            <div class="space-y-4">
+              <div>
+                <label class="text-xs font-medium text-slate-500 mb-1.5 block">Тип действия</label>
+                <OptionCardPicker
+                  :items="scenarioActionItems"
+                  :model-value="action.action_type"
+                  @update:model-value="changeActionType(action, index, $event)"
+                />
               </div>
 
-              <div class="md:col-span-2">
+              <div>
                 <!-- Action Specific Config -->
                 <div v-if="isMessageLikeAction(action.action_type)">
                   <label class="text-xs font-medium text-slate-500 mb-1 block">Текст сообщения</label>
@@ -284,6 +285,98 @@
                   ></textarea>
                   <p class="mt-1 text-[10px] text-slate-500">
                     Эта инструкция будет добавлена в контекст агента перед формированием ответа.
+                  </p>
+                </div>
+                <div v-else-if="isSetResultAction(action.action_type)">
+                  <label class="text-xs font-medium text-slate-500 mb-1 block">Готовый ответ</label>
+                  <textarea
+                    v-model="action.config.result"
+                    rows="3"
+                    placeholder="Текст, который уйдёт клиенту вместо ответа модели"
+                    class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all resize-none"
+                  ></textarea>
+                  <p class="mt-1 text-[10px] text-slate-500">
+                    Обрывает цепочку: LLM не вызывается, клиент получает этот текст как есть.
+                  </p>
+                </div>
+                <div v-else-if="isSetVariableAction(action.action_type)" class="space-y-2">
+                  <div class="grid grid-cols-2 gap-2">
+                    <input
+                      v-model="action.config.name"
+                      type="text"
+                      placeholder="Имя переменной"
+                      class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all"
+                    />
+                    <select
+                      v-model="action.config.operation"
+                      class="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all"
+                    >
+                      <option value="set">Записать значение</option>
+                      <option value="increment">Увеличить на</option>
+                      <option value="clear">Очистить</option>
+                    </select>
+                  </div>
+                  <input
+                    v-if="action.config.operation !== 'clear'"
+                    v-model="action.config.value"
+                    type="text"
+                    placeholder="Значение (можно подставлять переменные)"
+                    class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all"
+                  />
+                  <p class="text-[10px] text-slate-500">
+                    Значение сохраняется в диалоге и доступно дальше по разговору.
+                  </p>
+                </div>
+                <div v-else-if="isNotifyAdminAction(action.action_type)" class="space-y-2">
+                  <label class="text-xs font-medium text-slate-500 mb-1 block">Текст уведомления</label>
+                  <textarea
+                    v-model="action.config.message"
+                    rows="2"
+                    placeholder="Например: клиент запросил счёт — нужен менеджер"
+                    class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all resize-none"
+                  ></textarea>
+                  <div class="grid grid-cols-2 gap-2">
+                    <input
+                      v-model="action.config.chat_id"
+                      type="text"
+                      placeholder="Chat ID (опц.)"
+                      class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all"
+                    />
+                    <input
+                      v-model="action.config.bot_token"
+                      type="text"
+                      placeholder="Токен бота (опц.)"
+                      class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all"
+                    />
+                  </div>
+                  <label class="flex items-center gap-2 text-[10px] text-slate-500">
+                    <input v-model="action.config.include_context" type="checkbox" class="accent-emerald-500" />
+                    Приложить последнее сообщение клиента
+                  </label>
+                  <p class="text-[10px] text-slate-500">
+                    Если Chat ID и токен пустые — берутся из настроек агента, и уведомления там должны быть включены.
+                  </p>
+                </div>
+                <div v-else-if="isHandoffAction(action.action_type)" class="space-y-2">
+                  <label class="text-xs font-medium text-slate-500 mb-1 block">Сообщение клиенту (опц.)</label>
+                  <textarea
+                    v-model="action.config.client_message"
+                    rows="2"
+                    placeholder="Например: передаю вас администратору, он ответит в ближайшее время"
+                    class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all resize-none"
+                  ></textarea>
+                  <input
+                    v-model="action.config.reason"
+                    type="text"
+                    placeholder="Причина для администратора"
+                    class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs outline-none focus:border-emerald-400 transition-all"
+                  />
+                  <label class="flex items-center gap-2 text-[10px] text-slate-500">
+                    <input v-model="action.config.notify_admin" type="checkbox" class="accent-emerald-500" />
+                    Уведомить администратора в Telegram
+                  </label>
+                  <p class="text-[10px] text-slate-500">
+                    Ставит диалог на паузу — агент перестаёт отвечать, пока оператор не вернёт его в работу.
                   </p>
                 </div>
                 <div v-else-if="isWebhookAction(action.action_type)" class="space-y-2">
@@ -336,6 +429,11 @@ import { Switch } from '~/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip'
 import KnowledgeSheetShell from '~/components/knowledge/KnowledgeSheetShell.vue'
 import type { Scenario, ScenarioUpsertPayload, ScenarioAction } from '~/types/scenario'
+import { functionRuleActionDescriptions, functionRuleActionLabels } from '~/types/ruleAction'
+import type { ScenarioPreset } from '~/utils/scenarioPresets'
+import { functionRuleActionIcons } from '~/utils/ruleActionIcons'
+import { soonActionItems } from '~/utils/ruleActionSoon'
+import OptionCardPicker, { type OptionCardItem } from '~/components/agents/function-rules/OptionCardPicker.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -343,6 +441,8 @@ const props = withDefaults(
     scenario: Scenario | null
     agentId: string
     saving?: boolean
+    /** Заготовка из каталога: применяется только при создании нового сценария. */
+    preset?: ScenarioPreset | null
   }>(),
   { saving: false }
 )
@@ -356,6 +456,18 @@ const emit = defineEmits<{
 const webhookPayloadPlaceholder =
   'Payload JSON (опционально): {"event":"new_dialog","session":"{{session_id}}"}'
 
+/**
+ * События, которые рантайм не вызывает никогда.
+ *
+ * `spend_limit` встречается в коде только в объявлении перечисления — ни одного
+ * запуска правил с этой фазой нет. `pre_run` вызывается лишь из тестового
+ * прогона правил, в живых диалогах этой фазы не существует. Правило с таким
+ * событием сохранялось и молча не срабатывало.
+ *
+ * Подписи оставляем: у ранее сохранённых правил событие должно читаться.
+ */
+const UNSUPPORTED_TRIGGERS = ['spend_limit', 'pre_run'] as const
+
 const triggerLabels = {
   client_message: 'Сообщение клиента',
   agent_message: 'Сообщение агента',
@@ -368,6 +480,14 @@ const triggerLabels = {
   post_run: 'После завершения',
   post_tool: 'После инструмента'
 }
+
+const selectableTriggerLabels = computed(() =>
+  Object.fromEntries(
+    Object.entries(triggerLabels).filter(
+      ([mode]) => !UNSUPPORTED_TRIGGERS.includes(mode as (typeof UNSUPPORTED_TRIGGERS)[number]),
+    ),
+  ),
+)
 
 const triggerHints = {
   client_message: 'Срабатывает, когда клиент присылает сообщение.',
@@ -396,17 +516,29 @@ const conditionLabels = {
   json_context: 'Контекст JSON'
 }
 
-const actionLabels = {
-  send_message: 'Отправить сообщение',
-  send_delayed: 'Отложенное сообщение',
-  set_tag: 'Поставить тег',
-  webhook: 'Вызвать вебхук',
-  pause_dialog: 'Пауза диалога',
-  resume_dialog: 'Возобновить диалог',
-  block_user: 'Заблокировать пользователя',
-  unblock_user: 'Разблокировать пользователя',
-  augment_prompt: 'Дополнить промпт (системная инструкция)',
-  noop: 'Ничего не делать'
+// Общий словарь с формой функции — раньше здесь был свой список, и он отставал
+// от бэкенда (не было set_result). Порядок в выпадашке задаётся порядком ключей
+// в functionRuleActionLabels.
+// В сценарии доступны все типы действий: ограничений на уровне бэкенда нет,
+// правило сценария отличается от правила функции только отсутствием tool_id.
+const scenarioActionItems: OptionCardItem[] = [
+  ...(
+    Object.keys(functionRuleActionLabels) as Array<keyof typeof functionRuleActionLabels>
+  ).map((type) => ({
+    value: type,
+    label: functionRuleActionLabels[type],
+    description: functionRuleActionDescriptions[type],
+    icon: functionRuleActionIcons[type],
+  })),
+  ...soonActionItems,
+]
+
+const changeActionType = (action: ScenarioAction, index: number, value: string) => {
+  action.action_type = value as ScenarioAction['action_type']
+  // Конфиг предыдущего типа не переносим: ensureActionConfig заполнит поля,
+  // нужные новому типу, а чужие ключи иначе осели бы в JSONB мусором.
+  action.config = {}
+  ensureActionConfig(action, index)
 }
 
 const weekdayLabels = {
@@ -440,6 +572,23 @@ const ensureActionConfig = (action: ScenarioAction, index: number) => {
     if (!delayUnit.value[index]) delayUnit.value[index] = 'seconds'
   }
   if (t === 'set_tag' && typeof cfg.tag !== 'string') cfg.tag = ''
+  if (t === 'set_result' && typeof cfg.result !== 'string') cfg.result = ''
+  if (t === 'set_variable') {
+    if (typeof cfg.name !== 'string') cfg.name = ''
+    if (typeof cfg.operation !== 'string') cfg.operation = 'set'
+    if (typeof cfg.value !== 'string') cfg.value = ''
+  }
+  if (t === 'notify_admin') {
+    if (typeof cfg.message !== 'string') cfg.message = ''
+    // Дефолты повторяют раннер: там оба флага читаются как «включено», пока
+    // явно не выставлено false. Иначе галка в UI врала бы про поведение.
+    if (cfg.include_context == null) cfg.include_context = true
+  }
+  if (t === 'handoff_to_operator') {
+    if (typeof cfg.client_message !== 'string') cfg.client_message = ''
+    if (typeof cfg.reason !== 'string') cfg.reason = ''
+    if (cfg.notify_admin == null) cfg.notify_admin = true
+  }
   if (t === 'augment_prompt') {
     const instr = cfg.instruction ?? cfg.prompt ?? ''
     cfg.instruction = typeof instr === 'string' ? instr : String(instr)
@@ -507,16 +656,27 @@ watch(
           }
         })
       } else {
+        const preset = props.preset
         form.value = {
-          name: '',
+          name: preset?.name || '',
           enabled: true,
           priority: 100,
-          trigger_mode: 'client_message',
-          condition_type: 'always',
-          condition_config: {},
-          actions: []
+          trigger_mode: preset?.trigger_mode || 'client_message',
+          condition_type: preset?.condition_type || 'always',
+          condition_config: JSON.parse(JSON.stringify(preset?.condition_config || {})),
+          actions: (preset?.actions || []).map((action, index) => ({
+            id: '',
+            rule_id: '',
+            action_type: action.action_type,
+            on_status: 'always',
+            enabled: true,
+            order_index: index,
+            config: { ...(action.config || {}) },
+          })) as any,
         }
-        keywordInput.value = ''
+        // Ключевые слова живут в отдельном инпуте и собираются обратно при сохранении.
+        keywordInput.value = (form.value.condition_config.keywords || []).join(', ')
+        form.value.actions.forEach((action, index) => ensureActionConfig(action, index))
         delayValue.value = {}
         delayUnit.value = {}
         webhookPayloadText.value = {}
@@ -610,4 +770,8 @@ const isMessageLikeAction = (actionType: string): boolean =>
 const isSetTagAction = (actionType: string): boolean => actionType === 'set_tag'
 const isAugmentPromptAction = (actionType: string): boolean => actionType === 'augment_prompt'
 const isWebhookAction = (actionType: string): boolean => actionType === 'webhook'
+const isSetResultAction = (actionType: string): boolean => actionType === 'set_result'
+const isSetVariableAction = (actionType: string): boolean => actionType === 'set_variable'
+const isNotifyAdminAction = (actionType: string): boolean => actionType === 'notify_admin'
+const isHandoffAction = (actionType: string): boolean => actionType === 'handoff_to_operator'
 </script>

@@ -58,6 +58,39 @@ async def _get_or_create_state(
     return state, True
 
 
+async def get_dialog_variables(
+    db: AsyncSession,
+    *,
+    agent_id: UUID | Any,
+    session_id: str,
+) -> dict[str, Any]:
+    """Прочитать переменные диалога. Нет записи — пустой словарь."""
+    stmt = select(DialogState.variables).where(
+        DialogState.session_id == session_id,
+        DialogState.agent_id == agent_id,
+    )
+    value = (await db.execute(stmt)).scalar_one_or_none()
+    return dict(value) if isinstance(value, dict) else {}
+
+
+async def set_dialog_variables(
+    db: AsyncSession,
+    *,
+    agent_id: UUID | Any,
+    tenant_id: UUID | Any,
+    session_id: str,
+    variables: dict[str, Any],
+) -> None:
+    """Записать переменные диалога без commit (внутри транзакции правил).
+
+    Присваиваем новый словарь целиком, а не мутируем существующий: SQLAlchemy
+    не отслеживает изменения внутри JSONB по месту, и мутация молча не сохранится.
+    """
+    state, _ = await _get_or_create_state(db, agent_id, tenant_id, session_id)
+    state.variables = dict(variables)
+    await db.flush()
+
+
 async def set_dialog_status(
     db: AsyncSession,
     *,

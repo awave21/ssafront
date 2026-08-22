@@ -5,7 +5,7 @@
         <span class="text-sm font-semibold text-slate-900">Действия</span>
         <FieldHint
           title="Действия после срабатывания"
-          text="Что именно платформа сделает, когда правило срабатывает: пометить диалог тегом, вызвать вебхук, отправить сообщение оператору, поставить пометку в CRM. Выполняются по порядку. Работают в связке с реакцией."
+          text="Что именно платформа сделает, когда правило срабатывает: вызвать вебхук, уведомить администратора, передать диалог оператору, пометить диалог тегом. Выполняются по порядку, сверху вниз. «Промолчать» здесь искать не нужно — это вариант в поле «Реакция после выполнения» выше."
         />
         <span v-if="actions.length" class="text-xs font-medium text-slate-500">{{ actions.length }}</span>
       </div>
@@ -19,8 +19,23 @@
       </button>
     </div>
 
-    <div v-if="actions.length === 0" class="rounded-xl border border-dashed border-slate-200 bg-white/60 py-6 text-center text-sm text-slate-400">
+    <!-- Тот же вид, что и раньше: текст и цвета не трогаем, блок просто стал
+         кликабельным. На hover только лёгкий подъём — понятно, что элемент
+         живой, но палитра остаётся нейтральной. -->
+    <button
+      v-if="actions.length === 0 && canEdit"
+      type="button"
+      class="w-full rounded-xl border border-dashed border-slate-200 bg-white/60 py-6 text-center text-sm text-slate-400 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-[0_10px_24px_-14px_rgba(0,0,0,0.10)]"
+      @click="$emit('add')"
+    >
       Действия не добавлены. Нажмите «+ Добавить действие».
+    </button>
+
+    <div
+      v-else-if="actions.length === 0"
+      class="rounded-xl border border-dashed border-slate-200 bg-white/60 py-6 text-center text-sm text-slate-400"
+    >
+      Действия не добавлены.
     </div>
 
     <div v-else class="space-y-2">
@@ -31,7 +46,10 @@
       >
         <span
           class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[11px] font-bold text-primary"
-        >{{ action.order_index || idx + 1 }}</span>
+        ><!-- Позиция в списке, а не order_index: у старых записей он мог быть
+             одинаковым, и все действия показывались единицей. Порядок выполнения
+             всё равно перенумеровывается по позиции при сохранении функции. -->
+          {{ idx + 1 }}</span>
 
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
@@ -97,7 +115,11 @@
 <script setup lang="ts">
 import { ChevronUp, ChevronDown, Pencil, Trash2 } from 'lucide-vue-next'
 import FieldHint from '~/components/agents/settings/FieldHint.vue'
-import type { FunctionRuleAction } from '~/types/ruleAction'
+import {
+  functionRuleActionLabels,
+  functionRuleActionStatusLabels,
+  type FunctionRuleAction,
+} from '~/types/ruleAction'
 
 defineProps<{
   actions: FunctionRuleAction[]
@@ -112,28 +134,8 @@ defineEmits<{
   'move-down': [id: string]
 }>()
 
-const ACTION_TYPE_LABELS: Record<string, string> = {
-  webhook: 'Webhook',
-  set_tag: 'Пометить диалог тегом',
-  remove_tag: 'Снять тег',
-  send_manager_message: 'Сообщение оператору',
-  send_client_message: 'Сообщение клиенту',
-  set_variable: 'Установить переменную',
-  crm_note: 'Заметка в CRM',
-  crm_update: 'Обновить CRM',
-  transfer_dialog: 'Передать другому агенту',
-  disable_dialog: 'Отключить диалог',
-  noop: 'Ничего не делать (пометка)',
-}
-
-const ON_STATUS_LABELS: Record<string, string> = {
-  always: 'Всегда',
-  matched: 'При срабатывании правила',
-  not_matched: 'Если не сработало',
-  succeeded: 'После успеха',
-  failed: 'После ошибки',
-}
-
-const labelForActionType = (raw: string) => ACTION_TYPE_LABELS[raw] || raw
-const labelForOnStatus = (raw: string) => ON_STATUS_LABELS[raw] || raw
+const labelForActionType = (raw: string) =>
+  functionRuleActionLabels[raw as keyof typeof functionRuleActionLabels] || raw
+const labelForOnStatus = (raw: string) =>
+  functionRuleActionStatusLabels[raw as keyof typeof functionRuleActionStatusLabels] || raw
 </script>

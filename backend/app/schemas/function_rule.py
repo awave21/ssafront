@@ -46,6 +46,11 @@ ActionType = Literal[
     "unblock_user",
     "resume_dialog",
     "send_delayed",
+    "notify_admin",
+    "handoff_to_operator",
+    "set_variable",
+    "table_find",
+    "table_write",
 ]
 ActionStatus = Literal["success", "error", "always"]
 

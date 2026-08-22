@@ -146,7 +146,7 @@
             type="button"
             class="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
             title="Удалить"
-            @click="deleteRule(rule.id)"
+            @click="askDeleteRule(rule)"
           >
             <Trash2 class="h-4 w-4" />
           </button>
@@ -154,6 +154,14 @@
       </div>
       </div>
       </div>
+      <ConfirmDialog
+        :open="Boolean(rulePendingDelete)"
+        :title="`Удалить функцию «${rulePendingDelete?.name || 'Без названия'}»?`"
+        description="Функция и её действия будут удалены безвозвратно."
+        :busy="deleteInProgress"
+        @update:open="!$event && (rulePendingDelete = null)"
+        @confirm="confirmDeleteRule"
+      />
     </AgentFunctionsWorkspace>
   </AgentPageShell>
 </template>
@@ -170,6 +178,8 @@ import { usePermissions } from '~/composables/usePermissions'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import { useLayoutState } from '~/composables/useLayoutState'
 import { getReadableErrorMessage } from '~/utils/api-errors'
+import { useToast } from '~/composables/useToast'
+import ConfirmDialog from '~/components/common/ConfirmDialog.vue'
 import type { FunctionRule } from '~/types/functionRule'
 
 const route = useRoute()
@@ -186,6 +196,7 @@ const {
   resetFunctionsTopbarState,
 } = useLayoutState()
 const { canEditAgents } = usePermissions()
+const { success: toastSuccess, error: toastError } = useToast()
 
 const agentId = computed(() => (route.params.id as string) || '')
 const {
@@ -198,6 +209,8 @@ const {
 } = useFunctionRules(agentId.value)
 
 const helpOpen = ref(false)
+const rulePendingDelete = ref<FunctionRule | null>(null)
+const deleteInProgress = ref(false)
 
 breadcrumbTitle.value = 'Функции'
 const agentName = computed(() => store.agent?.name || '')
@@ -236,9 +249,7 @@ const navigateToCreate = async () => {
 }
 
 const openTemplatesDialog = () => {
-  // Каталог готовых функций пока не реализован — ведём на форму создания.
-  // Когда появится галерея шаблонов, здесь откроется диалог выбора.
-  navigateToCreate()
+  router.push(`/agents/${agentId.value}/functions/catalog`)
 }
 
 const navigateToEdit = (ruleId: string) => {
@@ -255,12 +266,31 @@ const toggleRuleStatus = async (ruleId: string, enabled: boolean) => {
   }
 }
 
-const deleteRule = async (ruleId: string) => {
-  if (!confirm('Удалить функцию?')) return
+const askDeleteRule = (rule: FunctionRule) => {
+  rulePendingDelete.value = rule
+}
+
+const confirmDeleteRule = async () => {
+  const rule = rulePendingDelete.value
+  if (!rule || deleteInProgress.value) return
+
+  // Убираем карточку сразу, не дожидаясь ответа сервера: удаление обычно
+  // успешно, а пустая пауза читается как «кнопка не работает». Если запрос
+  // упадёт — возвращаем строку на прежнее место.
+  const index = rules.value.findIndex((item) => item.id === rule.id)
+  const snapshot = index >= 0 ? rules.value[index] : null
+  if (index >= 0) rules.value.splice(index, 1)
+
+  rulePendingDelete.value = null
+  deleteInProgress.value = true
   try {
-    await removeRule(ruleId)
+    await removeRule(rule.id)
+    toastSuccess('Функция удалена', rule.name || 'Без названия')
   } catch (err: any) {
-    alert(getReadableErrorMessage(err, 'Не удалось удалить функцию'))
+    if (snapshot) rules.value.splice(index, 0, snapshot)
+    toastError('Не удалось удалить функцию', getReadableErrorMessage(err, ''))
+  } finally {
+    deleteInProgress.value = false
   }
 }
 

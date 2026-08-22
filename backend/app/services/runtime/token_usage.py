@@ -14,6 +14,14 @@ from app.services.runtime.utils import (
 logger = structlog.get_logger("app.services.runtime")
 
 
+def _has_usage(messages: list[Any]) -> bool:
+    """Есть ли в сообщениях хоть один ответ модели с данными о расходе."""
+    return any(
+        isinstance(msg, ModelResponse) and getattr(msg, "usage", None) is not None
+        for msg in messages
+    )
+
+
 def extract_token_usage(
     result: Any,
     new_messages: list[Any],
@@ -25,10 +33,29 @@ def extract_token_usage(
     total_tokens = None
     token_usage_steps: list[dict[str, Any]] = []
 
-    try:
-        all_messages = result.all_messages() if hasattr(result, "all_messages") else new_messages
-    except Exception:
-        all_messages = new_messages
+    # Считаем ТОЛЬКО сообщения этого запуска.
+    #
+    # Здесь стоял result.all_messages(), а он возвращает историю сессии вместе с
+    # новыми сообщениями: в агент она передаётся через message_history. Каждый
+    # ModelResponse истории несёт свой usage, и он пересчитывался заново на каждом
+    # следующем запуске — расход рос квадратично по длине диалога. Замер на проде:
+    # за 30 дней записано 3 307 тыс. токенов и 693 ₽ против реальных 1 342 тыс.
+    # и 274 ₽; на реплике «/start» с одним вызовом модели значилось 24 шага,
+    # 217 822 токена и 28,84 ₽.
+    #
+    # new_messages для того и передаётся в эту функцию. На all_messages падаем
+    # обратно, только если в новых сообщениях usage не нашлось вовсе: молча
+    # перестать считать расход хуже, чем посчитать с запасом.
+    messages_of_this_run = new_messages or []
+    if not _has_usage(messages_of_this_run):
+        try:
+            messages_of_this_run = result.all_messages() if hasattr(result, "all_messages") else []
+        except Exception:
+            messages_of_this_run = []
+        if messages_of_this_run:
+            logger.warning("token_usage_fell_back_to_all_messages", trace_id=trace_id)
+
+    all_messages = messages_of_this_run
 
     step_index = 0
     for msg in all_messages:

@@ -23,9 +23,9 @@ usage() {
   ./scripts/deploy.sh full [--no-migrate]
 
 Режимы:
-  backend   Пересобрать и перезапустить api + sqns-sync-worker + script-flow-index-worker (db/redis поднимутся автоматически)
+  backend   Пересобрать и перезапустить api + sqns-sync-worker + + scenario-delayed-worker (db/redis поднимутся автоматически)
   frontend  Пересобрать и перезапустить frontend
-  worker    Пересобрать и перезапустить sqns-sync-worker + script-flow-index-worker
+  worker    Пересобрать и перезапустить sqns-sync-worker + + scenario-delayed-worker
   monitor   Перезапустить мониторинг (netdata + caddy)
   all       Пересобрать и перезапустить api + frontend + воркеры + netdata + caddy
   full      Поднять/обновить весь прод-набор (с мониторингом и admin-сервисами)
@@ -72,6 +72,17 @@ fi
 
 cd "$INFRA_DIR"
 
+# Беспарольный sudo: если в .env задан непустой DEPLOY_SUDO_PASSWORD, подключаем
+# askpass-хелпер, и sudo берёт пароль через него (sudo -A) вместо запроса в терминале.
+# Пароль живёт только в infra/.env (вне git, права 600). Явно заданный снаружи
+# SUDO_ASKPASS не перетираем.
+ASKPASS_HELPER="$SCRIPT_DIR/sudo-askpass.sh"
+if [[ -z "${SUDO_ASKPASS:-}" ]] \
+  && [[ -x "$ASKPASS_HELPER" ]] \
+  && grep -qE '^DEPLOY_SUDO_PASSWORD=.+' "$ENV_FILE"; then
+  export SUDO_ASKPASS="$ASKPASS_HELPER"
+fi
+
 _sudo() { if [[ -n "${SUDO_ASKPASS:-}" ]]; then sudo -A "$@"; else sudo "$@"; fi; }
 
 if docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
@@ -92,49 +103,49 @@ case "$TARGET" in
   backend)
     echo "Деплой backend: db/redis + сборка образов + миграции до старта api + запуск"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" build api sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" build api sqns-sync-worker scenario-delayed-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
-    "${DC[@]}" up -d api sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" up -d api sqns-sync-worker scenario-delayed-worker
     ;;
   frontend)
     echo "Деплой frontend: пересборка frontend + landing + проверка воркеров"
     "${DC[@]}" up -d --build frontend landing
-    "${DC[@]}" up -d sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" up -d sqns-sync-worker scenario-delayed-worker
     ;;
   worker)
-    echo "Деплой worker: db/redis + сборка образов + миграции + запуск sqns-sync + script-flow-index"
+    echo "Деплой worker: db/redis + сборка образов + миграции + запуск sqns-sync + scenario-delayed"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" build api sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" build api sqns-sync-worker scenario-delayed-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
-    "${DC[@]}" up -d sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" up -d sqns-sync-worker scenario-delayed-worker
     ;;
   monitor)
     echo "Деплой monitor: перезапуск netdata + caddy + проверка воркеров"
     "${DC[@]}" up -d netdata caddy
-    "${DC[@]}" up -d sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" up -d sqns-sync-worker scenario-delayed-worker
     ;;
   all)
     echo "Деплой all: db/redis + сборка + миграции до api + запуск сервисов + netdata + caddy"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" build api frontend landing sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" build api frontend landing sqns-sync-worker scenario-delayed-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
-    "${DC[@]}" up -d api frontend landing sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" up -d api frontend landing sqns-sync-worker scenario-delayed-worker
     "${DC[@]}" up -d --remove-orphans netdata caddy
     ;;
   full)
     echo "Деплой full: db/redis + сборка + миграции до api + запуск + netdata/caddy + pgadmin/watcher"
     "${DC[@]}" up -d db redis
-    "${DC[@]}" build api frontend landing sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" build api frontend landing sqns-sync-worker scenario-delayed-worker
     if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
       "$MIGRATIONS_SCRIPT"
     fi
-    "${DC[@]}" up -d api frontend landing sqns-sync-worker script-flow-index-worker
+    "${DC[@]}" up -d api frontend landing sqns-sync-worker scenario-delayed-worker
     "${DC[@]}" up -d --remove-orphans netdata caddy pgadmin watcher
     ;;
   *)

@@ -31,7 +31,7 @@ def _sanitize_augment_block(text: str) -> str | None:
 # Группы optional data-тулов (knowledge, direct_questions, …): платформа всегда
 # регистрирует их для модели; какие вызывать — решает LLM по описаниям тулов и промпту.
 OPTIONAL_RUNTIME_TOOL_CATEGORY_IDS = frozenset(
-    {"knowledge", "direct_questions", "expertise", "directory", "script_flows", "clinic_facts"}
+    {"knowledge", "direct_questions", "expertise", "directory", "clinic_facts"}
 )
 
 
@@ -118,7 +118,7 @@ def select_optional_runtime_tool_categories(
     This keeps runtime tool routing purely model-driven (system prompt +
     tool descriptions) without server-side message heuristics.
     """
-    selected = {"knowledge", "direct_questions", "directory", "expertise", "script_flows", "clinic_facts"}
+    selected = {"knowledge", "direct_questions", "directory", "expertise", "clinic_facts"}
     return selected, {
         "matched_categories": sorted(selected),
         "selection": "llm_driven_optional_tools",

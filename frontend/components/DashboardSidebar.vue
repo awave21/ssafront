@@ -217,6 +217,7 @@ import {
   GitBranch,
   Award,
   Wrench,
+  Quote,
 } from 'lucide-vue-next'
 import {
   TooltipRoot,
@@ -242,22 +243,11 @@ const route = useRoute()
 const router = useRouter()
 
 // Use shared layout state
-const { isCollapsed, newInterface } = useLayoutState()
+const { isCollapsed } = useLayoutState()
 const { hasScope } = usePermissions()
 
-// Режим разработчика: прячет технические разделы за тумблером (доступен только в «Новом интерфейсе»).
+// Режим разработчика: прячет технические разделы за тумблером.
 const devMode = useLocalStorage('agent-sidebar-dev-mode', false)
-
-// Persist глобального режима «Новый интерфейс». Сайдбар смонтирован всегда, поэтому храним здесь.
-onMounted(() => {
-  if (import.meta.client) {
-    const saved = localStorage.getItem('new-interface')
-    if (saved === 'true' || saved === 'false') newInterface.value = saved === 'true'
-  }
-})
-watch(newInterface, (v) => {
-  if (import.meta.client) localStorage.setItem('new-interface', String(v))
-})
 
 const emit = defineEmits<{
   close: []
@@ -352,7 +342,9 @@ const agentMenuItems = [
   { id: 'knowledge', name: 'База знаний', icon: Database, path: (id: string) => `/agents/${id}/knowledge` },
   { id: 'knowledge-graph', name: 'Граф знаний', icon: GitBranch, path: (id: string) => `/agents/${id}/knowledge/graph`, group: 'dev' },
   { id: 'scenarios', name: 'Сценарии', icon: ListTree, path: (id: string) => `/agents/${id}/scenarios`, group: 'dev' },
-  { id: 'script-flows', name: 'Потоки эксперта', icon: GitBranch, path: (id: string) => `/agents/${id}/scripts` },
+  // «Эксперт» — витрина стиля (библиотека фраз, проверка, журнал). Отдельный
+  // раздел: к «Источникам знаний» отношения не имеет, навыки живут своим пунктом.
+  { id: 'expert', name: 'Эксперт', icon: Quote, path: (id: string) => `/agents/${id}/expert` },
   { id: 'skills', name: 'Навыки', icon: GraduationCap, path: (id: string) => `/agents/${id}/skills` },
   { id: 'functions', name: 'Функции', icon: Code, path: (id: string) => `/agents/${id}/functions`, group: 'dev' },
   { id: 'webhook', name: 'Webhook', icon: Webhook, path: (id: string) => `/agents/${id}/webhook`, group: 'dev' },
@@ -373,15 +365,15 @@ const currentMenuItems = computed<any[]>(() => {
   const resolved = agentMenuItems
     .filter(item => !('requiresScope' in item && item.requiresScope) || hasScope((item as any).requiresScope))
     .map(item => ({ ...item, path: item.path(agentId) }))
-  // Классический вид: плоский список всех разделов (как раньше на проде).
-  if (!newInterface.value) return resolved
-  // Новый интерфейс: разделы агента вынесены в горизонтальные вкладки (AgentTabsNav).
+  // Разделы агента вынесены в горизонтальные вкладки (AgentTabsNav).
   // В sidebar видны только «базовые» пункты, которые не имеют отдельной вкладки —
   // сейчас это «Чат» (тестовый чат агента). Плюс тумблер «Режим разработчика», а при
   // включённом dev-mode — dev-разделы без дубля с верхней навигацией.
   // Функции/Сценарии/Webhook/Модель/API-ключи — уже в top-tabs, не дублируем.
   const DEV_IN_TOP_TABS = new Set(['functions', 'scenarios', 'webhook', 'model', 'api-keys'])
-  const ALWAYS_VISIBLE_IN_NEW = new Set(['chat'])
+  // «Эксперт» — единственный вход к материалу эксперта: навыки живут внутри него
+  // вкладкой, отдельным пунктом не дублируются (в классическом виде — как раньше).
+  const ALWAYS_VISIBLE_IN_NEW = new Set(['chat', 'expert'])
   const alwaysVisible = resolved.filter(i => ALWAYS_VISIBLE_IN_NEW.has((i as any).id))
   const dev = resolved.filter(
     i => (i as any).group === 'dev' && !DEV_IN_TOP_TABS.has((i as any).id),

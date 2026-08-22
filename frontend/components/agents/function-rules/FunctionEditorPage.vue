@@ -68,27 +68,33 @@
         @remove-action="removeAction"
         @move-action-up="moveActionUp"
         @move-action-down="moveActionDown"
-      />
+      >
+        <template #action-editor>
+          <div ref="actionEditorEl">
+            <RuleActionEditor
+              :open="isActionDialogOpen"
+              :model="editingAction"
+              :tools="tools"
+              :rule-variables="ruleVariables"
+              @update:open="isActionDialogOpen = $event"
+              @add-rule-variable="onAddRuleVariable"
+              @submit="saveAction"
+            />
+          </div>
+        </template>
+      </FunctionRuleForm>
     </div>
 
     <div v-else class="rounded-2xl border border-slate-100 bg-white p-8 text-center text-slate-500 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]">
       Функция не найдена
     </div>
-
-    <RuleActionFormDialog
-      :open="isActionDialogOpen"
-      :model="editingAction"
-      :tools="tools"
-      :rule-variables="ruleVariables"
-      @update:open="isActionDialogOpen = $event"
-      @add-rule-variable="onAddRuleVariable"
-      @submit="saveAction"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, watchEffect } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, watchEffect } from 'vue'
+import { useRoute } from 'vue-router'
+import { buildPresetArgsSchema, findFunctionPreset } from '~/utils/functionPresets'
 import { ChevronLeft, Loader2, Zap, BookOpen } from 'lucide-vue-next'
 import { useApiFetch } from '~/composables/useApiFetch'
 import { useFunctionRules } from '~/composables/useFunctionRules'
@@ -99,7 +105,7 @@ import { useLayoutState } from '~/composables/useLayoutState'
 import { useAgentEditorStore } from '~/composables/useAgentEditorStore'
 import { getReadableErrorMessage } from '~/utils/api-errors'
 import FunctionRuleForm from '~/components/agents/function-rules/FunctionRuleForm.vue'
-import RuleActionFormDialog from '~/components/agents/function-rules/RuleActionFormDialog.vue'
+import RuleActionEditor from '~/components/agents/function-rules/RuleActionEditor.vue'
 import type { Tool } from '~/types/tool'
 import type { FunctionRule } from '~/types/functionRule'
 import type { FunctionRuleAction } from '~/types/ruleAction'
@@ -113,6 +119,7 @@ const emit = defineEmits<{
   back: []
 }>()
 
+const route = useRoute()
 const apiFetch = useApiFetch()
 const store = useAgentEditorStore()
 const { canEditAgents } = usePermissions()
@@ -157,6 +164,7 @@ const editingRule = ref<FunctionRule | null>(null)
 const editingActions = ref<FunctionRuleAction[]>([])
 const editingAction = ref<FunctionRuleAction | null>(null)
 const isActionDialogOpen = ref(false)
+const actionEditorEl = ref<HTMLElement | null>(null)
 const helpOpen = ref(false)
 
 const loading = computed(() => rulesLoading.value)
@@ -379,8 +387,39 @@ const ensureToolForRule = async (rule: FunctionRule): Promise<string | null> => 
 }
 
 const startCreateRule = () => {
-  editingRule.value = createEmptyRule()
-  editingActions.value = []
+  const rule = createEmptyRule()
+  const preset = findFunctionPreset(route.query.preset as string | undefined)
+
+  if (!preset) {
+    editingRule.value = rule
+    editingActions.value = []
+    return
+  }
+
+  rule.name = preset.name
+  rule.condition_config = {
+    ...rule.condition_config,
+    // Форма читает описание из function_description (см. FunctionRuleForm).
+    function_description: preset.functionDescription,
+    tool_args_schema: buildPresetArgsSchema(preset.parameters),
+  }
+  if (preset.reaction_mode) rule.reaction_mode = preset.reaction_mode
+  if (preset.reaction_message) rule.reaction_message = preset.reaction_message
+  if (preset.reaction_instruction) rule.reaction_instruction = preset.reaction_instruction
+  if (preset.post_scenario) rule.post_scenario = preset.post_scenario
+  if (preset.post_scenario_prompt) rule.post_scenario_prompt = preset.post_scenario_prompt
+
+  editingRule.value = rule
+  // Локальные id: действия ещё не сохранены, saveRule отличает их по префиксу.
+  editingActions.value = (preset.actions || []).map((action, index) => ({
+    id: `local_${index}_${Date.now()}`,
+    rule_id: rule.id,
+    action_type: action.action_type,
+    on_status: 'always',
+    enabled: true,
+    order_index: index + 1,
+    config: { ...(action.config || {}) },
+  }))
 }
 
 const startEditRule = async (ruleId: string) => {
@@ -410,6 +449,12 @@ const onRuleModelUpdate = (payload: FunctionRule) => {
 const openActionDialog = (action: FunctionRuleAction | null) => {
   editingAction.value = action
   isActionDialogOpen.value = true
+  // Редактор действия раскрывается ниже формы, за пределами экрана — доводим
+  // его до видимой области, иначе клик по «+ Добавить действие» выглядит как
+  // будто ничего не произошло.
+  nextTick(() => {
+    actionEditorEl.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  })
 }
 
 const openActionDialogById = (actionId: string) => {

@@ -8,14 +8,9 @@
     <div class="flex-1 flex flex-col bg-background rounded-md border border-border overflow-hidden min-w-0 min-h-0 order-2 lg:order-1">
       <div class="flex items-center justify-between px-3 lg:px-4 py-3 border-b border-border bg-background gap-2">
         <div class="flex items-center gap-2 overflow-x-auto">
-          <button
-            type="button"
-            @click="handleOpenPromptTraining"
-            class="inline-flex items-center justify-center gap-2 px-2 lg:px-3 py-1.5 bg-primary/10 text-primary rounded-md text-xs font-medium hover:bg-primary/15 transition-colors shrink-0"
-          >
-            <Sparkles class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Улучшить с AI</span>
-          </button>
+          <!-- «Улучшить с AI» (обучение промпта) отключено: пересборка промпта по
+               шаблону схлопывает дословные формулировки эксперта. Замена — раздел
+               «Стиль эксперта». Бэкенд-роутер тоже выключен (agents/__init__.py). -->
           <button
             type="button"
             disabled
@@ -356,8 +351,7 @@ import {
   Maximize2,
   Minimize2,
   PanelRightClose,
-  RotateCcw,
-  Sparkles
+  RotateCcw
 } from 'lucide-vue-next'
 import { useToast } from '~/composables/useToast'
 import { usePermissions } from '~/composables/usePermissions'
@@ -465,12 +459,6 @@ const handlePromptBlur = () => {
   if (hasUnsavedChanges.value && canEditAgents.value) {
     store.autoSavePrompt()
   }
-}
-
-const handleOpenPromptTraining = () => {
-  const agentId = agent.value?.id
-  if (!agentId) return
-  navigateTo(`/agents/${agentId}/prompt-training`)
 }
 
 // Load tool data for menu categories

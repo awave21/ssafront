@@ -3,7 +3,7 @@
     <button
       v-if="!isOpen"
       type="button"
-      class="fixed right-0 bottom-8 lg:bottom-10 z-[10002] inline-flex items-center justify-center rounded-l-2xl bg-indigo-600 px-3 py-5 text-white shadow-xl transition-all duration-200 hover:-translate-y-0.5 hover:bg-indigo-700"
+      class="fixed right-0 bottom-28 lg:bottom-32 z-[10002] inline-flex items-center justify-center rounded-l-2xl bg-indigo-600 px-3 py-5 text-white shadow-xl transition-all duration-200 hover:-translate-y-0.5 hover:bg-indigo-700"
       @click="isOpen = true"
       aria-label="Проверка векторного поиска"
       title="Проверка векторного поиска (RAG)"

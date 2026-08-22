@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import event
 from sqlalchemy.exc import OperationalError, DisconnectionError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.util import await_only
 
 from app.core.config import get_settings
 from app.utils.debug_logging import emit_debug_log
@@ -25,17 +23,22 @@ def create_engine() -> tuple[async_sessionmaker[AsyncSession], str]:
         future=True,  # Использовать новый API SQLAlchemy 2.0
     )
 
-    # asyncpg + SQLAlchemy: `connect` event получает `AsyncAdapt_asyncpg_connection`, а не raw asyncpg conn.
-    # В новых версиях pgvector `register_vector` — coroutine; из sync-хука его нужно await'ить через `await_only`.
-    @event.listens_for(engine.sync_engine, "connect")
-    def _register_pgvector(dbapi_connection, _connection_record) -> None:  # type: ignore[no-untyped-def]
-        try:
-            from pgvector.asyncpg import register_vector
-
-            await_only(register_vector(dbapi_connection.driver_connection))
-        except Exception:
-            # Не валим старт приложения: без pgvector индексы embeddings просто не заработают.
-            return
+    # Кодек pgvector для asyncpg здесь НЕ регистрируется намеренно.
+    #
+    # register_vector нужен, когда с базой работают сырым asyncpg. У нас работает
+    # SQLAlchemy, и тип pgvector.sqlalchemy.Vector сам сериализует вектор для
+    # драйвера — в строку вида "[0.1,0.2]". Кодек же ждёт список и такую строку
+    # отвергает: вместе они кодируют дважды.
+    #
+    # Пока кодек был зарегистрирован, ЛЮБАЯ запись вектора через модель падала с
+    # asyncpg DataError: expected list or ndarray. Молча, потому что вызовы
+    # обёрнуты в try/except: новая карточка прямых вопросов оставалась без
+    # эмбеддинга, документ базы знаний — без чанков, детектор пропущенных звонков
+    # всегда возвращал None. Отсюда же двойные касты CAST(CAST(:x AS text) AS vector)
+    # по всему коду — их писали, обходя этот самый конфликт.
+    #
+    # Проверено на проде до правки: INSERT и UPDATE вектора падали, без кодека —
+    # проходят; поиск и чтение вектора работают одинаково в обоих случаях.
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     # region agent log

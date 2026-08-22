@@ -113,6 +113,7 @@ async def run_agent_with_tools(
     openai_api_key: str | None = None,
     anthropic_api_key: str | None = None,
     system_prompt_override: str | None = None,
+    style_prompt_addition: str | None = None,
     extra_tools: list[PydanticTool] | None = None,
 ) -> AgentRunResult:
     settings = get_settings()
@@ -218,8 +219,10 @@ async def run_agent_with_tools(
     )
     
     # Собираем агента с tools и toolsets.
-    # IMPORTANT: поведение и стиль должны задаваться ТОЛЬКО явным system_prompt
-    # пользователя (или system_prompt_override). Никаких скрытых auto-bridges.
+    # IMPORTANT: поведение задаётся явным system_prompt пользователя (или
+    # system_prompt_override). Никаких скрытых auto-bridges внутри этой строки:
+    # платформенный стиль-слой подаётся отдельно — штатными runtime instructions
+    # на вызове run() (см. ниже), а не склейкой в тот же текст.
     enriched_system_prompt = (
         system_prompt_override if system_prompt_override is not None else agent.system_prompt
     )
@@ -368,6 +371,11 @@ async def run_agent_with_tools(
         result = await pydantic_agent.run(
             input_message,
             message_history=message_history,
+            # Runtime instructions (PydanticAI): добавка к инструкциям на конкретный
+            # запуск. Так платформенный стиль-слой не смешивается со строкой промпта
+            # пользователя и не может быть затёрт сценарными фазами; фреймворк сам
+            # дописывает его после статических инструкций и переоценивает каждый run.
+            instructions=(style_prompt_addition.strip() or None) if style_prompt_addition else None,
             usage_limits=UsageLimits(
                 tool_calls_limit=effective_tool_calls_limit,
                 request_limit=effective_request_limit,

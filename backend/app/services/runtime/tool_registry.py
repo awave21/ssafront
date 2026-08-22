@@ -19,7 +19,6 @@ from app.services.runtime.tools import (
     build_direct_answer_tool,
     build_direct_questions_search_tool,
     build_directory_runtime_tools,
-    build_expert_tactics_tool,
     build_knowledge_search_tool,
 )
 
@@ -123,14 +122,9 @@ async def build_optional_runtime_tools(
             )
         )
 
-    if "script_flows" in selected_categories:
-        tools.append(
-            build_expert_tactics_tool(
-                agent_id=agent.id,
-                tenant_id=tenant_id,
-                openai_api_key=openai_api_key,
-            )
-        )
+    # «Потоки эксперта» (search_expert_tactics) выпилены из рантайма: стилевые поля
+    # узлов не редактировались в UI (приходили только из шаблона), тул вызывался
+    # 23 раза за всю историю. Материал стиля переезжает в system_prompt / навыки.
 
     # Навыки эксперта, выбираемые САМОЙ моделью (как Claude Skills). Регистрируем,
     # только если фича включена и у агента есть опубликованные навыки со skill_doc.

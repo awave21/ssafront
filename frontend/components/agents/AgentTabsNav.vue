@@ -80,9 +80,10 @@ const tabs = computed<TabDef[]>(() => {
       label: 'Источники знаний',
       path: `/agents/${id}/knowledge`,
       icon: BookOpen,
+      // Навыки (/skills) сюда больше не входят — они относятся к разделу
+      // «Эксперт» (пункт sidebar), а не к источникам знаний.
       match: [
         `/agents/${id}/knowledge`,
-        `/agents/${id}/skills`,
       ],
     },
     {
@@ -103,7 +104,6 @@ const tabs = computed<TabDef[]>(() => {
       icon: GitBranch,
       match: [
         `/agents/${id}/scenarios`,
-        `/agents/${id}/scripts`,
       ],
     },
     {

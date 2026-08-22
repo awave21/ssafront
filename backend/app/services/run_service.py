@@ -40,7 +40,7 @@ from app.services.runtime.context_assembler import (
     select_optional_runtime_tool_categories,
 )
 from app.services.runtime.tool_registry import build_optional_runtime_tools
-from app.services.runtime.skill_layer import build_skill_layer_prompt
+from app.services.runtime.skill_layer import build_skill_layer_prompt, build_style_digest_prompt
 from app.services.runtime.scenario_runtime import apply_dialog_scenario_phases_before_llm
 from app.core.config import get_settings
 from app.services.logfire_cost_reconcile import schedule_logfire_cost_reconcile
@@ -641,6 +641,37 @@ def append_token_usage_steps(
 # Execute run (common logic for create_run, stream_run, webhooks, ws)
 # ---------------------------------------------------------------------------
 
+def _classify_tool_result(payload: Any) -> tuple[str, dict[str, Any] | None]:
+    """Чем закончился вызов рантайм-тула: success, empty или error.
+
+    Раньше в лог писалась константа "success" — все 211 вызовов в базе значились
+    успешными, и по логу нельзя было отличить сломавшийся инструмент от рабочего.
+    Настоящий признак лежит внутри ответа: рантайм-тулы кладут туда ключ error
+    (sqns) или status='no_match' (поиск по прямым вопросам).
+
+    «empty» — не ошибка: инструмент отработал, но ничего не нашёл. Отличать
+    полезно: пустой поиск лечится наполнением источника, ошибка — починкой.
+    """
+    if not isinstance(payload, dict):
+        return "success", None
+
+    error = payload.get("error")
+    if error:
+        return "error", {"error": str(error)[:300]}
+
+    status = str(payload.get("status") or "").strip().lower()
+    if status and status not in {"ok", "success"}:
+        return "empty", {"tool_status": status}
+
+    # Единственное содержательное поле — пустой список: так выглядит поиск слотов,
+    # не нашедший ни одного окна ({"availableTimeSlots": []}).
+    collections = [value for value in payload.values() if isinstance(value, list)]
+    if collections and all(not value for value in collections) and len(collections) == len(payload):
+        return "empty", None
+
+    return "success", None
+
+
 async def execute_agent_run(
     db: AsyncSession,
     *,
@@ -762,6 +793,26 @@ async def execute_agent_run(
             base = (system_prompt_override or agent.system_prompt or "").rstrip()
             system_prompt_override = base + skill_addition
 
+    # Стиль-слой (голос эксперта): компактная выжимка из опубликованных навыков.
+    # Намеренно НЕ через system_prompt_override — сценарные pre-LLM фазы ниже
+    # пересобирают override от agent.system_prompt и затёрли бы добавку (ровно
+    # так молчал навык-слой). Передаётся отдельным параметром в orchestrator,
+    # который приклеивает блок ПОСЛЕ всех пересборок.
+    style_prompt_addition: str | None = None
+    if settings.runtime_style_layer_enabled:
+        try:
+            style_prompt_addition = await build_style_digest_prompt(
+                db,
+                agent_id=agent.id,
+                input_message=input_message,
+                message_history=message_history,
+                openai_api_key=openai_api_key,
+                tenant_id=agent.tenant_id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("style_layer_build_failed", session_id=session_id)
+            style_prompt_addition = None
+
     # Same phases as inbound webhooks (webhooks_inbound_agent): dialog_start on first message
     # in session, then client_message / client_return. Test chat (/runs, WS) previously skipped
     # these and only ran agent_message after the model — so «Начало диалога» did not fire in UI.
@@ -802,6 +853,7 @@ async def execute_agent_run(
             openai_api_key=openai_api_key,
             anthropic_api_key=anthropic_api_key,
             system_prompt_override=system_prompt_override,
+            style_prompt_addition=style_prompt_addition,
             extra_tools=extra_runtime_tools or None,
         )
 
@@ -1087,6 +1139,8 @@ async def execute_agent_run(
         if not tool_name or tool_name in captured_names:
             continue
         args = item.get("args") or {}
+        tool_result = item.get("result")
+        call_status, call_error = _classify_tool_result(tool_result)
         tool_description = str(
             item.get("description") or item.get("when_to_call") or tool_name
         )
@@ -1099,13 +1153,13 @@ async def execute_agent_run(
                 tool_name=tool_name,
                 tool_description=tool_description,
                 tool_settings_url=f"/agents/{agent.id}",
-                status="success",
+                status=call_status,
                 invoked_at=datetime.now(timezone.utc),
                 duration_ms=None,
                 user_info=_to_json_object(user_info),
                 request_payload=_to_json_object(args) if args else None,
-                response_payload=_to_json_object(item.get("result")),
-                error_payload=None,
+                response_payload=_to_json_object(tool_result),
+                error_payload=_to_json_object(call_error),
             )
         )
 

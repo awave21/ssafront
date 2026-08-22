@@ -36,9 +36,11 @@ router = APIRouter()
 
 MAX_TABLES_PER_TENANT = 100
 MAX_ATTRIBUTES_PER_TABLE = 100
-SYSTEM_ID_FIELD_NAME = "id"
-SYSTEM_CREATED_AT_FIELD_NAME = "created_at"
-SYSTEM_FIELD_NAMES = {SYSTEM_ID_FIELD_NAME, SYSTEM_CREATED_AT_FIELD_NAME}
+from app.services.user_table.service import (  # noqa: E402  — реэкспорт для совместимости
+    SYSTEM_CREATED_AT_FIELD_NAME,
+    SYSTEM_FIELD_NAMES,
+    SYSTEM_ID_FIELD_NAME,
+)
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 

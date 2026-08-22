@@ -370,8 +370,23 @@
               </div>
             </div>
 
+            <!-- Переключатель «простой / детальный». По умолчанию простой:
+                 навык правится через чат, справа — только просмотр. -->
+            <div class="flex items-center justify-between gap-2 rounded-2xl border border-[#ECEAF4] bg-white px-3.5 py-2.5">
+              <p class="text-[11px] leading-relaxed text-[#6C6980]">
+                {{ showDetails ? 'Ручное редактирование структуры навыка.' : 'Навык собирается в чате слева. Здесь — что уже накоплено.' }}
+              </p>
+              <button
+                type="button"
+                class="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50"
+                @click="showDetails = !showDetails"
+              >
+                {{ showDetails ? 'Скрыть детали' : 'Показать детали' }}
+              </button>
+            </div>
+
             <!-- поиск -->
-            <div class="relative">
+            <div v-if="showDetails" class="relative">
               <Search class="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 v-model="objSearch"
@@ -382,7 +397,7 @@
             </div>
 
             <!-- действия -->
-            <div class="flex flex-wrap items-center justify-between gap-2">
+            <div v-if="showDetails" class="flex flex-wrap items-center justify-between gap-2">
               <div class="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -412,9 +427,9 @@
               </button>
             </div>
 
-            <!-- Full skill text (read-only) -->
+            <!-- Full skill text (read-only) — в простом режиме это и есть просмотр навыка -->
             <section
-              v-if="showFullText"
+              v-if="showFullText || !showDetails"
               class="overflow-hidden rounded-3xl border border-indigo-100 bg-white shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]"
             >
               <div class="flex items-center justify-between border-b border-slate-100 bg-indigo-50/40 px-4 py-2.5">
@@ -433,8 +448,8 @@
               <pre class="max-h-[420px] overflow-auto whitespace-pre-wrap px-5 py-4 text-xs leading-relaxed text-slate-700">{{ fullText }}</pre>
             </section>
 
-            <!-- Контекст навыка — всегда виден и редактируется -->
-            <section class="rounded-3xl border border-slate-100 bg-white p-4 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]">
+            <!-- Контекст навыка — редактируется только в деталях -->
+            <section v-if="showDetails" class="rounded-3xl border border-slate-100 bg-white p-4 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]">
               <div class="flex items-baseline gap-2">
                 <label class="text-sm font-bold text-slate-900">Контекст навыка</label>
                 <span class="text-xs text-slate-400">описание для выбора навыка</span>
@@ -452,8 +467,8 @@
               />
             </section>
 
-            <!-- Навык как ветки условий по этапам диалога -->
-            <section class="space-y-4">
+            <!-- Навык как ветки условий по этапам диалога — редактор только в деталях -->
+            <section v-if="showDetails" class="space-y-4">
               <div v-for="grp in visibleStageGroups" :key="grp.stage">
                 <!-- этап -->
                 <div class="mb-2 flex items-center gap-2">
@@ -902,6 +917,10 @@ const endings = computed(() => skill.value?.endings ?? [])
 // ── UX-состояние вкладки «Структура» ──────────────────────────────────────────
 const objSearch = ref('')
 const showFullText = ref(false)
+// Экран навыка по умолчанию простой: чат слева + read-only «текст навыка» справа.
+// Ручной редактор структуры (обработки, этапы, уровни фраз) — под «Показать детали»,
+// чтобы эксперт-непрограммист не встречал форму на десяток полей.
+const showDetails = ref(false)
 const showContext = ref(false)
 const showGaps = ref(false)
 const showExtra = ref(false)

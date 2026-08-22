@@ -59,9 +59,17 @@
           </button>
         </div>
 
-        <div v-if="functionParameters.length === 0" class="py-4 text-center text-sm text-slate-400">
+        <!-- Тот же приём, что и у пустого блока действий: текст прежний, блок
+             стал кликабельным. Рамка добавлена, чтобы два пустых состояния в
+             одной форме выглядели одинаково. -->
+        <button
+          v-if="functionParameters.length === 0"
+          type="button"
+          class="w-full rounded-xl border border-dashed border-slate-200 bg-white/60 py-6 text-center text-sm text-slate-400 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-[0_10px_24px_-14px_rgba(0,0,0,0.10)]"
+          @click="addParameter"
+        >
           Параметров пока нет. Нажмите «+ Добавить параметр».
-        </div>
+        </button>
 
         <div v-else class="space-y-3">
           <div
@@ -93,12 +101,21 @@
             </div>
 
             <div class="space-y-1.5">
-              <label class="text-xs font-semibold text-slate-700">Описание параметра</label>
+              <label class="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                Описание параметра — что модель должна сюда записать
+                <FieldHint
+                  title="Описание видит модель"
+                  text="Это не пометка для вас, а инструкция для модели: по ней она решает, что именно вытащить из сообщения клиента. «Телефон клиента для связи» → из «мой номер 8999…» модель возьмёт номер. Если параметр заполняется не тем — правьте в первую очередь это поле."
+                />
+              </label>
               <Input
                 :model-value="parameter.description"
-                placeholder="Например: Имя клиента для записи"
+                placeholder="Например: телефон клиента для связи, только цифры"
                 @update:model-value="updateParameter(index, 'description', $event)"
               />
+              <p class="text-xs text-slate-500">
+                Пишите так, будто объясняете помощнику. Чем конкретнее — тем реже модель ошибается.
+              </p>
             </div>
 
             <div class="flex items-center justify-between pt-1">
@@ -125,6 +142,24 @@
         </div>
       </div>
 
+      <!-- Действия правила -->
+      <div class="space-y-3 rounded-2xl bg-slate-100 p-5">
+        <RuleActionsTable
+          :actions="actions"
+          :can-edit="canEdit"
+          @add="$emit('add-action')"
+          @edit="$emit('edit-action', $event)"
+          @remove="$emit('remove-action', $event)"
+          @move-up="$emit('move-action-up', $event)"
+          @move-down="$emit('move-action-down', $event)"
+        />
+
+        <!-- Редактор действия живёт здесь, а не после всей формы: иначе он
+             раскрывается в самом низу страницы, далеко от списка, к которому
+             относится. Владеет им родитель — сюда приходит слотом. -->
+        <slot name="action-editor" />
+      </div>
+
       <!-- Реакция на выполнение -->
       <div class="space-y-3 rounded-2xl bg-slate-100 p-5">
         <div class="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
@@ -134,19 +169,13 @@
             text="Что бот сделает после успешного выполнения функции. «AI ответит сам» — модель сформулирует ответ по данным функции. «Отправить сообщение» — фиксированный текст. «Инструкция для AI» — подсказка модели, как ответить. «Промолчать» — только тихое действие без сообщения клиенту."
           />
         </div>
-        <div class="grid gap-3 sm:grid-cols-[minmax(220px,280px)_1fr]">
-          <Select :model-value="local.reaction_mode" @update:model-value="local.reaction_mode = $event as any">
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="item in reactionOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <div class="rounded-xl border border-emerald-200 bg-emerald-50/40 px-4 py-2.5 text-sm text-slate-700">
-            {{ reactionDescription }}
-          </div>
-        </div>
+        <OptionCardPicker
+          :items="reactionCards"
+          :model-value="local.reaction_mode"
+          :disabled="!canEdit"
+          :columns="4"
+          @update:model-value="local.reaction_mode = $event as any"
+        />
         <div v-if="local.reaction_mode === 'send_message'" class="space-y-1.5">
           <label class="text-xs font-semibold text-slate-700">Текст сообщения</label>
           <Textarea v-model="local.reaction_message" class="bg-white" />
@@ -166,19 +195,12 @@
             text="«Продолжить» — обычная работа бота. «Пауза» — бот замолкает, ждёт сотрудника или события возобновления. «Дополнить промпт» — к системному промпту на СЛЕДУЮЩИЙ ход подмешивается указанный текст (не сохраняется навсегда)."
           />
         </div>
-        <div class="grid gap-3 sm:grid-cols-[minmax(220px,280px)_1fr]">
-          <Select :model-value="local.post_scenario" @update:model-value="local.post_scenario = $event as any">
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="item in postScenarioOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <div class="rounded-xl border border-emerald-200 bg-emerald-50/40 px-4 py-2.5 text-sm text-slate-700">
-            {{ postScenarioDescription }}
-          </div>
-        </div>
+        <OptionCardPicker
+          :items="postScenarioCards"
+          :model-value="local.post_scenario"
+          :disabled="!canEdit"
+          @update:model-value="local.post_scenario = $event as any"
+        />
         <div v-if="local.post_scenario === 'augment_prompt'" class="space-y-1.5">
           <label class="text-xs font-semibold text-slate-700">Что добавить в промпт</label>
           <Textarea v-model="local.post_scenario_prompt" class="bg-white" />
@@ -194,7 +216,9 @@
             text="Приоритет управляет порядком проверки правил (меньше — раньше). Тестовый режим пишет в лог, что правило сработало бы, но реакцию/действия не применяет. «Остановить следующие правила» — после срабатывания этого правила остальные правила той же фазы пропускаются."
           />
         </div>
-        <div class="grid gap-3 sm:grid-cols-3">
+        <!-- Три колонки только на широких экранах: на планшете карточка ужимается
+             до ~200px, и «по возрастанию» рядом с полем ввода уже не помещается. -->
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div class="flex flex-col justify-between rounded-xl bg-white p-4">
             <label class="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
               Приоритет
@@ -230,19 +254,6 @@
           Тестовый режим включён: правило пишется в журнал, но реакция и действия не применяются.
         </div>
       </div>
-
-      <!-- Действия правила -->
-      <div class="space-y-3 rounded-2xl bg-slate-100 p-5">
-        <RuleActionsTable
-          :actions="actions"
-          :can-edit="canEdit"
-          @add="$emit('add-action')"
-          @edit="$emit('edit-action', $event)"
-          @remove="$emit('remove-action', $event)"
-          @move-up="$emit('move-action-up', $event)"
-          @move-down="$emit('move-action-down', $event)"
-        />
-      </div>
     </div>
 
     <div v-if="showCancel" class="flex justify-end gap-2">
@@ -253,13 +264,15 @@
 
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { X } from 'lucide-vue-next'
+import type { Component } from 'vue'
+import { ArrowRight, Bot, FileText, MessageSquare, Pause, Sparkles, VolumeX, X } from 'lucide-vue-next'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select'
 import { Switch } from '~/components/ui/switch'
 import { Textarea } from '~/components/ui/textarea'
 import RuleActionsTable from '~/components/agents/function-rules/RuleActionsTable.vue'
+import OptionCardPicker, { type OptionCardItem } from '~/components/agents/function-rules/OptionCardPicker.vue'
 import FieldHint from '~/components/agents/settings/FieldHint.vue'
 import type { Tool } from '~/types/tool'
 import type { FunctionRule } from '~/types/functionRule'
@@ -308,11 +321,25 @@ const postScenarioOptions = [
   { value: 'augment_prompt', label: 'Дополнить промпт', description: 'К системному промпту добавится дополнительный текст на следующий ход.' },
 ]
 
-const reactionDescription = computed(
-  () => reactionOptions.find((o) => o.value === local.reaction_mode)?.description || '',
+// Описания переехали внутрь карточек, поэтому отдельная зелёная плашка с текстом
+// выбранного варианта больше не нужна — теперь видно все варианты сразу.
+const REACTION_ICONS: Record<string, Component> = {
+  send_message: MessageSquare,
+  ai_instruction: Sparkles,
+  ai_self_reply: Bot,
+  silent: VolumeX,
+}
+const POST_SCENARIO_ICONS: Record<string, Component> = {
+  continue: ArrowRight,
+  pause: Pause,
+  augment_prompt: FileText,
+}
+
+const reactionCards = computed<OptionCardItem[]>(() =>
+  reactionOptions.map((o) => ({ ...o, icon: REACTION_ICONS[o.value] || Bot })),
 )
-const postScenarioDescription = computed(
-  () => postScenarioOptions.find((o) => o.value === local.post_scenario)?.description || '',
+const postScenarioCards = computed<OptionCardItem[]>(() =>
+  postScenarioOptions.map((o) => ({ ...o, icon: POST_SCENARIO_ICONS[o.value] || ArrowRight })),
 )
 
 type FunctionParameterUi = {

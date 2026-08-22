@@ -144,6 +144,27 @@ class Settings(BaseSettings):
             "openai:gpt-4.1-nano, openai:gpt-4o, openai:gpt-4o-mini, openai:gpt-5.2"
         ),
     )
+    agent_assistant_model: str = Field(
+        default="openai:gpt-4.1-mini",
+        validation_alias="AGENT_ASSISTANT_MODEL",
+        description=(
+            "Модель помощника-конструктора. Отдельная от pydanticai_default_model: "
+            "та задаёт модель всем агентам в рантайме, и менять её ради помощника нельзя. "
+            "Замеряли на двух вопросах: gpt-4.1-mini — 3–4 с, ошибок нет; gpt-5-mini "
+            "недоступен без верификации организации; gpt-5-nano на low не возвращает "
+            "карточек вовсе, на medium думает 20+ с; gpt-5.1 отвечает лучше всех, но "
+            "вдесятеро дороже и медленнее. Поднять до gpt-5.1 можно через env."
+        ),
+    )
+    agent_assistant_reasoning_effort: str = Field(
+        default="none",
+        validation_alias="AGENT_ASSISTANT_REASONING_EFFORT",
+        description=(
+            "reasoning_effort помощника (none|minimal|low|medium|high). Применяется только "
+            "к reasoning-моделям OpenAI (gpt-5.x). low — компромисс: чат интерактивный, "
+            "но выводы о конфигурации требуют хоть какого-то рассуждения."
+        ),
+    )
     summary_model: str = Field(
         default="openai:gpt-4o-mini",
         validation_alias="SUMMARY_MODEL",
@@ -623,6 +644,19 @@ class Settings(BaseSettings):
             "system_prompt_override — вместо пофрагментной RAG-выборки тактик. Навык "
             "формирует поведение голосом эксперта, факты остаются жёсткими (из тулов). "
             "По умолчанию False — включать точечно."
+        ),
+    )
+    runtime_style_layer_enabled: bool = Field(
+        default=True,
+        validation_alias="RUNTIME_STYLE_LAYER_ENABLED",
+        description=(
+            "Стиль-слой (голос эксперта): компактная выжимка из опубликованных навыков "
+            "агента (обязательные/дословные фразы, запреты, образцы интонации) добавляется "
+            "к system_prompt в КАЖДОМ запуске. В отличие от навык-слоя не зависит от "
+            "resolve_clinic_facts — работает с первой реплики диалога; в отличие от "
+            "augment_prompt приклеивается в orchestrator ПОСЛЕ сценарных фаз и не "
+            "затирается ими. Пустой дистиллят (нет опубликованных навыков) — блок не "
+            "добавляется, поэтому True безопасен для агентов без навыков."
         ),
     )
     skill_distiller_model: str = Field(

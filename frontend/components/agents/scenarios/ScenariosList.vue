@@ -1,15 +1,41 @@
 <template>
   <div class="max-w-full space-y-6 overflow-hidden">
-    <!-- Header with Create Button -->
-    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+    <!-- Две большие CTA-карточки — как в разделе функций -->
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <button
-        @click="$emit('create')"
-        class="inline-flex h-10 shrink-0 self-start items-center gap-2 whitespace-nowrap rounded-xl bg-indigo-600 px-5 text-sm font-bold text-white transition-colors hover:bg-indigo-700"
+        type="button"
+        class="group flex items-center gap-4 rounded-2xl border-2 border-dashed border-primary/40 bg-primary/[0.04] p-5 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/70 hover:bg-primary/[0.08]"
+        @click="$emit('open-catalog')"
       >
-        <Plus class="w-4 h-4" />
-        Создать сценарий
+        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white text-primary shadow-[0_2px_8px_-2px_rgba(59,130,246,0.15)] transition-transform group-hover:scale-105">
+          <LayoutGrid class="h-5 w-5" />
+        </div>
+        <div class="min-w-0">
+          <div class="text-sm font-semibold text-primary">+ Добавить готовый</div>
+          <div class="mt-1 text-xs leading-relaxed text-slate-600">
+            Выберите готовый сценарий из каталога — популярные кейсы, минимум настроек
+          </div>
+        </div>
       </button>
 
+      <button
+        type="button"
+        class="group flex items-center gap-4 rounded-2xl border-2 border-dashed border-slate-200 bg-white p-5 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-slate-50"
+        @click="$emit('create')"
+      >
+        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+          <Plus class="h-5 w-5" />
+        </div>
+        <div class="min-w-0">
+          <div class="text-sm font-semibold text-slate-900 transition-colors group-hover:text-primary">+ Создать свой</div>
+          <div class="mt-1 text-xs leading-relaxed text-slate-600">
+            Добавьте свой сценарий, самостоятельно настроив триггер и действия
+          </div>
+        </div>
+      </button>
+    </div>
+
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-end">
       <div v-if="scenarios.length > 0" class="relative min-w-0 grow sm:grow-0">
         <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
         <input
@@ -87,7 +113,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Plus, Search, Loader2, ListTree, AlertCircle } from 'lucide-vue-next'
+import { Plus, Search, Loader2, ListTree, AlertCircle, LayoutGrid } from 'lucide-vue-next'
 import ScenarioCard from './ScenarioCard.vue'
 import type { Scenario } from '~/types/scenario'
 
@@ -99,6 +125,7 @@ const props = defineProps<{
 
 defineEmits<{
   (e: 'create'): void
+  (e: 'open-catalog'): void
   (e: 'select', scenario: Scenario): void
   (e: 'toggle', id: string, enabled: boolean): void
   (e: 'settings', scenario: Scenario): void

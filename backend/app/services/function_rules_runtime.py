@@ -27,10 +27,21 @@ from app.db.models.tool import Tool
 from app.schemas.auth import AuthContext
 from app.core.config import get_settings
 from app.services.agent_user_state import upsert_agent_user_state
-from app.services.dialog_state import set_dialog_status, upsert_dialog_status_flush_only
-from app.services.ops_alerts import send_manager_pause_alert
+from app.services.dialog_state import (
+    get_dialog_variables,
+    set_dialog_status,
+    set_dialog_variables,
+    upsert_dialog_status_flush_only,
+)
+from app.services.ops_alerts import send_admin_notification, send_manager_pause_alert
 from app.services.semantic_matcher import semantic_match_text
 from app.services.tool_executor import _ensure_allowed_domain, execute_tool_call
+from app.services.user_table.runtime import (
+    find_record,
+    insert_record,
+    load_table,
+    update_record,
+)
 from app.utils.idempotency import generate_idempotency_key
 
 logger = structlog.get_logger(__name__)
@@ -76,6 +87,43 @@ async def _pause_dialog_and_user(
         is_disabled=True,
         changed_by_user_id=user.user_id,
     )
+
+
+async def _resolve_admin_notification_target(
+    db: AsyncSession,
+    *,
+    agent_id: UUID,
+    cfg: dict[str, Any],
+) -> tuple[str | None, str | None, str, str | None]:
+    """Определить бота и чат для уведомления администратора.
+
+    Возвращает (bot_token, chat_id, agent_name, skip_reason). Если skip_reason
+    не None — отправлять не нужно, причина уходит в трейс действия.
+
+    Явно указанная в конфиге пара «токен + чат» имеет приоритет и работает даже
+    при выключенном тумблере `admin_notification_enabled`: это осознанный выбор
+    автора правила, он адресует уведомление в свой чат. Если же реквизиты берутся
+    из настроек агента, выключенный тумблер означает «не слать» — иначе глобальный
+    выключатель в настройках не выключал бы ничего.
+    """
+    agent_obj = await db.get(Agent, agent_id)
+    agent_name = agent_obj.name if agent_obj is not None else ""
+
+    cfg_token = str(cfg.get("bot_token") or "").strip()
+    cfg_chat = str(cfg.get("chat_id") or "").strip()
+    if cfg_token and cfg_chat:
+        return cfg_token, cfg_chat, agent_name, None
+
+    if agent_obj is None:
+        return None, None, agent_name, "agent_not_found"
+    if not getattr(agent_obj, "admin_notification_enabled", False):
+        return None, None, agent_name, "admin_notifications_disabled"
+
+    token = cfg_token or str(agent_obj.admin_notification_bot_token or "").strip()
+    chat = cfg_chat or str(agent_obj.admin_notification_chat_id or "").strip()
+    if not token or not chat:
+        return None, None, agent_name, "missing_bot_token_or_chat_id"
+    return token, chat, agent_name, None
 
 
 @dataclass
@@ -176,6 +224,13 @@ def _render_template(value: Any, context: dict[str, Any]) -> Any:
                 if root in context:
                     return _resolve_path(context[root], tail)
 
+            # Переменные диалога: {{city}} работает наравне с {{variables.city}}.
+            # Ищем до tool-payload'ов — имя переменной человек задал явно, и оно
+            # не должно перекрываться случайным одноимённым полем из ответа тула.
+            dialog_variables = context.get("variables")
+            if isinstance(dialog_variables, dict) and token in dialog_variables:
+                return dialog_variables.get(token)
+
             # Backward compatibility: allow {{field}} to be resolved
             # from tool payload contexts if the key is not top-level.
             for source_key in ("tool_result", "last_tool_result", "tool_args", "tool_call_args"):
@@ -262,9 +317,31 @@ def _parse_hhmm(s: str) -> tuple[int, int]:
         return 0, 0
 
 
+def _first_present(cfg: dict[str, Any], *keys: str) -> Any:
+    """Первое непустое значение из перечисленных ключей.
+
+    Редактор сценария пишет start_time/end_time и weekdays, а раннер исторически
+    читал start/end и days — правило по времени срабатывало круглосуточно, а по
+    дням недели не срабатывало никогда. Принимаем оба написания, как это уже
+    сделано для platforms/platform ниже.
+    """
+    for key in keys:
+        value = cfg.get(key)
+        if value not in (None, "", []):
+            return value
+    return None
+
+
 def _evaluate_schedule_time(cfg: dict[str, Any], context: dict[str, Any]) -> ConditionResult:
-    start_s = str(cfg.get("start", "00:00"))
-    end_s = str(cfg.get("end", "23:59"))
+    start_raw = _first_present(cfg, "start", "start_time")
+    end_raw = _first_present(cfg, "end", "end_time")
+    if start_raw is None or end_raw is None:
+        # Раньше пустое окно подставляло 00:00–23:59, то есть правило
+        # срабатывало всегда — ровно наоборот тому, чего ждёт человек,
+        # настроивший ночной автоответ.
+        return ConditionResult(matched=False, reason="schedule_time missing window")
+    start_s = str(start_raw)
+    end_s = str(end_raw)
     tz_name = str(context.get("agent_timezone") or "UTC").strip() or "UTC"
     try:
         tz = ZoneInfo(tz_name)
@@ -288,7 +365,7 @@ def _evaluate_schedule_time(cfg: dict[str, Any], context: dict[str, Any]) -> Con
 
 
 def _evaluate_schedule_weekday(cfg: dict[str, Any], context: dict[str, Any]) -> ConditionResult:
-    days_raw = cfg.get("days")
+    days_raw = _first_present(cfg, "days", "weekdays")
     if not isinstance(days_raw, list) or not days_raw:
         return ConditionResult(matched=False, reason="schedule_weekday missing days")
     tz_name = str(context.get("agent_timezone") or "UTC").strip() or "UTC"
@@ -516,7 +593,7 @@ async def _execute_rule_tool(
         except Exception:
             pass
         # endregion agent log
-        result_payload = await execute_tool_call(
+        result_payload = await _call_rule_webhook(
             endpoint=tool.endpoint,
             input_schema=tool.input_schema,
             args=args,
@@ -538,13 +615,15 @@ async def _execute_rule_tool(
             "skipped",
             {"reason": "unsupported_tool_execution_type", "tool_id": str(tool.id), "execution_type": tool.execution_type},
         )
+    tool_status, failure_reason = _classify_rule_tool_result(result_payload)
     return (
         result_payload,
         ActionResult(
             None,
             "rule_tool",
-            "success",
+            tool_status,
             {
+                "error": failure_reason,
                 "tool_id": str(tool.id),
                 "tool_name": tool.name,
                 "execution_type": tool.execution_type,
@@ -557,6 +636,36 @@ async def _execute_rule_tool(
             },
         ),
     )
+
+
+async def _call_rule_webhook(**kwargs: Any) -> dict[str, Any]:
+    """Вебхук правила. Исключение превращаем в полезную нагрузку с ошибкой.
+
+    Иначе падение вебхука рвёт весь прогон правил, и действия «При ошибке»
+    не выполняются — до них дело просто не доходит.
+    """
+    try:
+        return await execute_tool_call(**kwargs)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("rule_tool_webhook_failed", error=str(exc))
+        return {"error": str(exc)[:300], "status_code": None}
+
+
+def _classify_rule_tool_result(payload: Any) -> tuple[str, str | None]:
+    """Успех или ошибка вызова тула правила.
+
+    Раньше статус всегда был «успех», поэтому действия с условием «При ошибке»
+    не выполнялись никогда — фильтр в execute_post_actions отбрасывал их все.
+    """
+    if not isinstance(payload, dict):
+        return "success", None
+    error_msg = payload.get("error")
+    if error_msg:
+        return "error", str(error_msg)[:300]
+    status_code = payload.get("status_code")
+    if isinstance(status_code, int) and status_code >= 400:
+        return "error", f"HTTP {status_code}"
+    return "success", None
 
 
 async def execute_post_actions(
@@ -629,6 +738,87 @@ async def execute_post_actions(
                 results.append(ActionResult(action.id, action.action_type, "success"))
                 continue
 
+            if action.action_type == "notify_admin":
+                bot_token, chat_id, agent_name, skip_reason = await _resolve_admin_notification_target(
+                    db, agent_id=agent_id, cfg=cfg
+                )
+                if skip_reason is not None:
+                    results.append(
+                        ActionResult(action.id, action.action_type, "skipped", {"reason": skip_reason})
+                    )
+                    continue
+                text = str(_render_template(str(cfg.get("message", "")), output_context) or "").strip()
+                include_context = bool(cfg.get("include_context", True))
+                sent = await send_admin_notification(
+                    bot_token=bot_token,
+                    chat_id=chat_id,
+                    agent_name=agent_name,
+                    session_id=session_id,
+                    message=text or None,
+                    last_client_message=(
+                        (str(output_context.get("last_user_message") or "").strip() or None)
+                        if include_context
+                        else None
+                    ),
+                )
+                results.append(
+                    ActionResult(
+                        action.id,
+                        action.action_type,
+                        "success" if sent else "error",
+                        # bot_token в трейс не пишем — это секрет.
+                        {"chat_id": chat_id, "message": text, "delivered": sent},
+                    )
+                )
+                continue
+
+            if action.action_type == "handoff_to_operator":
+                await _pause_dialog_and_user(
+                    db,
+                    tenant_id=tenant_id,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    user=user,
+                )
+                output_context["should_pause"] = True
+                handoff_details: dict[str, Any] = {"paused": True}
+
+                client_message = str(
+                    _render_template(str(cfg.get("client_message", "")), output_context) or ""
+                ).strip()
+                if client_message:
+                    output_context.setdefault("messages_to_send", []).append(client_message)
+                    handoff_details["client_message"] = client_message
+
+                if bool(cfg.get("notify_admin", True)):
+                    bot_token, chat_id, agent_name, skip_reason = await _resolve_admin_notification_target(
+                        db, agent_id=agent_id, cfg=cfg
+                    )
+                    if skip_reason is not None:
+                        handoff_details["notify"] = f"skipped:{skip_reason}"
+                    else:
+                        reason = str(
+                            _render_template(str(cfg.get("reason", "")), output_context) or ""
+                        ).strip()
+                        delivered = await send_manager_pause_alert(
+                            bot_token=bot_token,
+                            chat_id=chat_id,
+                            agent_name=agent_name,
+                            session_id=session_id,
+                            reason=reason or "передача оператору",
+                            last_client_message=(
+                                str(output_context.get("last_user_message") or "").strip() or None
+                            ),
+                        )
+                        handoff_details["notify"] = "sent" if delivered else "failed"
+                else:
+                    handoff_details["notify"] = "disabled"
+
+                results.append(
+                    ActionResult(action.id, action.action_type, "success", handoff_details)
+                )
+                continue
+
             if action.action_type == "send_message":
                 template = str(cfg.get("message", "")).strip()
                 rendered_message = _render_template(template, output_context)
@@ -640,6 +830,139 @@ async def execute_post_actions(
                         action.action_type,
                         "success",
                         {"message": rendered_message},
+                    )
+                )
+                continue
+
+            if action.action_type == "set_variable":
+                name = str(cfg.get("name", "")).strip()
+                if not name:
+                    results.append(
+                        ActionResult(action.id, action.action_type, "skipped", {"reason": "empty_name"})
+                    )
+                    continue
+                variables = dict(output_context.get("variables") or {})
+                operation = str(cfg.get("operation", "set")).strip().lower()
+
+                if operation == "clear":
+                    variables.pop(name, None)
+                    new_value: Any = None
+                elif operation == "increment":
+                    try:
+                        step = float(_render_template(str(cfg.get("value", "1")), output_context))
+                    except (TypeError, ValueError):
+                        step = 1.0
+                    try:
+                        current = float(variables.get(name, 0) or 0)
+                    except (TypeError, ValueError):
+                        current = 0.0
+                    total = current + step
+                    # Целые держим целыми, иначе счётчики превращаются в 3.0.
+                    new_value = int(total) if float(total).is_integer() else total
+                    variables[name] = new_value
+                else:
+                    operation = "set"
+                    new_value = _render_template(str(cfg.get("value", "")), output_context)
+                    variables[name] = new_value
+
+                output_context["variables"] = variables
+                output_context["variables_dirty"] = True
+                results.append(
+                    ActionResult(
+                        action.id,
+                        action.action_type,
+                        "success",
+                        {"name": name, "operation": operation, "value": new_value},
+                    )
+                )
+                continue
+
+            if action.action_type in ("table_find", "table_write"):
+                table = await load_table(
+                    db, tenant_id=tenant_id, table_id=cfg.get("table_id")
+                )
+
+            if action.action_type == "table_find":
+                column = str(cfg.get("column", "")).strip()
+                lookup = _render_template(str(cfg.get("value", "")), output_context)
+                prefix = str(cfg.get("store_prefix", "") or "row").strip() or "row"
+
+                record = await find_record(
+                    db, tenant_id=tenant_id, table=table, column=column, value=lookup
+                )
+                variables = dict(output_context.get("variables") or {})
+                variables[f"{prefix}_found"] = record is not None
+                if record is not None:
+                    # Раскладываем найденную строку по переменным: дальше по цепочке
+                    # к ним обращаются как {{row_phone}}, без знания про таблицы.
+                    for key, val in (record.data or {}).items():
+                        variables[f"{prefix}_{key}"] = val
+                output_context["variables"] = variables
+                output_context["variables_dirty"] = True
+
+                results.append(
+                    ActionResult(
+                        action.id,
+                        action.action_type,
+                        "success",
+                        {
+                            "table": table.name,
+                            "column": column,
+                            "value": lookup,
+                            "found": record is not None,
+                            "prefix": prefix,
+                        },
+                    )
+                )
+                continue
+
+            if action.action_type == "table_write":
+                mode = str(cfg.get("mode", "insert")).strip().lower()
+                if mode not in ("insert", "update", "upsert"):
+                    mode = "insert"
+                raw_values = cfg.get("values")
+                values = _render_template(raw_values, output_context) if isinstance(raw_values, dict) else {}
+                if not isinstance(values, dict) or not values:
+                    results.append(
+                        ActionResult(action.id, action.action_type, "skipped", {"reason": "empty_values"})
+                    )
+                    continue
+
+                existing = None
+                if mode in ("update", "upsert"):
+                    match_column = str(cfg.get("match_column", "")).strip()
+                    match_value = _render_template(str(cfg.get("match_value", "")), output_context)
+                    existing = await find_record(
+                        db,
+                        tenant_id=tenant_id,
+                        table=table,
+                        column=match_column,
+                        value=match_value,
+                    )
+
+                if existing is not None:
+                    written = await update_record(
+                        db, tenant_id=tenant_id, table=table, record=existing, values=values
+                    )
+                    outcome = "updated"
+                elif mode == "update":
+                    # Обновление без найденной строки — не ошибка, а «нечего обновлять».
+                    results.append(
+                        ActionResult(action.id, action.action_type, "skipped", {"reason": "record_not_found"})
+                    )
+                    continue
+                else:
+                    written = await insert_record(
+                        db, tenant_id=tenant_id, table=table, values=values
+                    )
+                    outcome = "inserted"
+
+                results.append(
+                    ActionResult(
+                        action.id,
+                        action.action_type,
+                        "success",
+                        {"table": table.name, "mode": mode, "outcome": outcome, "data": _truncate_for_trace(written)},
                     )
                 )
                 continue
@@ -924,6 +1247,13 @@ async def run_rules_for_phase(
     context_data.setdefault("message", message)
     if not rules_enabled:
         return [], context_data
+    # Переменные диалога кладём в контекст до перебора правил: они доступны
+    # в шаблонах {{...}} всех действий и реакций. Ключ мог прийти снаружи
+    # (тестовый прогон правил) — тогда не перетираем.
+    if "variables" not in context_data:
+        context_data["variables"] = await get_dialog_variables(
+            db, agent_id=agent_id, session_id=session_id
+        )
     stmt = (
         select(FunctionRule)
         .options(selectinload(FunctionRule.actions))
@@ -1067,6 +1397,9 @@ async def run_rules_for_phase(
                     if ai_instruction:
                         context_data.setdefault("augment_prompt", []).append(ai_instruction)
 
+                # Объявляем до ветки: иначе при пропуске тула значение либо
+                # не определено, либо протекает от предыдущего правила цикла.
+                rule_tool_trace: ActionResult | None = None
                 if not context_data.get("skip_rule_tool_execution"):
                     tool_result, rule_tool_trace = await _execute_rule_tool(
                         db,
@@ -1080,6 +1413,13 @@ async def run_rules_for_phase(
                     if rule_tool_trace is not None:
                         action_traces.append(rule_tool_trace)
                 context_data["current_rule_id"] = rule.id
+                # Статус берём из вызова тула правила: с константой "success"
+                # действия «При ошибке» не выполнялись никогда.
+                execution_status = (
+                    "error"
+                    if rule_tool_trace is not None and rule_tool_trace.status == "error"
+                    else "success"
+                )
                 post_action_traces, context_data = await execute_post_actions(
                     db,
                     tenant_id=tenant_id,
@@ -1088,7 +1428,7 @@ async def run_rules_for_phase(
                     trace_id=trace_id,
                     user=user,
                     actions=rule.actions,
-                    execution_status="success",
+                    execution_status=execution_status,
                     context=context_data,
                 )
                 action_traces.extend(post_action_traces)
@@ -1146,5 +1486,18 @@ async def run_rules_for_phase(
                 actions=action_traces,
             )
         )
+
+    # Сохраняем переменные один раз в конце, а не после каждого set_variable:
+    # правила в одной фазе видят изменения друг друга через context_data,
+    # а в базу уходит одна запись вместо нескольких.
+    if context_data.get("variables_dirty"):
+        await set_dialog_variables(
+            db,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            variables=dict(context_data.get("variables") or {}),
+        )
+        context_data.pop("variables_dirty", None)
 
     return traces, context_data

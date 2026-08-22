@@ -117,7 +117,10 @@ services:
     mem_limit: "${SQNS_WORKER_MEM_LIMIT:-512m}"
     mem_reservation: "${SQNS_WORKER_MEM_RESERVATION:-256m}"
 
-  script-flow-index-worker:
+  # Отправка отложенных сообщений сценариев. Воркер был написан вместе с
+  # действием «Отложенное сообщение», но в компоуз его не добавили: сообщения
+  # копились в очереди, которую никто не читал.
+  scenario-delayed-worker:
     restart: unless-stopped
     build:
       context: ../backend
@@ -128,7 +131,7 @@ services:
       REDIS_URL: ${REDIS_URL}
       PYTHONPATH: /app
       SKIP_ALEMBIC: "1"
-    command: ["python", "-m", "app.workers.script_flow_index"]
+    command: ["python", "-m", "app.workers.scenario_delayed_dispatch"]
     depends_on:
       db:
         condition: service_healthy
@@ -136,9 +139,9 @@ services:
         condition: service_healthy
     volumes:
       - ./logs:/logs
-    cpus: "${SCRIPT_FLOW_INDEX_WORKER_CPUS:-0.40}"
-    mem_limit: "${SCRIPT_FLOW_INDEX_WORKER_MEM_LIMIT:-512m}"
-    mem_reservation: "${SCRIPT_FLOW_INDEX_WORKER_MEM_RESERVATION:-256m}"
+    cpus: "${SCENARIO_DELAYED_WORKER_CPUS:-0.25}"
+    mem_limit: "${SCENARIO_DELAYED_WORKER_MEM_LIMIT:-384m}"
+    mem_reservation: "${SCENARIO_DELAYED_WORKER_MEM_RESERVATION:-192m}"
 
   frontend:
     restart: unless-stopped
