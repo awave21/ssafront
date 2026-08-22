@@ -159,6 +159,109 @@ def score_skill_match(message: str, skill_name: str, skill_doc: dict[str, Any]) 
     return score
 
 
+import hashlib as _hashlib
+
+# Кэш эмбеддингов тем навыков в памяти процесса: описание навыка меняется редко,
+# считать его вектор на каждый запуск незачем. Ключ = sha1(topic_text).
+_SKILL_TOPIC_EMBED_CACHE: dict[str, list[float]] = {}
+_SKILL_TOPIC_CACHE_MAX = 512
+
+# Порог косинусной близости сообщения к теме навыка. Подобран под
+# text-embedding-3-small (у directory-порогов тот же ориентир ~0.35–0.45).
+# Ниже порога тема считается неопределённой — общий режим стиля.
+_SEMANTIC_TOPIC_THRESHOLD = 0.38
+# Насколько близко к лидеру должен быть навык, чтобы тоже считаться активным
+# (несколько тем одновременно, напр. «биоревитализация и мезотерапия — что лучше»).
+_SEMANTIC_TIE_GAP = 0.04
+
+
+def _skill_topic_text(skill_name: str, skill_doc: dict[str, Any]) -> str:
+    """Текст, представляющий ТЕМУ навыка для эмбеддинга: имя + контекст + триггеры.
+    Это то, с чем семантически сравнивается сообщение клиента."""
+    parts: list[str] = [str(skill_name or "")]
+    context = str(skill_doc.get("context") or "").strip()
+    if context:
+        parts.append(context)
+    for o in (skill_doc.get("objections") or []):
+        if isinstance(o, dict):
+            trg = str(o.get("trigger_when") or o.get("situation") or "").strip()
+            if trg:
+                parts.append(trg)
+    return "\n".join(p for p in parts if p).strip()
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    import math
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na > 0 and nb > 0 else 0.0
+
+
+async def find_active_skills_semantic(
+    message: str,
+    docs: list[tuple[str, dict[str, Any]]],
+    *,
+    openai_api_key: str | None,
+    db: AsyncSession | None = None,
+    tenant_id: Any = None,
+) -> set[str] | None:
+    """Тема разговора по СМЫСЛУ (эмбеддинги OpenAI), а не по совпадению слов.
+
+    Сообщение и тема каждого навыка (имя+контекст+триггеры) переводятся в векторы
+    text-embedding-3-small, сравниваются косинусом. Возвращает навыки-лидеры выше
+    порога, либо None — если эмбеддинги недоступны (нет ключа / ошибка), тогда
+    вызывающая сторона откатывается на лексический матчер.
+    """
+    from app.services.directory.service import create_embedding
+
+    text_msg = (message or "").strip()
+    if not text_msg or not openai_api_key:
+        return None
+
+    msg_vec = await create_embedding(
+        text_msg,
+        openai_api_key=openai_api_key,
+        db=db,
+        tenant_id=tenant_id,
+        charge_source_type="embedding.skill_topic_query",
+    )
+    if not msg_vec:
+        return None
+
+    scored: list[tuple[float, str]] = []
+    for name, doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        topic = _skill_topic_text(name, doc)
+        if not topic:
+            continue
+        key = _hashlib.sha1(topic.encode("utf-8")).hexdigest()
+        vec = _SKILL_TOPIC_EMBED_CACHE.get(key)
+        if vec is None:
+            vec = await create_embedding(
+                topic,
+                openai_api_key=openai_api_key,
+                db=db,
+                tenant_id=tenant_id,
+                charge_source_type="embedding.skill_topic_doc",
+            )
+            if not vec:
+                continue
+            if len(_SKILL_TOPIC_EMBED_CACHE) < _SKILL_TOPIC_CACHE_MAX:
+                _SKILL_TOPIC_EMBED_CACHE[key] = vec
+        scored.append((_cosine(msg_vec, vec), name))
+
+    if not scored:
+        return None
+    best = max(sc for sc, _ in scored)
+    if best < _SEMANTIC_TOPIC_THRESHOLD:
+        return set()  # тема не ясна — общий режим (не None: эмбеддинги отработали)
+    return {name for sc, name in scored if best - sc <= _SEMANTIC_TIE_GAP}
+
+
 def find_active_skills_by_message(
     message: str, docs: list[tuple[str, dict[str, Any]]]
 ) -> set[str]:
@@ -572,14 +675,21 @@ def render_style_digest(
 
 
 async def build_style_digest_prompt(
-    db: AsyncSession, *, agent_id: UUID, input_message: str | None = None
+    db: AsyncSession,
+    *,
+    agent_id: UUID,
+    input_message: str | None = None,
+    openai_api_key: str | None = None,
+    tenant_id: Any = None,
 ) -> str | None:
     """Загрузить опубликованные навыки агента и собрать стиль-выжимку, либо None.
 
-    Тему разговора определяем по сообщению клиента и ТЕКСТУ навыков (имя,
-    контекст, триггеры) — без идентификаторов, без обращения к инструментам и
-    без знания сферы бизнеса. Совпавшие навыки активны: их фразы идут первыми
-    и целиком. Тема не ясна (приветствие, общий вопрос) — общий режим.
+    Тему разговора определяем СЕМАНТИЧЕСКИ — по смыслу сообщения и темы навыка
+    (эмбеддинги OpenAI text-embedding-3-small, cosine). Так «уколы красоты»
+    находят навык биоревитализации, хотя слов навыка в реплике нет. Если ключа
+    эмбеддингов нет или вызов не удался — откат на лексический матчер по словам.
+    Совпавшие навыки активны: их фразы идут первыми и целиком; тема не ясна —
+    общий режим. Механизм не знает ни сферы бизнеса, ни имён инструментов.
     """
     rows = (
         await db.execute(
@@ -613,8 +723,23 @@ async def build_style_digest_prompt(
         return None
 
     active_names: set[str] = set()
+    topic_method = "none"
     if input_message and len(docs) > 1:
-        active_names = find_active_skills_by_message(input_message, docs)
+        semantic: set[str] | None = None
+        try:
+            semantic = await find_active_skills_semantic(
+                input_message, docs,
+                openai_api_key=openai_api_key, db=db, tenant_id=tenant_id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("style_layer_semantic_topic_failed", agent_id=str(agent_id))
+            semantic = None
+        if semantic is not None:
+            active_names = semantic          # эмбеддинги отработали (пусто = тема не ясна)
+            topic_method = "semantic"
+        else:
+            active_names = find_active_skills_by_message(input_message, docs)  # откат
+            topic_method = "lexical"
 
     digest = render_style_digest(docs, active_skill_names=active_names)
     if digest:
@@ -623,6 +748,7 @@ async def build_style_digest_prompt(
             agent_id=str(agent_id),
             skills=len(docs),
             active_skills=sorted(active_names),
+            topic_method=topic_method,
             digest_chars=len(digest),
         )
     return digest
