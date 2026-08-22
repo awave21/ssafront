@@ -115,7 +115,6 @@
                 </div>
               </div>
               <select
-                v-if="showDetails"
                 v-model="chatModel"
                 class="rounded-[11px] border border-[#ECEAF4] bg-[#F7F6FC] py-1.5 pl-2.5 pr-7 text-xs font-medium text-[#16141F] outline-none transition-colors hover:bg-[#F1EFFA] focus:border-[#7B61FF]"
                 @change="persistChatModel"

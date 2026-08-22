@@ -295,13 +295,13 @@ const { token } = useAuth()
 const authHeaders = () => ({ Authorization: `Bearer ${token.value}` })
 
 const tabs = [
-  { id: 'library', label: 'Библиотека' },
   { id: 'skills', label: 'Навыки' },
+  { id: 'library', label: 'Библиотека' },
   { id: 'log', label: 'Журнал' },
   { id: 'training', label: 'Обучение' },
 ] as const
 type TabId = (typeof tabs)[number]['id']
-const activeTab = ref<TabId>('library')
+const activeTab = ref<TabId>('skills')
 
 const library = ref<StyleLibrary | null>(null)
 const skills = ref<ExpertSkill[]>([])

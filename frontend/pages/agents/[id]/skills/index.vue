@@ -15,6 +15,17 @@
           </button>
           <button
             type="button"
+            class="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            :disabled="importing"
+            title="Создать навык из .md-файла — содержимое разберётся в опыт эксперта"
+            @click="mdInput?.click()"
+          >
+            <UploadCloud class="h-4 w-4" />
+            {{ importing ? 'Импорт…' : 'Импорт .md' }}
+          </button>
+          <input ref="mdInput" type="file" accept=".md,.markdown,.txt" class="hidden" @change="handleImportMd">
+          <button
+            type="button"
             class="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
             @click="openTrash"
           >
@@ -330,6 +341,7 @@ const {
   isLoading,
   error,
   fetchSkills,
+  importFromMarkdown,
   fetchTrash,
   createSkill,
   updateSkill,
@@ -411,6 +423,33 @@ const filteredCards = computed(() => {
 })
 
 const openSkill = (skillId: string) => navigateTo(`/agents/${agentId}/skills/${skillId}`)
+
+const importing = ref(false)
+const mdInput = ref<HTMLInputElement | null>(null)
+
+const handleImportMd = async (e: Event) => {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (input) input.value = ''
+  if (!file || importing.value) return
+  importing.value = true
+  try {
+    const markdown = await file.text()
+    if (!markdown.trim()) {
+      toastError('Файл пустой')
+      return
+    }
+    const name = file.name.replace(/\.(md|markdown|txt)$/i, '') || 'Импортированный навык'
+    const created = await importFromMarkdown({ name, markdown })
+    await fetchSkills()
+    toastSuccess('Навык создан из файла — проверьте и опубликуйте')
+    await navigateTo(`/agents/${agentId}/skills/${created.id}`)
+  } catch (err: unknown) {
+    toastError(err instanceof Error ? err.message : 'Не удалось импортировать файл')
+  } finally {
+    importing.value = false
+  }
+}
 
 const handleCreate = async () => {
   if (creating.value) return

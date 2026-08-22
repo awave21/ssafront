@@ -61,6 +61,18 @@ export const useExpertSkills = (agentId: string) => {
     })
   }
 
+  const importFromMarkdown = async (payload: {
+    name: string
+    markdown: string
+    model?: string | null
+  }): Promise<ExpertSkill> => {
+    return await apiFetch<ExpertSkill>(`${base}/import-markdown`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: payload,
+    })
+  }
+
   const updateSkill = async (
     skillId: string,
     payload: { name?: string; service_external_ids?: string[]; status?: 'draft' | 'published' },
@@ -222,6 +234,7 @@ export const useExpertSkills = (agentId: string) => {
     fetchTrash,
     getSkill,
     createSkill,
+    importFromMarkdown,
     updateSkill,
     deleteSkill,
     restoreSkill,

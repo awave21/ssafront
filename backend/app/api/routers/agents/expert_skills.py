@@ -115,6 +115,12 @@ class ImportFromFlowBody(BaseModel):
     flow_id: UUID
 
 
+class ImportFromMarkdownBody(BaseModel):
+    name: str
+    markdown: str
+    model: str | None = None  # любая модель из белого списка; None → дефолтный дистиллятор
+
+
 # Модели для ассистента навыка (белый список).
 SKILL_CHAT_MODELS: list[dict[str, str]] = [
     {"id": "openai:gpt-4.1", "label": "GPT-4.1", "hint": "быстро, дёшево"},
@@ -338,6 +344,51 @@ async def create_expert_skill(
         agent_id=agent_id,
         name=payload.name,
         service_external_ids=list(payload.service_external_ids or []),
+        skill_doc=skill_doc,
+        status="draft",
+    )
+    db.add(skill)
+    await db.commit()
+    await db.refresh(skill)
+    return ExpertSkillRead.model_validate(skill)
+
+
+@router.post("/expert-skills/import-markdown", response_model=ExpertSkillRead, status_code=status.HTTP_201_CREATED)
+async def import_expert_skill_from_markdown(
+    agent_id: UUID,
+    body: ImportFromMarkdownBody,
+    db: AsyncSession = Depends(get_db),
+    user: AuthContext = Depends(require_scope("agents:write")),
+) -> ExpertSkillRead:
+    """Создать навык-черновик из .md-файла: содержимое дистиллируется в skill_doc.
+
+    Тот же дистиллятор, что при публикации потока; на вход — произвольный markdown
+    (выгрузка сценария, заметки эксперта). Навык создаётся как draft — в рантайм
+    попадёт только после ручной публикации.
+    """
+    await get_agent_or_404(agent_id, db, user)
+    text_md = (body.markdown or "").strip()
+    if not text_md:
+        raise _api_error("empty_markdown", "Файл пустой — нечего импортировать.", status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+    skill_doc: dict[str, Any] | None = None
+    api_key = await get_decrypted_api_key(db, user.tenant_id)
+    if api_key:
+        try:
+            raw = await distill_skill(text_md, body.name, openai_api_key=api_key, model=body.model)
+            skill_doc = _sanitize_skill_doc(raw) if isinstance(raw, dict) else None
+        except Exception:  # noqa: BLE001
+            logger.exception("skill_import_markdown_distill_failed", agent_id=str(agent_id))
+            raise _api_error("distill_failed", "Не удалось разобрать файл в навык. Проверьте содержимое.", status.HTTP_502_BAD_GATEWAY)
+    else:
+        raise _api_error("no_llm_key", "Не настроен ключ модели у тенанта — импорт недоступен.", status.HTTP_400_BAD_REQUEST)
+
+    skill = ExpertSkill(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        agent_id=agent_id,
+        name=body.name,
+        service_external_ids=[],
         skill_doc=skill_doc,
         status="draft",
     )
