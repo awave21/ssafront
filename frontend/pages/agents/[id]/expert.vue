@@ -119,6 +119,54 @@
 
         <!-- ═══ Навыки (список + вход в редактор и в проверку) ═══ -->
         <template v-else-if="activeTab === 'skills'">
+          <!-- Действия: создать в системе или сгенерировать в любой модели и загрузить -->
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              class="inline-flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              :disabled="creating"
+              @click="handleCreate"
+            >
+              <Plus class="h-4 w-4" />
+              {{ creating ? 'Создаём…' : 'Создать навык' }}
+            </button>
+            <button
+              type="button"
+              class="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50"
+              :disabled="importing"
+              @click="mdInput?.click()"
+            >
+              <UploadCloud class="h-4 w-4" />
+              {{ importing ? 'Импорт…' : 'Импорт .md' }}
+            </button>
+            <input ref="mdInput" type="file" accept=".md,.markdown,.txt" class="hidden" @change="handleImportMd">
+          </div>
+
+          <!-- Как создать навык в любой модели -->
+          <div class="overflow-hidden rounded-2xl border border-indigo-100 bg-indigo-50/40">
+            <button type="button" class="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-indigo-900" @click="showGuide = !showGuide">
+              <Sparkles class="h-4 w-4 shrink-0 text-indigo-500" />
+              <span class="flex-1"><b>Навык можно создать в любой модели</b> (ChatGPT, Claude…) и загрузить файлом .md. Или наполнить в чате прямо здесь.</span>
+              <component :is="showGuide ? ChevronsDownUp : ChevronsUpDown" class="h-4 w-4 shrink-0 text-indigo-400" />
+            </button>
+            <div v-if="showGuide" class="border-t border-indigo-100 px-4 py-4">
+              <div class="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <div class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-3 py-2">
+                  <span class="text-[11px] font-bold text-slate-600">Подсказка для модели — скопируйте, вставьте свои примеры ответов</span>
+                  <button type="button" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50" @click="copyGuidePrompt">
+                    <component :is="guideCopied ? Check : Copy" class="h-3.5 w-3.5" />
+                    {{ guideCopied ? 'Скопировано' : 'Копировать' }}
+                  </button>
+                </div>
+                <pre class="max-h-56 overflow-auto whitespace-pre-wrap px-3 py-3 text-[11px] leading-relaxed text-slate-700">{{ skillPrompt }}</pre>
+              </div>
+              <p class="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-700">
+                <ShieldAlert class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Не вписывайте точные цены, имена и даты — они меняются, агент берёт их из системы. Навык — про манеру разговора.
+              </p>
+            </div>
+          </div>
+
           <div
             v-if="skills.length === 0"
             class="rounded-3xl border-2 border-dashed border-slate-100 bg-white p-12 text-center"
@@ -253,9 +301,17 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { navigateTo } from '#app'
+import { useToast } from '~/composables/useToast'
 import {
   Check,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Copy,
+  Plus,
+  ShieldAlert,
+  Sparkles,
   UploadCloud,
   GraduationCap,
   Loader2,
@@ -326,6 +382,80 @@ const loadAll = async () => {
 }
 
 onMounted(loadAll)
+
+const { success: toastSuccess, error: toastError } = useToast()
+const creating = ref(false)
+const importing = ref(false)
+const mdInput = ref<HTMLInputElement | null>(null)
+const showGuide = ref(false)
+const guideCopied = ref(false)
+
+const skillPrompt = `Ты помогаешь оформить НАВЫК общения для менеджера.
+Я дам примеры того, как я отвечаю клиентам. Собери из них навык в markdown.
+
+# Навык: <тема>
+Контекст: <о каких запросах этот навык — 1-2 предложения>
+
+## Ситуация: <название>
+Когда срабатывает: <слова клиента, в т.ч. непрямые>
+Как отвечаю:
+- <фраза как я реально говорю>
+Избегать: <обороты, которых быть не должно>
+
+(повтори блок «## Ситуация» для типовых случаев: приветствие, цена, возражение «дорого», сомнение, «я подумаю», следующий шаг)
+
+Правила: пиши моими словами; НЕ вставляй точные цены/имена/даты — их подставит система; один вопрос в сообщении.
+
+Мои примеры:
+<вставьте свои ответы клиентам>`
+
+const copyGuidePrompt = async () => {
+  try {
+    await navigator.clipboard.writeText(skillPrompt)
+    guideCopied.value = true
+    setTimeout(() => { guideCopied.value = false }, 2000)
+  } catch {
+    toastError('Не удалось скопировать — выделите текст вручную')
+  }
+}
+
+const handleCreate = async () => {
+  if (creating.value) return
+  creating.value = true
+  try {
+    const name = `Навык ${new Date().toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}`
+    const created = await apiFetch<ExpertSkill>(`/agents/${agentId.value}/expert-skills`, {
+      method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: { name },
+    })
+    await navigateTo(`/agents/${agentId.value}/skills/${created.id}`)
+  } catch (err: unknown) {
+    toastError(getReadableErrorMessage(err, 'Не удалось создать навык'))
+  } finally {
+    creating.value = false
+  }
+}
+
+const handleImportMd = async (e: Event) => {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (input) input.value = ''
+  if (!file || importing.value) return
+  importing.value = true
+  try {
+    const markdown = await file.text()
+    if (!markdown.trim()) { toastError('Файл пустой'); return }
+    const name = file.name.replace(/\.(md|markdown|txt)$/i, '') || 'Импортированный навык'
+    const created = await apiFetch<ExpertSkill>(`/agents/${agentId.value}/expert-skills/import-markdown`, {
+      method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: { name, markdown },
+    })
+    toastSuccess('Навык создан из файла — проверьте и опубликуйте')
+    await navigateTo(`/agents/${agentId.value}/skills/${created.id}`)
+  } catch (err: unknown) {
+    toastError(getReadableErrorMessage(err, 'Не удалось импортировать файл'))
+  } finally {
+    importing.value = false
+  }
+}
 
 const kindFilter = ref<string>('all')
 const kindChips = computed(() => {
