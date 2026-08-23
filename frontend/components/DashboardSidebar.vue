@@ -5,20 +5,25 @@
     class="bg-sidebar border-r border-border h-screen lg:h-full lg:relative fixed inset-y-0 left-0 z-50 transition-all duration-300 ease-in-out flex flex-col overflow-hidden"
     :class="[isCollapsed ? 'w-16' : 'w-64']"
   >
-    <!-- Top Section — переключатель агента -->
+    <!-- Top Section — бренд (глобально) / переключатель агента (в контексте агента) -->
     <div class="shrink-0 border-b border-border">
-      <!-- Свёрнутый вид: иконка-бот -->
+      <!-- Свёрнутый вид: иконка-бот (в агенте) / логотип (глобально) -->
       <button
-        v-if="isCollapsed"
+        v-if="isCollapsed && isAgentDetail"
         @click="goToCurrentAgent"
         class="mx-auto my-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary/15"
         title="Текущий агент"
       >
         <Bot class="h-4 w-4" />
       </button>
+      <div v-else-if="isCollapsed" class="flex h-[60px] items-center justify-center">
+        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary">
+          <span class="text-xs font-bold text-sidebar-primary-foreground">CM</span>
+        </div>
+      </div>
 
-      <!-- Развёрнутый вид: AgentPicker -->
-      <div v-else class="relative px-3 pb-2.5 pt-3.5">
+      <!-- Развёрнутый вид, контекст агента: AgentPicker -->
+      <div v-else-if="isAgentDetail" class="relative px-3 pb-2.5 pt-3.5">
         <DropdownMenuRoot>
           <DropdownMenuTrigger as-child>
             <button
@@ -80,6 +85,20 @@
         <button
           @click="emit('close')"
           class="absolute right-4 top-1 rounded-lg p-1.5 text-foreground hover:bg-muted lg:hidden"
+        >
+          <X class="h-5 w-5" />
+        </button>
+      </div>
+
+      <!-- Развёрнутый вид, глобально: бренд ChatMedBot -->
+      <div v-else class="relative flex h-[60px] items-center gap-3 px-3">
+        <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary">
+          <span class="text-xs font-bold text-sidebar-primary-foreground">CM</span>
+        </div>
+        <span class="truncate text-lg font-bold text-foreground">ChatMedBot</span>
+        <button
+          @click="emit('close')"
+          class="ml-auto rounded-lg p-2 text-foreground hover:bg-muted lg:hidden"
         >
           <X class="h-5 w-5" />
         </button>
