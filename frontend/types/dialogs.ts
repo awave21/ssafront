@@ -88,6 +88,17 @@ export type Message = {
   is_deleted?: boolean
 }
 
+// Сгруппированный вызов инструмента (tool_call + tool_result объединены) для UI-пиллов
+export type ToolGroup = {
+  key: string
+  tool_name: string
+  args?: Record<string, unknown>
+  result?: unknown
+  duration_ms?: number
+  tool_status?: string
+  hasResult: boolean
+}
+
 // API request/response types
 export type CreateDialogData = {
   title?: string

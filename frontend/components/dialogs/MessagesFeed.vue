@@ -36,10 +36,12 @@
       :css="animateMessages"
     >
       <MessageBubble
-        v-for="message in messages"
-        :key="message.id"
-        :message="message"
-        @retry="$emit('retry', message.id)"
+        v-for="item in renderItems"
+        :key="item.key"
+        :message="item.message"
+        :tools="item.tools"
+        :tools-only="item.toolsOnly"
+        @retry="$emit('retry', item.message.id)"
         @image-click="openLightbox"
       />
     </TransitionGroup>
@@ -99,11 +101,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { Loader2, ArrowDown, X } from 'lucide-vue-next'
 import MessageBubble from './MessageBubble.vue'
 import DialogsEmptyState from './DialogsEmptyState.vue'
-import type { Message } from '../../types/dialogs'
+import type { Message, ToolGroup } from '../../types/dialogs'
 
 const props = defineProps<{
   dialogId: string
@@ -112,6 +114,77 @@ const props = defineProps<{
   isStreaming?: boolean
   hasMore?: boolean
 }>()
+
+type RenderItem = { key: string; message: Message; tools: ToolGroup[]; toolsOnly: boolean }
+
+// Группируем tool_call/tool_result и привязываем их рядом пиллов к ответу агента.
+// tool_call + tool_result одного вызова объединяются в один ToolGroup (по tool_call_id
+// либо по имени в порядке следования).
+const renderItems = computed<RenderItem[]>(() => {
+  const items: RenderItem[] = []
+  let pending: ToolGroup[] = []
+  const pendingByKey = new Map<string, ToolGroup>()
+  let seq = 0
+
+  const flushOrphan = () => {
+    if (!pending.length) return
+    const carrier = pending[0]
+    items.push({
+      key: `tools-${carrier.key}`,
+      message: {
+        id: `tools-${carrier.key}`,
+        dialog_id: props.dialogId,
+        role: 'agent',
+        type: 'text',
+        content: '',
+        status: 'done',
+        created_at: new Date().toISOString(),
+      } as Message,
+      tools: pending,
+      toolsOnly: true,
+    })
+    pending = []
+    pendingByKey.clear()
+  }
+
+  for (const m of props.messages) {
+    if (m.type === 'tool_call' || m.type === 'tool_result') {
+      const callId = (m.tool_call_id || '').trim()
+      let group: ToolGroup | undefined = callId ? pendingByKey.get(callId) : undefined
+      if (!group) {
+        const key = callId || `${m.tool_name || 'tool'}#${++seq}`
+        group = { key, tool_name: m.tool_name || 'function', hasResult: false }
+        pending.push(group)
+        if (callId) pendingByKey.set(callId, group)
+      }
+      if (m.type === 'tool_call') {
+        if (m.args) group.args = m.args
+      } else {
+        group.result = m.result
+        group.hasResult = true
+        if (typeof m.duration_ms === 'number') group.duration_ms = m.duration_ms
+        if (m.tool_status) group.tool_status = m.tool_status
+      }
+      continue
+    }
+
+    if (m.role === 'agent' && m.type === 'text') {
+      items.push({ key: m.id, message: m, tools: pending, toolsOnly: false })
+      pending = []
+      pendingByKey.clear()
+      continue
+    }
+
+    // user / manager / system / прочее — сбрасываем «осиротевшие» инструменты перед сообщением
+    flushOrphan()
+    items.push({ key: m.id, message: m, tools: [], toolsOnly: false })
+  }
+
+  // Инструменты без финального ответа (например, во время стриминга)
+  flushOrphan()
+
+  return items
+})
 
 defineEmits<{
   (e: 'load-more'): void

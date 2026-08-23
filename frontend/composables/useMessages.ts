@@ -132,7 +132,13 @@ const normalizeMessage = (raw: any, fallbackDialogId: string): Message | null =>
     isAgent: raw?.isAgent,
     is_agent: raw?.is_agent
   })
-  const type = normalizeType(raw?.type ?? raw?.message_type ?? raw?.content_type ?? raw?.kind ?? raw?.media_type)
+  let type = normalizeType(raw?.type ?? raw?.message_type ?? raw?.content_type ?? raw?.kind ?? raw?.media_type)
+  // WS-путь передаёт tool-части через part_kind без явного type — доводим до tool_call/tool_result
+  if (type === 'text') {
+    const partKind = typeof raw?.part_kind === 'string' ? raw.part_kind.replace(/_/g, '-').toLowerCase() : ''
+    if (partKind === 'tool-call') type = 'tool_call'
+    else if (partKind === 'tool-return') type = 'tool_result'
+  }
   const createdAt = raw?.created_at ?? raw?.createdAt ?? raw?.timestamp ?? raw?.time ?? raw?.created ?? new Date().toISOString()
   const status = normalizeStatus(raw?.status)
   const durationSeconds = raw?.duration_seconds ?? raw?.durationSeconds ?? raw?.duration
