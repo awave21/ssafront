@@ -76,6 +76,13 @@ export type Message = {
   tool_call_id?: string
   args?: Record<string, unknown>
   result?: unknown
+  // Tool call meta (из tool_call_logs)
+  duration_ms?: number
+  tool_status?: string           // 'success' | 'error'
+  // Run meta (из runs) — на финальном текстовом ответе агента
+  tokens?: number
+  cost_rub?: number
+  latency_ms?: number
   // Edit / delete flags (set by real-time WS updates)
   is_edited?: boolean
   is_deleted?: boolean

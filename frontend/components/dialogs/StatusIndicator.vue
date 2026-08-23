@@ -1,11 +1,17 @@
 <template>
   <span class="inline-flex items-center justify-center flex-shrink-0">
-    <!-- IN_PROGRESS: Spinner -->
-    <Loader2 v-if="status === 'IN_PROGRESS'" class="w-3.5 h-3.5 animate-spin text-indigo-600" />
-    
+    <!-- IN_PROGRESS: «В работе» pill -->
+    <span
+      v-if="status === 'IN_PROGRESS'"
+      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-indigo-50"
+    >
+      <span class="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse" />
+      <span class="text-[10px] font-semibold text-indigo-600">В работе</span>
+    </span>
+
     <!-- ERROR: Alert icon -->
     <AlertCircle v-else-if="status === 'ERROR'" class="w-3.5 h-3.5 text-red-500" />
-    
+
     <!-- UNREAD: Badge with count -->
     <span
       v-else-if="status === 'UNREAD'"
@@ -13,7 +19,7 @@
     >
       {{ displayCount }}
     </span>
-    
+
     <!-- NEW: Badge -->
     <span
       v-else-if="status === 'NEW'"
@@ -26,7 +32,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Loader2, AlertCircle } from 'lucide-vue-next'
+import { AlertCircle } from 'lucide-vue-next'
 import type { DialogStatus } from '../../types/dialogs'
 
 const props = defineProps<{

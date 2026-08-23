@@ -5,7 +5,7 @@
   >
     <button
       @click="$emit('click')"
-      class="w-full px-4 py-3 flex items-start gap-3 text-left transition-colors"
+      class="w-full px-4 py-3 flex items-start gap-3 text-left border-b border-slate-100 transition-colors"
       :class="[
         isSelected
           ? 'bg-indigo-50'
@@ -16,34 +16,24 @@
       <div
         class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
         :class="[
-          isTelegram
+          isMessenger
             ? (isSelected ? 'bg-blue-100' : 'bg-blue-50')
-            : (isSelected ? 'bg-indigo-100' : 'bg-slate-100')
+            : 'bg-slate-100'
         ]"
       >
-        <!-- Telegram Icon -->
-        <svg
-          v-if="isTelegram"
-          class="w-5 h-5"
-          :class="[isSelected ? 'text-blue-600' : 'text-blue-500']"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-        >
-          <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
-        </svg>
-        <!-- Default Icon -->
+        <Send
+          v-if="isMessenger"
+          class="w-5 h-5 text-blue-500"
+        />
         <MessageSquare
           v-else
-          class="w-5 h-5"
-          :class="[
-            isSelected ? 'text-indigo-600' : 'text-slate-500'
-          ]"
+          class="w-5 h-5 text-slate-500"
         />
       </div>
 
       <!-- Content -->
       <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1.5">
           <h3
             class="text-sm font-semibold truncate"
             :class="[
@@ -52,49 +42,48 @@
           >
             {{ dialogTitle }}
           </h3>
-          
-          <!-- Канал / платформа -->
-          <span
-            v-if="channelBadgeText"
-            class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700 max-w-[140px] truncate"
-            :title="channelBadgeText"
-          >
-            {{ channelBadgeText }}
-          </span>
-          
-          <!-- Status Indicator -->
+
+          <!-- Status / Unread indicator -->
           <StatusIndicator
             v-if="displayStatus"
             :status="displayStatus"
             :count="dialog.unread_count"
           />
+
+          <!-- Канал (виджет/веб) — если нет мессенджер-идентификатора -->
+          <span
+            v-if="channelTag"
+            class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700 max-w-[120px] truncate"
+            :title="channelTag"
+          >
+            {{ channelTag }}
+          </span>
         </div>
-        
+
         <!-- Идентификатор контакта -->
         <p
           v-if="secondaryIdentity"
-          class="text-xs truncate"
-          :class="[isTelegram ? 'text-blue-500' : 'text-slate-500']"
+          class="text-xs text-blue-600 truncate mt-0.5"
         >
           {{ secondaryIdentity }}
         </p>
-        
+
         <p class="text-xs text-slate-500 truncate mt-0.5">
           {{ dialog.last_message_preview || 'Нет сообщений' }}
         </p>
       </div>
 
       <!-- Right Column -->
-      <div class="flex flex-col items-end gap-1 flex-shrink-0">
+      <div class="flex flex-col items-end gap-1.5 flex-shrink-0">
         <!-- Time -->
-        <span class="text-xs text-slate-400">
+        <span class="text-xs text-slate-500">
           {{ formattedTime }}
         </span>
-        
+
         <!-- Agent Status Badge: only show when paused -->
         <span
           v-if="!isDialogAgentActive"
-          class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-100 text-amber-700 flex items-center gap-0.5"
+          class="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-100 text-amber-700 flex items-center gap-0.5"
         >
           <PauseCircle class="w-3 h-3" />
           Пауза
@@ -217,12 +206,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { onClickOutside } from '@vueuse/core'
-import { MessageSquare, MoreVertical, Pencil, Trash2, PauseCircle } from 'lucide-vue-next'
+import { MessageSquare, Send, MoreVertical, Pencil, Trash2, PauseCircle } from 'lucide-vue-next'
+import StatusIndicator from './StatusIndicator.vue'
 import type { Dialog, DialogStatus } from '../../types/dialogs'
 import {
   isTelegramDialog,
+  resolveDialogPlatform,
   resolveDialogSecondaryIdentity,
   resolveDialogUserTitle,
   resolveIntegrationChannelLabel
@@ -257,17 +248,25 @@ onClickOutside(contextMenuRef, () => {
   isContextMenuOpen.value = false
 })
 
-// Computed
-const isTelegram = computed(() => {
-  return isTelegramDialog(props.dialog)
-})
+// Messenger-каналы получают иконку «отправки» в синем круге, веб/виджет — message-square
+const MESSENGER_PLATFORMS = new Set(['telegram', 'telegram_phone', 'whatsapp', 'max'])
 
-const channelBadgeText = computed(() => {
-  return resolveIntegrationChannelLabel(props.dialog)
+const isMessenger = computed(() => {
+  if (isTelegramDialog(props.dialog)) return true
+  const platform = resolveDialogPlatform(props.dialog)
+  return platform ? MESSENGER_PLATFORMS.has(platform) : false
 })
 
 const secondaryIdentity = computed(() => {
   return resolveDialogSecondaryIdentity(props.dialog)
+})
+
+// Метка канала показывается для веб/виджет-диалогов (когда нет мессенджер-идентификатора)
+const channelTag = computed(() => {
+  if (isMessenger.value || secondaryIdentity.value) return ''
+  const label = resolveIntegrationChannelLabel(props.dialog)
+  if (label) return label
+  return 'Виджет'
 })
 
 const dialogTitle = computed(() => {
@@ -276,12 +275,12 @@ const dialogTitle = computed(() => {
 
 const formattedTime = computed(() => {
   if (!props.dialog.last_message_at) return ''
-  
+
   const date = new Date(props.dialog.last_message_at)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-  
+
   if (diffDays === 0) {
     return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
   } else if (diffDays === 1) {
@@ -304,19 +303,19 @@ const isDialogAgentActive = computed(() => (props.dialog.agent_status ?? 'active
 // Determine which status indicator to show (priority: IN_PROGRESS > ERROR > UNREAD > NEW)
 const displayStatus = computed((): DialogStatus | null => {
   const status = props.dialog.status
-  
+
   // Don't show IN_PROGRESS if agent is paused for this dialog
   if (status === 'IN_PROGRESS' && !isDialogAgentActive.value) {
     // Fall through to next priority
     if (props.dialog.unread_count > 0) return 'UNREAD'
     return null
   }
-  
+
   if (status === 'IN_PROGRESS') return 'IN_PROGRESS'
   if (status === 'ERROR') return 'ERROR'
   if (props.dialog.unread_count > 0) return 'UNREAD'
   if (status === 'NEW') return 'NEW'
-  
+
   return null
 })
 

@@ -55,6 +55,13 @@ class MessageRead(BaseModel):
     tool_call_id: str | None = Field(None, description="ID вызова инструмента")
     args: dict[str, Any] | None = Field(None, description="Аргументы вызова инструмента")
     result: Any | None = Field(None, description="Результат инструмента")
+    # Метаданные вызова инструмента (из tool_call_logs)
+    duration_ms: int | None = Field(None, description="Длительность вызова инструмента, мс")
+    tool_status: str | None = Field(None, description="Статус вызова инструмента: success / error")
+    # Метаданные запуска агента (из runs) — крепятся к финальному текстовому ответу
+    tokens: int | None = Field(None, description="Всего токенов LLM за запуск")
+    cost_rub: float | None = Field(None, description="Стоимость запуска в рублях")
+    latency_ms: int | None = Field(None, description="Латентность запуска, мс")
 
 
 class MessageCreate(BaseModel):

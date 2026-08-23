@@ -118,7 +118,6 @@
       <TransitionGroup
         v-else
         tag="div"
-        class="divide-y divide-slate-100"
         name="dialog-list"
       >
         <DialogItem

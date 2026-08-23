@@ -1,57 +1,60 @@
 <template>
-  <!-- Tool Call / Tool Result — compact inline card, full width, collapsible -->
+  <!-- Tool Call / Tool Result — compact pill that expands into a request/response card -->
   <div v-if="isToolMessage" class="flex justify-start w-full">
-    <div class="w-full max-w-[85%] sm:max-w-[70%] lg:max-w-[60%]">
-      <div
-        class="rounded-xl border text-xs font-mono overflow-hidden"
-        :class="message.type === 'tool_call'
-          ? 'border-amber-200 bg-amber-50'
-          : 'border-emerald-200 bg-emerald-50'"
+    <div class="max-w-[85%] sm:max-w-[70%] lg:max-w-[470px]">
+      <!-- Collapsed: inline pill -->
+      <button
+        v-if="!isToolExpanded"
+        @click="isToolExpanded = true"
+        class="inline-flex items-center gap-1.5 pl-2.5 pr-2.5 py-1 rounded-full bg-blue-600/10 hover:bg-blue-600/15 transition-colors"
       >
-        <!-- Header (clickable to toggle) -->
+        <Zap class="w-3 h-3 text-blue-600 shrink-0" />
+        <span class="text-[11px] font-semibold text-blue-600 font-mono">{{ toolNameDisplay }}</span>
+        <span v-if="toolDuration" class="text-[10px] text-slate-400">{{ toolDuration }}</span>
+        <ChevronDown class="w-3 h-3 text-blue-600 shrink-0" />
+      </button>
+
+      <!-- Expanded: request / response card -->
+      <div
+        v-else
+        class="rounded-xl border border-slate-200 bg-white overflow-hidden"
+      >
+        <!-- Head (clickable to collapse) -->
         <button
-          class="w-full flex items-center gap-2 px-3 py-1.5 border-b text-left"
-          :class="message.type === 'tool_call'
-            ? 'border-amber-200 bg-amber-100/60 hover:bg-amber-100'
-            : 'border-emerald-200 bg-emerald-100/60 hover:bg-emerald-100'"
-          @click="isToolExpanded = !isToolExpanded"
+          class="w-full flex items-center gap-2 px-3 py-2.5 bg-blue-600/[0.04] text-left"
+          @click="isToolExpanded = false"
         >
-          <Wrench v-if="message.type === 'tool_call'" class="w-3 h-3 text-amber-600 shrink-0" />
-          <CheckSquare v-else class="w-3 h-3 text-emerald-600 shrink-0" />
+          <Zap class="w-3.5 h-3.5 text-blue-600 shrink-0" />
+          <span class="text-xs font-semibold text-blue-600 font-mono truncate">{{ toolNameDisplay }}</span>
           <span
-            class="font-semibold text-[11px]"
-            :class="message.type === 'tool_call' ? 'text-amber-700' : 'text-emerald-700'"
+            v-if="isToolResult && toolOk"
+            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-100 shrink-0"
           >
-            {{ message.type === 'tool_call' ? 'Вызов функции' : 'Результат функции' }}
+            <Check class="w-2.5 h-2.5 text-green-600" />
+            <span class="text-[10px] font-semibold text-green-600">Успешно</span>
           </span>
           <span
-            v-if="message.tool_name"
-            class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide"
-            :class="message.type === 'tool_call'
-              ? 'bg-amber-200 text-amber-800'
-              : 'bg-emerald-200 text-emerald-800'"
+            v-else-if="isToolResult"
+            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-100 shrink-0"
           >
-            {{ message.tool_name }}
+            <span class="text-[10px] font-semibold text-red-600">Ошибка</span>
           </span>
-          <span class="ml-auto text-[10px] text-slate-400" :title="fullDateTime">{{ formattedTime }}</span>
-          <ChevronDown
-            class="w-3 h-3 text-slate-400 transition-transform flex-shrink-0"
-            :class="{ 'rotate-180': isToolExpanded }"
-          />
+          <span class="flex-1" />
+          <span v-if="toolDuration" class="text-[11px] text-slate-500 shrink-0">{{ toolDuration }}</span>
+          <ChevronUp class="w-3.5 h-3.5 text-slate-400 shrink-0" />
         </button>
-        <!-- Args / Result body -->
-        <div v-if="isToolExpanded" class="px-3 py-2 space-y-1.5">
-          <template v-if="message.type === 'tool_call' && message.args">
-            <div class="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Аргументы</div>
-            <pre class="whitespace-pre-wrap break-all text-slate-700 leading-relaxed">{{ formatJson(message.args) }}</pre>
-          </template>
-          <template v-else-if="message.type === 'tool_result'">
-            <div class="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Ответ</div>
-            <pre class="whitespace-pre-wrap break-all text-slate-700 leading-relaxed">{{ formatResultContent }}</pre>
-          </template>
-          <template v-else-if="message.content">
-            <pre class="whitespace-pre-wrap break-all text-slate-700 leading-relaxed">{{ message.content }}</pre>
-          </template>
+
+        <!-- Body -->
+        <div class="px-3 py-3">
+          <div class="text-[10px] tracking-[0.5px] text-slate-400 mb-1.5">
+            {{ isToolResult ? 'ОТВЕТ' : 'ЗАПРОС' }}
+          </div>
+          <div class="rounded-lg bg-slate-100 p-2.5 overflow-x-auto">
+            <pre
+              class="text-[11px] leading-[18px] font-mono whitespace-pre-wrap break-all"
+              :class="isToolResult ? 'text-cyan-600' : 'text-slate-700'"
+            >{{ toolBodyText }}</pre>
+          </div>
         </div>
       </div>
     </div>
@@ -81,7 +84,7 @@
 
       <!-- Message Bubble -->
       <div
-        class="rounded-2xl px-4 py-2.5 relative"
+        class="px-4 py-2.5 relative"
         :class="bubbleClasses"
       >
         <!-- Text Message -->
@@ -121,7 +124,7 @@
               <Pause v-if="isPlaying" class="w-5 h-5" />
               <Play v-else class="w-5 h-5 ml-0.5" />
             </button>
-            
+
             <div class="flex-1">
               <!-- Progress bar -->
               <div
@@ -138,7 +141,7 @@
                   :style="{ width: `${playProgress}%` }"
                 />
               </div>
-              
+
               <!-- Duration -->
               <span
                 class="text-xs mt-1 block"
@@ -182,13 +185,22 @@
           />
         </template>
       </div>
+
+      <!-- Run meta (агент: токены · время · стоимость) -->
+      <div
+        v-if="runMeta"
+        class="mt-0.5 px-1 text-[10px] text-slate-400"
+        :class="isOutgoing ? 'text-right' : 'text-left'"
+      >
+        {{ runMeta }}
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Play, Pause, Wrench, CheckSquare, ChevronDown } from 'lucide-vue-next'
+import { Play, Pause, Zap, Check, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import type { Message } from '../../types/dialogs'
 import MessageDeliveryStatus from './MessageDeliveryStatus.vue'
 import { createSafeMarkdownRenderer } from '~/utils/safe-markdown'
@@ -252,12 +264,30 @@ const senderLabelClass = computed(() => {
   return 'text-left text-slate-500'
 })
 const isToolMessage = computed(() => props.message.type === 'tool_call' || props.message.type === 'tool_result')
+const isToolResult = computed(() => props.message.type === 'tool_result')
+const toolOk = computed(() => (props.message.tool_status ?? 'success') !== 'error')
+
+const toolNameDisplay = computed(() => {
+  const name = props.message.tool_name?.trim() || 'function'
+  return `${name}()`
+})
+
+const toolDuration = computed(() => {
+  const ms = props.message.duration_ms
+  if (typeof ms === 'number' && ms > 0) {
+    return ms < 1000 ? `${ms} мс` : `${(ms / 1000).toFixed(1)} с`
+  }
+  const seconds = props.message.duration_seconds
+  if (!seconds || seconds <= 0) return ''
+  if (seconds < 1) return `${Math.round(seconds * 1000)} мс`
+  return `${seconds.toFixed(1)} с`
+})
 
 const bubbleClasses = computed(() => {
-  if (isManager.value) return 'bg-emerald-600 text-white rounded-br-sm'
-  if (isAgent.value) return 'bg-indigo-600 text-white rounded-br-sm'
-  if (isSystem.value) return 'bg-slate-100 border border-slate-200 text-slate-700 rounded-bl-sm'
-  return 'bg-white border border-slate-200 text-slate-900 rounded-bl-sm shadow-sm'
+  if (isManager.value) return 'bg-emerald-600 text-white rounded-[16px_16px_4px_16px]'
+  if (isAgent.value) return 'bg-indigo-600 text-white rounded-[16px_16px_4px_16px]'
+  if (isSystem.value) return 'bg-slate-100 border border-slate-200 text-slate-700 rounded-[16px_16px_16px_4px]'
+  return 'bg-white border border-slate-200 text-slate-900 rounded-[16px_16px_16px_4px]'
 })
 
 const renderedContent = computed(() => {
@@ -273,10 +303,14 @@ const formatJson = (value: unknown): string => {
   }
 }
 
-const formatResultContent = computed(() => {
-  if (props.message.result !== undefined && props.message.result !== null) {
-    return formatJson(props.message.result)
+const toolBodyText = computed(() => {
+  if (isToolResult.value) {
+    if (props.message.result !== undefined && props.message.result !== null) {
+      return formatJson(props.message.result)
+    }
+    return props.message.content || '—'
   }
+  if (props.message.args) return formatJson(props.message.args)
   return props.message.content || '—'
 })
 
@@ -304,17 +338,36 @@ const formattedDuration = computed(() => {
   return `${mins}:${secs.toString().padStart(2, '0')}`
 })
 
+// Мета запуска для ответа агента — показываем только реальные значения
+const runMeta = computed(() => {
+  if (!isAgent.value) return ''
+  const parts: string[] = []
+  const { tokens, latency_ms, cost_rub } = props.message
+  if (typeof tokens === 'number' && tokens > 0) {
+    parts.push(`${new Intl.NumberFormat('ru-RU').format(tokens)} токенов`)
+  }
+  if (typeof latency_ms === 'number' && latency_ms > 0) {
+    parts.push(`${(latency_ms / 1000).toFixed(1)} с`)
+  }
+  if (typeof cost_rub === 'number' && cost_rub > 0) {
+    parts.push(
+      `${new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cost_rub)} ₽`
+    )
+  }
+  return parts.join(' · ')
+})
+
 // Methods
 const togglePlay = () => {
   if (!audioRef.value) {
     audioRef.value = new Audio(props.message.content)
-    
+
     audioRef.value.addEventListener('timeupdate', () => {
       if (audioRef.value) {
         playProgress.value = (audioRef.value.currentTime / audioRef.value.duration) * 100
       }
     })
-    
+
     audioRef.value.addEventListener('ended', () => {
       isPlaying.value = false
       playProgress.value = 0
@@ -326,7 +379,7 @@ const togglePlay = () => {
   } else {
     audioRef.value.play()
   }
-  
+
   isPlaying.value = !isPlaying.value
 }
 </script>

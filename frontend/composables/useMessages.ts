@@ -176,6 +176,11 @@ const normalizeMessage = (raw: any, fallbackDialogId: string): Message | null =>
     tool_call_id: raw?.tool_call_id ?? undefined,
     args: raw?.args ?? undefined,
     result: raw?.result ?? undefined,
+    duration_ms: typeof raw?.duration_ms === 'number' ? raw.duration_ms : undefined,
+    tool_status: typeof raw?.tool_status === 'string' ? raw.tool_status : undefined,
+    tokens: typeof raw?.tokens === 'number' ? raw.tokens : undefined,
+    cost_rub: typeof raw?.cost_rub === 'number' ? raw.cost_rub : undefined,
+    latency_ms: typeof raw?.latency_ms === 'number' ? raw.latency_ms : undefined,
     is_edited: raw?.is_edited ?? undefined,
     is_deleted: raw?.is_deleted ?? undefined,
   }

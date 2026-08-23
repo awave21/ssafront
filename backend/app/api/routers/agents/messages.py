@@ -20,6 +20,7 @@ from app.api.routers.runs import create_run, stream_run
 from app.services.run_service import append_session_messages
 from app.db.models.run import Run
 from app.db.models.session_message import SessionMessage
+from app.db.models.tool_call_log import ToolCallLog
 from app.db.session import get_db, async_session_factory
 from app.schemas.auth import AuthContext
 from app.schemas.dialog import MessageRead, MessageCreate, ManagerMessageCreate, StreamRequest
@@ -142,15 +143,55 @@ async def agent_events(
 
     return EventSourceResponse(event_generator())
 
-def _map_session_message(msg_data: dict[str, Any], msg_id: UUID, created_at: datetime, session_id: str | None = None, agent_id: UUID | None = None) -> list[MessageRead]:
+def _pop_tool_meta(
+    tool_matcher: dict[str, list[dict[str, Any]]] | None,
+    tool_name: str | None,
+) -> dict[str, Any]:
+    """Снять метаданные (duration_ms/status) очередного вызова инструмента по имени."""
+    if not tool_matcher or not tool_name:
+        return {}
+    queue = tool_matcher.get(tool_name)
+    if not queue:
+        return {}
+    return queue.pop(0)
+
+
+def _map_session_message(
+    msg_data: dict[str, Any],
+    msg_id: UUID,
+    created_at: datetime,
+    session_id: str | None = None,
+    agent_id: UUID | None = None,
+    tool_matcher: dict[str, list[dict[str, Any]]] | None = None,
+) -> list[MessageRead]:
     """
     Маппинг системного сообщения pydantic-ai в список сообщений для фронтенда.
+
+    Возвращает текстовые сообщения, а также карточки вызова инструментов
+    (``tool_call`` / ``tool_result``). Технические инструменты (имя с префиксом
+    ``__``) пропускаются. ``tool_matcher`` (если передан) обогащает результаты
+    вызовов длительностью и статусом из ``tool_call_logs``.
     """
-    from app.utils.message_mapping import infer_role, extract_user_info, extract_text_contents
+    from app.utils.message_mapping import (
+        infer_role,
+        extract_user_info,
+        extract_structured_parts,
+        extract_text_contents,
+    )
 
     mapped_role = infer_role(msg_data)
     user_info = extract_user_info(msg_data)
-    contents = extract_text_contents(msg_data)
+    structured = extract_structured_parts(msg_data)
+    status_value = _normalize_message_status(msg_data.get("status"))
+
+    # Fallback для сообщений без parts / нестандартного формата: сохраняем прежнее
+    # поведение (широкий разбор по известным ключам) как текстовые части.
+    if not structured:
+        structured = [
+            {"kind": "text", "part_kind": None, "content": text}
+            for text in extract_text_contents(msg_data)
+            if text
+        ]
 
     sender_kind: str | None = None
     sender_label: str | None = None
@@ -175,22 +216,84 @@ def _map_session_message(msg_data: dict[str, Any], msg_id: UUID, created_at: dat
         sender_kind = "system"
         sender_label = "Система"
 
-    return [
-        MessageRead(
-            id=msg_id,
-            session_id=session_id,
-            agent_id=agent_id,
-            role=mapped_role,
-            type="text",
-            content=content,
-            status=_normalize_message_status(msg_data.get("status")),
-            created_at=created_at,
-            user_info=user_info,
-            sender_kind=sender_kind,
-            sender_label=sender_label,
-        )
-        for content in contents
-    ]
+    messages: list[MessageRead] = []
+    for part in structured:
+        kind = part.get("kind")
+
+        if kind == "text":
+            content = str(part.get("content") or "")
+            if not content:
+                continue
+            messages.append(
+                MessageRead(
+                    id=msg_id,
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    role=mapped_role,
+                    type="text",
+                    content=content,
+                    status=status_value,
+                    created_at=created_at,
+                    user_info=user_info,
+                    sender_kind=sender_kind,
+                    sender_label=sender_label,
+                    part_kind=part.get("part_kind"),
+                )
+            )
+            continue
+
+        tool_name = part.get("tool_name")
+        # Технические инструменты не показываем (например, __end_dialog)
+        if isinstance(tool_name, str) and tool_name.startswith("__"):
+            continue
+
+        if kind == "tool-call":
+            messages.append(
+                MessageRead(
+                    id=msg_id,
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    role="agent",
+                    type="tool_call",
+                    content="",
+                    status=status_value,
+                    created_at=created_at,
+                    sender_kind="agent",
+                    sender_label="Агент",
+                    part_kind=part.get("part_kind"),
+                    tool_name=tool_name,
+                    tool_call_id=part.get("tool_call_id"),
+                    args=part.get("args") if isinstance(part.get("args"), dict) else None,
+                )
+            )
+            continue
+
+        if kind == "tool-return":
+            meta = _pop_tool_meta(tool_matcher, tool_name if isinstance(tool_name, str) else None)
+            messages.append(
+                MessageRead(
+                    id=msg_id,
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    role="agent",
+                    type="tool_result",
+                    content="",
+                    status=status_value,
+                    created_at=created_at,
+                    sender_kind="agent",
+                    sender_label="Агент",
+                    part_kind=part.get("part_kind"),
+                    tool_name=tool_name,
+                    tool_call_id=part.get("tool_call_id"),
+                    args=part.get("args") if isinstance(part.get("args"), dict) else None,
+                    result=part.get("result"),
+                    duration_ms=meta.get("duration_ms"),
+                    tool_status=meta.get("status"),
+                )
+            )
+            continue
+
+    return messages
 
 
 async def _update_manager_message_delivery_state(
@@ -334,24 +437,77 @@ async def list_messages(
     
     result = await db.execute(stmt)
     db_messages = result.scalars().all()
-    
+
     logger.info("list_messages_found", count=len(db_messages))
-    
-    all_mapped = []
+
+    # Мета запусков (токены/стоимость/латентность) и логи вызовов инструментов
+    # (длительность/статус) — подгружаем пачкой по run_id этих сообщений.
+    run_ids = {db_msg.run_id for db_msg in db_messages if db_msg.run_id}
+    run_meta_by_id: dict[UUID, dict[str, Any]] = {}
+    tool_matchers_by_run: dict[UUID, dict[str, list[dict[str, Any]]]] = {}
+    if run_ids:
+        runs = (
+            await db.execute(select(Run).where(Run.id.in_(run_ids)))
+        ).scalars().all()
+        for run_row in runs:
+            tokens = run_row.total_tokens
+            if tokens is None and (run_row.prompt_tokens is not None or run_row.completion_tokens is not None):
+                tokens = (run_row.prompt_tokens or 0) + (run_row.completion_tokens or 0)
+            latency_ms: int | None = None
+            if run_row.updated_at and run_row.created_at:
+                delta = (run_row.updated_at - run_row.created_at).total_seconds()
+                if delta > 0:
+                    latency_ms = int(delta * 1000)
+            run_meta_by_id[run_row.id] = {
+                "tokens": tokens or None,
+                "cost_rub": float(run_row.cost_rub) if run_row.cost_rub is not None else None,
+                "latency_ms": latency_ms,
+            }
+
+        tool_logs = (
+            await db.execute(
+                select(ToolCallLog)
+                .where(ToolCallLog.run_id.in_(run_ids))
+                .order_by(ToolCallLog.invoked_at.asc())
+            )
+        ).scalars().all()
+        for log_row in tool_logs:
+            tool_matchers_by_run.setdefault(log_row.run_id, {}).setdefault(
+                log_row.tool_name, []
+            ).append({"duration_ms": log_row.duration_ms, "status": log_row.status})
+
+    # Собираем MessageRead, помня для каждого run последнее текстовое сообщение агента,
+    # чтобы прикрепить к нему мету запуска.
+    mapped_objects: list[MessageRead] = []
+    last_agent_text_by_run: dict[UUID, MessageRead] = {}
     for db_msg in db_messages:
         try:
             mapped = _map_session_message(
-                db_msg.message, 
-                db_msg.id, 
+                db_msg.message,
+                db_msg.id,
                 db_msg.created_at,
                 session_id=dialog_id,
-                agent_id=agent_id
+                agent_id=agent_id,
+                tool_matcher=tool_matchers_by_run.get(db_msg.run_id) if db_msg.run_id else None,
             )
-            # Сериализуем каждое сообщение в словарь через Pydantic для консистентности
-            all_mapped.extend([m.model_dump(mode='json') for m in mapped])
         except Exception as e:
             logger.error("map_message_error", error=str(e), msg_id=str(db_msg.id))
             continue
+        for m in mapped:
+            mapped_objects.append(m)
+            if db_msg.run_id and m.type == "text" and m.role == "agent":
+                last_agent_text_by_run[db_msg.run_id] = m
+
+    # Крепим мету запуска к финальному текстовому ответу агента.
+    for run_id, meta in run_meta_by_id.items():
+        target = last_agent_text_by_run.get(run_id)
+        if target is None:
+            continue
+        target.tokens = meta["tokens"]
+        target.cost_rub = meta["cost_rub"]
+        target.latency_ms = meta["latency_ms"]
+
+    all_mapped = [m.model_dump(mode="json") for m in mapped_objects]
     
     # Если таблица session_messages пуста или не удалось распарсить контент,
     # используем fallback из таблицы runs (input_message / output_message).
@@ -405,6 +561,14 @@ async def list_messages(
                     "user_info": user_info
                 })
             if run.output_message:
+                fallback_tokens = run.total_tokens
+                if fallback_tokens is None and (run.prompt_tokens is not None or run.completion_tokens is not None):
+                    fallback_tokens = (run.prompt_tokens or 0) + (run.completion_tokens or 0)
+                fallback_latency_ms: int | None = None
+                if run.updated_at and run.created_at:
+                    fallback_delta = (run.updated_at - run.created_at).total_seconds()
+                    if fallback_delta > 0:
+                        fallback_latency_ms = int(fallback_delta * 1000)
                 fallback_messages.append({
                     "id": f"{run.id}:agent",
                     "session_id": dialog_id,
@@ -414,7 +578,10 @@ async def list_messages(
                     "content": run.output_message,
                     "status": "done",
                     "created_at": (run.updated_at or run.created_at).isoformat(),
-                    "user_info": user_info
+                    "user_info": user_info,
+                    "tokens": fallback_tokens or None,
+                    "cost_rub": float(run.cost_rub) if run.cost_rub is not None else None,
+                    "latency_ms": fallback_latency_ms,
                 })
 
         logger.info("list_messages_fallback_runs", count=len(fallback_messages))

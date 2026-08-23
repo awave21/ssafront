@@ -12,21 +12,12 @@
     <div
       class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
       :class="[
-        isTelegram
+        isMessenger
           ? 'bg-blue-100'
           : 'bg-gradient-to-br from-indigo-500 to-purple-600'
       ]"
     >
-      <!-- Telegram Icon -->
-      <svg
-        v-if="isTelegram"
-        class="w-5 h-5 text-blue-600"
-        viewBox="0 0 24 24"
-        fill="currentColor"
-      >
-        <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
-      </svg>
-      <!-- Default: User Initials -->
+      <Send v-if="isMessenger" class="w-5 h-5 text-blue-600" />
       <span v-else class="text-white font-bold text-sm">
         {{ userInitials }}
       </span>
@@ -43,8 +34,7 @@
       <div class="flex items-center gap-1.5 flex-wrap mt-0.5">
         <span
           v-if="secondaryIdentity"
-          class="text-xs truncate"
-          :class="[isTelegram ? 'text-blue-600' : 'text-slate-600']"
+          class="text-xs text-blue-600 truncate"
         >{{ secondaryIdentity }}</span>
 
         <span v-if="secondaryIdentity && integrationChannelLabel" class="text-slate-300 text-xs">·</span>
@@ -53,7 +43,7 @@
           {{ integrationChannelLabel }}
         </span>
 
-        <span class="text-slate-300 text-xs">·</span>
+        <span v-if="secondaryIdentity || integrationChannelLabel" class="text-slate-300 text-xs">·</span>
 
         <template v-if="isStreaming && isEnabled">
           <Loader2 class="w-3 h-3 text-indigo-600 animate-spin" />
@@ -74,7 +64,7 @@
     <button
       @click="confirmClearHistory"
       :disabled="isClearing"
-      class="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+      class="w-10 h-10 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
       title="Очистить историю диалога"
     >
       <Loader2 v-if="isClearing" class="w-4 h-4 animate-spin" />
@@ -137,13 +127,14 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ArrowLeft, Loader2, Trash2 } from 'lucide-vue-next'
+import { ArrowLeft, Loader2, Trash2, Send } from 'lucide-vue-next'
 import { useDialogs } from '../../composables/useDialogs'
 import { useMessages } from '../../composables/useMessages'
 import type { Agent } from '../../composables/useAgents'
 import type { Dialog } from '../../types/dialogs'
 import {
   isTelegramDialog,
+  resolveDialogPlatform,
   resolveDialogSecondaryIdentity,
   resolveDialogUserTitle,
   resolveIntegrationChannelLabel
@@ -180,8 +171,13 @@ const doClearHistory = async () => {
 // Computed — agent is active unless explicitly paused for this dialog
 const isEnabled = computed(() => (props.dialog?.agent_status ?? 'active') === 'active')
 
-const isTelegram = computed(() => {
-  return isTelegramDialog(props.dialog || {})
+const MESSENGER_PLATFORMS = new Set(['telegram', 'telegram_phone', 'whatsapp', 'max'])
+
+const isMessenger = computed(() => {
+  const dialog = props.dialog || {}
+  if (isTelegramDialog(dialog)) return true
+  const platform = resolveDialogPlatform(dialog)
+  return platform ? MESSENGER_PLATFORMS.has(platform) : false
 })
 
 const integrationChannelLabel = computed(() => {
