@@ -51,6 +51,7 @@ import {
   Table2,
   Database,
   GraduationCap,
+  Quote,
 } from 'lucide-vue-next'
 
 type SubNavItem = {
@@ -83,6 +84,7 @@ const items = computed<SubNavItem[]>(() => {
   const id = props.agentId
   const knowledgePath = `/agents/${id}/knowledge`
   const skillsPath = `/agents/${id}/skills`
+  const expertPath = `/agents/${id}/expert`
 
   const list: SubNavItem[] = [
     {
@@ -155,6 +157,16 @@ const items = computed<SubNavItem[]>(() => {
     icon: GraduationCap,
     to: skillsPath,
     matchPath: skillsPath,
+  })
+
+  // «Эксперт» — последний пункт источников знаний (стиль, фразы, опыт агента)
+  list.push({
+    id: 'expert',
+    label: 'Эксперт',
+    hint: 'Стиль, фразы и опыт агента',
+    icon: Quote,
+    to: expertPath,
+    matchPath: expertPath,
   })
 
   return list

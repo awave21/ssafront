@@ -37,6 +37,7 @@ import {
   Zap,
   GitBranch,
   Plug,
+  MessageCircle,
 } from 'lucide-vue-next'
 
 type TabDef = {
@@ -114,6 +115,15 @@ const tabs = computed<TabDef[]>(() => {
       match: [
         `/agents/${id}/channels`,
         `/agents/${id}/connections`,
+      ],
+    },
+    {
+      id: 'testing',
+      label: 'Тестирование',
+      path: `/agents/${id}/chat`,
+      icon: MessageCircle,
+      match: [
+        `/agents/${id}/chat`,
       ],
     },
   ]

@@ -5,24 +5,81 @@
     class="bg-sidebar border-r border-border h-screen lg:h-full lg:relative fixed inset-y-0 left-0 z-50 transition-all duration-300 ease-in-out flex flex-col overflow-hidden"
     :class="[isCollapsed ? 'w-16' : 'w-64']"
   >
-    <!-- Top Section (Logo) — h-[60px] совпадает с DashboardTopBar -->
-    <div class="h-[60px] px-3 border-b border-border shrink-0 flex items-center">
-      <div class="flex items-center" :class="[isCollapsed ? 'justify-center' : 'gap-3']">
-        <div class="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center shrink-0">
-          <span class="text-sidebar-primary-foreground font-bold text-xs">
-            {{ tenant?.name ? tenant.name.split(' ').map(word => word.charAt(0)).join('').toUpperCase().slice(0, 2) : 'ОР' }}
-          </span>
-        </div>
-        <span
-          v-show="!isCollapsed"
-          class="text-foreground font-bold text-lg whitespace-nowrap truncate"
-        >
-          {{ tenant?.name || '' }}
-        </span>
+    <!-- Top Section — переключатель агента -->
+    <div class="shrink-0 border-b border-border">
+      <!-- Свёрнутый вид: иконка-бот -->
+      <button
+        v-if="isCollapsed"
+        @click="goToCurrentAgent"
+        class="mx-auto my-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary/15"
+        title="Текущий агент"
+      >
+        <Bot class="h-4 w-4" />
+      </button>
+
+      <!-- Развёрнутый вид: AgentPicker -->
+      <div v-else class="relative px-3 pb-2.5 pt-3.5">
+        <DropdownMenuRoot>
+          <DropdownMenuTrigger as-child>
+            <button
+              class="flex w-full items-center gap-2.5 rounded-xl bg-primary/10 p-2.5 text-left outline outline-1 -outline-offset-1 outline-primary/20 transition-colors hover:bg-primary/15 focus:outline-primary/40"
+            >
+              <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white">
+                <Bot class="h-4 w-4 text-primary" />
+              </div>
+              <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span class="truncate text-[13px] font-semibold leading-[17px] text-primary">
+                  {{ currentAgent?.name || 'Выберите агента' }}
+                </span>
+                <span class="flex items-center gap-1.5">
+                  <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="statusDotClass" />
+                  <span class="truncate text-[11px] text-muted-foreground">{{ statusLabel }}</span>
+                </span>
+              </div>
+              <ChevronsUpDown class="h-3.5 w-3.5 shrink-0 text-primary" />
+            </button>
+          </DropdownMenuTrigger>
+
+          <DropdownMenuPortal>
+            <DropdownMenuContent
+              side="bottom"
+              align="start"
+              :side-offset="6"
+              class="z-[9999] max-h-80 min-w-[232px] overflow-y-auto rounded-xl border border-border bg-background p-1 shadow-lg"
+            >
+              <DropdownMenuItem
+                v-for="agent in agents"
+                :key="agent.id"
+                class="flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 outline-none transition-colors hover:bg-muted focus:bg-muted"
+                @select="selectAgent(agent.id)"
+              >
+                <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                  <Bot class="h-3.5 w-3.5 text-primary" />
+                </div>
+                <span class="min-w-0 flex-1 truncate text-sm text-foreground">{{ agent.name }}</span>
+                <Check v-if="agent.id === currentAgentId" class="h-4 w-4 shrink-0 text-primary" />
+              </DropdownMenuItem>
+
+              <div v-if="!agents.length" class="px-3 py-3 text-center text-sm text-muted-foreground">
+                Нет доступных агентов
+              </div>
+
+              <DropdownMenuSeparator class="my-1 h-px bg-border" />
+              <DropdownMenuItem
+                class="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-foreground outline-none transition-colors hover:bg-muted focus:bg-muted"
+                @select="router.push('/agents')"
+              >
+                <Bot class="h-4 w-4 text-muted-foreground" />
+                Все агенты
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenuPortal>
+        </DropdownMenuRoot>
+
         <!-- Mobile close button -->
         <button
           @click="emit('close')"
-          class="lg:hidden ml-auto p-2 rounded-lg text-foreground hover:bg-muted"
+          class="absolute right-4 top-1 rounded-lg p-1.5 text-foreground hover:bg-muted lg:hidden"
         >
           <X class="h-5 w-5" />
         </button>
@@ -32,27 +89,6 @@
     <!-- Middle Section (Scrollable Navigation) -->
     <nav class="flex-1 p-3 overflow-y-auto min-h-0">
       <ul class="flex flex-col gap-2">
-        <!-- Back Button for Agent Detail -->
-        <li v-if="isAgentDetail">
-          <TooltipRoot :disabled="!isCollapsed">
-            <TooltipTrigger as-child>
-              <button
-                @click="handleBackToAgents"
-                class="flex items-center text-sm font-medium rounded-md transition-colors text-sidebar-foreground hover:bg-muted"
-                :class="[isCollapsed ? 'w-10 h-10 justify-center' : 'w-full px-3 py-2 gap-3']"
-              >
-                <ArrowLeft class="w-5 h-5 shrink-0" />
-                <span v-show="!isCollapsed" class="whitespace-nowrap">Назад к агентам</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipPortal>
-              <TooltipContent side="right" :side-offset="12" class="z-[9999] rounded-md bg-foreground px-2.5 py-1.5 text-xs text-background shadow-md">
-                Назад к агентам
-              </TooltipContent>
-            </TooltipPortal>
-          </TooltipRoot>
-        </li>
-
         <li v-for="item in currentMenuItems" :key="item.id || item.name || item.path">
           <!-- Тумблер «Режим разработчика» -->
           <TooltipRoot v-if="item.type === 'dev-toggle'" :disabled="!isCollapsed">
@@ -201,7 +237,6 @@ import {
   Settings,
   X,
   LogOut,
-  ArrowLeft,
   Sparkles,
   Radio,
   Link,
@@ -212,12 +247,12 @@ import {
   KeyRound,
   GraduationCap,
   ChevronsUpDown,
+  Check,
   UsersRound,
   ListTree,
   GitBranch,
   Award,
   Wrench,
-  Quote,
 } from 'lucide-vue-next'
 import {
   TooltipRoot,
@@ -234,17 +269,24 @@ import {
 } from 'radix-vue'
 import { useLocalStorage } from '@vueuse/core'
 import { useAuth } from '../composables/useAuth'
+import { useAgents } from '../composables/useAgents'
 import { usePermissions } from '~/composables/usePermissions'
 import { useLayoutState } from '~/composables/useLayoutState'
 
 // Auth composable
-const { user, tenant, logout } = useAuth()
+const { user, logout } = useAuth()
 const route = useRoute()
 const router = useRouter()
 
 // Use shared layout state
 const { isCollapsed } = useLayoutState()
 const { hasScope } = usePermissions()
+
+// Список агентов для переключателя
+const { agents, fetchAgents } = useAgents()
+onMounted(() => {
+  if (!agents.value.length) fetchAgents().catch(() => {})
+})
 
 // Режим разработчика: прячет технические разделы за тумблером.
 const devMode = useLocalStorage('agent-sidebar-dev-mode', false)
@@ -274,67 +316,60 @@ const isAgentDetail = computed(() => {
   return route.name?.toString().startsWith('agents-id')
 })
 
-const handleBackToAgents = () => {
-  router.push('/agents')
+// --- Текущий агент (для переключателя и агентских пунктов) ---
+// В детальном виде агента источник истины — id из роута; иначе — последний выбранный.
+const persistedAgentId = useLocalStorage<string>('sidebar-current-agent-id', '')
+const routeAgentId = computed(() => (isAgentDetail.value ? String(route.params.id || '') : ''))
+watch(routeAgentId, (id) => { if (id) persistedAgentId.value = id }, { immediate: true })
+
+const currentAgentId = computed(() => routeAgentId.value || persistedAgentId.value || '')
+const currentAgent = computed(() => agents.value.find(a => a.id === currentAgentId.value) || null)
+
+const statusLabel = computed(() => {
+  const agent = currentAgent.value
+  if (!agent) return 'Не выбран'
+  if (agent.is_disabled) return 'Отключён'
+  return agent.status === 'published' ? 'Отвечает сам' : 'Черновик'
+})
+const statusDotClass = computed(() => {
+  const agent = currentAgent.value
+  if (!agent) return 'bg-slate-300'
+  if (agent.is_disabled) return 'bg-slate-400'
+  return agent.status === 'published' ? 'bg-green-500' : 'bg-amber-500'
+})
+
+const goToCurrentAgent = () => {
+  router.push(currentAgentId.value ? `/agents/${currentAgentId.value}` : '/agents')
 }
 
-const menuItems = [
-  {
-    name: 'Панель управления',
-    path: '/dashboard',
-    icon: LayoutDashboard
-  },
-  {
-    name: 'Мои агенты',
-    path: '/agents',
-    icon: Bot
-  },
-  {
-    name: 'Диалоги',
-    path: '/dialogs',
-    icon: MessageSquare
-  },
-  {
-    name: 'Пациенты',
-    path: '/patients',
-    icon: UsersRound
-  },
-  {
-    name: 'Аналитика',
-    path: '/analytics',
-    icon: Activity
-  },
-  {
-    name: 'Мотивация',
-    path: '/motivation',
-    icon: Award
-  },
-  {
-    name: 'История',
-    path: '/tool-calls-history',
-    icon: History
-  },
-  {
-    name: 'Платежи',
-    path: '/billing',
-    icon: CreditCard
-  },
-  {
-    name: 'Учётные данные',
-    path: '/credentials',
-    icon: Shield,
-    requiresScope: 'agents:write',
-  },
-  {
-    name: 'Настройки',
-    path: '/settings',
-    icon: Settings,
-    requiresScope: 'settings:write',
+const selectAgent = (id: string) => {
+  persistedAgentId.value = id
+  if (isAgentDetail.value) {
+    // остаёмся в том же подразделе, меняя id агента
+    const newPath = route.path.replace(/\/agents\/[^/]+/, `/agents/${id}`)
+    router.push(newPath)
+  } else {
+    router.push(`/agents/${id}`)
   }
+  emit('close')
+}
+
+// Глобальные пункты меню — видны всегда, в т.ч. внутри агента.
+const menuItems = [
+  { name: 'Панель управления', path: '/dashboard', icon: LayoutDashboard },
+  { name: 'Мои агенты', path: '/agents', icon: Bot },
+  { name: 'Диалоги', path: '/dialogs', icon: MessageSquare },
+  { name: 'Пациенты', path: '/patients', icon: UsersRound },
+  { name: 'Аналитика', path: '/analytics', icon: Activity },
+  { name: 'Мотивация', path: '/motivation', icon: Award },
+  { name: 'История', path: '/tool-calls-history', icon: History },
+  { name: 'Платежи', path: '/billing', icon: CreditCard },
+  { name: 'Учётные данные', path: '/credentials', icon: Shield, requiresScope: 'agents:write' },
+  { name: 'Настройки', path: '/settings', icon: Settings, requiresScope: 'settings:write' },
 ]
 
-// Порядок — как в классическом виде. group: 'dev' → в «Новом интерфейсе» прячется за тумблером
-// «Режим разработчика»; в классике всё отображается плоским списком в этом же порядке.
+// Агентские разделы: используются для dev-инструментов за тумблером в детальном виде.
+// «Эксперт» переехал в «Источники знаний» (AgentKnowledgeSubNav), в сайдбаре его нет.
 const agentMenuItems = [
   { id: 'prompt', name: 'Системный промпт', icon: Sparkles, path: (id: string) => `/agents/${id}/prompt` },
   { id: 'channels', name: 'Каналы', icon: Radio, path: (id: string) => `/agents/${id}/channels` },
@@ -342,44 +377,35 @@ const agentMenuItems = [
   { id: 'knowledge', name: 'База знаний', icon: Database, path: (id: string) => `/agents/${id}/knowledge` },
   { id: 'knowledge-graph', name: 'Граф знаний', icon: GitBranch, path: (id: string) => `/agents/${id}/knowledge/graph`, group: 'dev' },
   { id: 'scenarios', name: 'Сценарии', icon: ListTree, path: (id: string) => `/agents/${id}/scenarios`, group: 'dev' },
-  // «Эксперт» — витрина стиля (библиотека фраз, проверка, журнал). Отдельный
-  // раздел: к «Источникам знаний» отношения не имеет, навыки живут своим пунктом.
-  { id: 'expert', name: 'Эксперт', icon: Quote, path: (id: string) => `/agents/${id}/expert` },
   { id: 'skills', name: 'Навыки', icon: GraduationCap, path: (id: string) => `/agents/${id}/skills` },
   { id: 'functions', name: 'Функции', icon: Code, path: (id: string) => `/agents/${id}/functions`, group: 'dev' },
   { id: 'webhook', name: 'Webhook', icon: Webhook, path: (id: string) => `/agents/${id}/webhook`, group: 'dev' },
   { id: 'model', name: 'Модель', icon: Cpu, path: (id: string) => `/agents/${id}/model`, group: 'dev' },
   { id: 'analysis', name: 'Анализ', icon: Activity, path: (id: string) => `/agents/${id}/analysis`, group: 'dev' },
-  { id: 'chat', name: 'Чат', icon: MessageSquare, path: (id: string) => `/agents/${id}/chat` },
   { id: 'api-keys', name: 'API-ключи', icon: KeyRound, path: (id: string) => `/agents/${id}/api-keys`, requiresScope: 'settings:write', group: 'dev' },
   { id: 'settings', name: 'Настройки', icon: Settings, path: (id: string) => `/agents/${id}/settings`, requiresScope: 'agents:write' },
 ] as const
 
 const currentMenuItems = computed<any[]>(() => {
-  if (!isAgentDetail.value) {
-    return menuItems.filter(
-      item => !('requiresScope' in item && item.requiresScope) || hasScope(item.requiresScope),
-    )
+  // Глобальные пункты — всегда
+  const global = menuItems
+    .filter(item => !('requiresScope' in item && item.requiresScope) || hasScope(item.requiresScope))
+    .map(item => ({ ...item, id: item.path }))
+
+  let list: any[] = global
+
+  // В детальном виде агента — dev-инструменты за тумблером (не дублируя верхние вкладки)
+  if (isAgentDetail.value) {
+    const agentId = String(route.params.id)
+    const resolved = agentMenuItems
+      .filter(item => !('requiresScope' in item && (item as any).requiresScope) || hasScope((item as any).requiresScope))
+      .map(item => ({ ...item, path: item.path(agentId) }))
+    const DEV_IN_TOP_TABS = new Set(['functions', 'scenarios', 'webhook', 'model', 'api-keys'])
+    const dev = resolved.filter(i => (i as any).group === 'dev' && !DEV_IN_TOP_TABS.has((i as any).id))
+    list = [...list, { id: '__dev-toggle', type: 'dev-toggle' }]
+    if (devMode.value) list.push(...dev)
   }
-  const agentId = route.params.id as string
-  const resolved = agentMenuItems
-    .filter(item => !('requiresScope' in item && item.requiresScope) || hasScope((item as any).requiresScope))
-    .map(item => ({ ...item, path: item.path(agentId) }))
-  // Разделы агента вынесены в горизонтальные вкладки (AgentTabsNav).
-  // В sidebar видны только «базовые» пункты, которые не имеют отдельной вкладки —
-  // сейчас это «Чат» (тестовый чат агента). Плюс тумблер «Режим разработчика», а при
-  // включённом dev-mode — dev-разделы без дубля с верхней навигацией.
-  // Функции/Сценарии/Webhook/Модель/API-ключи — уже в top-tabs, не дублируем.
-  const DEV_IN_TOP_TABS = new Set(['functions', 'scenarios', 'webhook', 'model', 'api-keys'])
-  // «Эксперт» — единственный вход к материалу эксперта: навыки живут внутри него
-  // вкладкой, отдельным пунктом не дублируются (в классическом виде — как раньше).
-  const ALWAYS_VISIBLE_IN_NEW = new Set(['chat', 'expert'])
-  const alwaysVisible = resolved.filter(i => ALWAYS_VISIBLE_IN_NEW.has((i as any).id))
-  const dev = resolved.filter(
-    i => (i as any).group === 'dev' && !DEV_IN_TOP_TABS.has((i as any).id),
-  )
-  const list: any[] = [...alwaysVisible, { id: '__dev-toggle', type: 'dev-toggle' }]
-  if (devMode.value) list.push(...dev)
+
   return list
 })
 
