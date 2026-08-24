@@ -98,10 +98,15 @@ defineEmits<{
 /** Канонический набор блоков хорошо структурированного промпта. */
 const RECOMMENDED: RecommendedBlock[] = [
   { label: 'РОЛЬ', key: 'РОЛЬ', aliases: ['РОЛЬ', 'ПЕРСОНА', 'ROLE', 'PERSONA'], stub: '# РОЛЬ' },
-  { label: 'ПРАВИЛА', key: 'ПРАВИЛА', aliases: ['ПРАВИЛА', 'ИНСТРУКЦИИ', 'INSTRUCTIONS', 'RULES'], stub: '# ПРАВИЛА' },
-  { label: 'ИНСТРУМЕНТЫ', key: 'ИНСТРУМЕНТЫ', aliases: ['ИНСТРУМЕНТЫ', 'ТУЛЫ', 'TOOLS'], stub: '# ИНСТРУМЕНТЫ' },
+  { label: 'ЗАДАЧА', key: 'ЗАДАЧА', aliases: ['ЗАДАЧА', 'ЦЕЛЬ', 'GOAL', 'TASK', 'OBJECTIVE'], stub: '# ЗАДАЧА' },
   { label: 'КОНТЕКСТ', key: 'КОНТЕКСТ', aliases: ['КОНТЕКСТ', 'CONTEXT'], stub: '# КОНТЕКСТ' },
-  { label: 'ЕСЛИ НЕ ЗНАЮ', key: 'ЕСЛИ НЕ ЗНАЮ', aliases: ['ЕСЛИ НЕ ЗНАЮ', 'FALLBACK', 'НЕ ЗНАЮ'], stub: '# ЕСЛИ НЕ ЗНАЮ' },
+  { label: 'ПРАВИЛА', key: 'ПРАВИЛА', aliases: ['ПРАВИЛА', 'ИНСТРУКЦИИ', 'INSTRUCTIONS', 'RULES'], stub: '# ПРАВИЛА' },
+  { label: 'ОГРАНИЧЕНИЯ', key: 'ОГРАНИЧЕНИЯ', aliases: ['ОГРАНИЧЕНИЯ', 'ЗАПРЕТЫ', 'CONSTRAINTS', 'GUARDRAILS'], stub: '# ОГРАНИЧЕНИЯ' },
+  { label: 'ТОН ОБЩЕНИЯ', key: 'ТОН ОБЩЕНИЯ', aliases: ['ТОН ОБЩЕНИЯ', 'ТОН', 'СТИЛЬ', 'STYLE', 'TONE'], stub: '# ТОН ОБЩЕНИЯ' },
+  { label: 'ИНСТРУМЕНТЫ', key: 'ИНСТРУМЕНТЫ', aliases: ['ИНСТРУМЕНТЫ', 'ТУЛЫ', 'TOOLS'], stub: '# ИНСТРУМЕНТЫ' },
+  { label: 'ФОРМАТ ОТВЕТА', key: 'ФОРМАТ ОТВЕТА', aliases: ['ФОРМАТ ОТВЕТА', 'ФОРМАТ', 'OUTPUT FORMAT', 'FORMAT'], stub: '# ФОРМАТ ОТВЕТА' },
+  { label: 'ПРИМЕРЫ', key: 'ПРИМЕРЫ', aliases: ['ПРИМЕРЫ', 'EXAMPLES'], stub: '# ПРИМЕРЫ' },
+  { label: 'ЕСЛИ НЕ ЗНАЮ', key: 'ЕСЛИ НЕ ЗНАЮ', aliases: ['ЕСЛИ НЕ ЗНАЮ', 'НЕ ЗНАЮ', 'FALLBACK'], stub: '# ЕСЛИ НЕ ЗНАЮ' },
   { label: 'ЭСКАЛАЦИЯ', key: 'ЭСКАЛАЦИЯ', aliases: ['ЭСКАЛАЦИЯ', 'ПЕРЕДАЧА', 'ESCALATION'], stub: '# ЭСКАЛАЦИЯ' },
 ]
 
