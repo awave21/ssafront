@@ -624,16 +624,11 @@ const handleOutlineNavigate = (block: OutlineBlock) => {
 }
 
 const handleOutlineAdd = (block: RecommendedBlock) => {
-  const base = (form.value.system_prompt || '').replace(/\s+$/, '')
-  form.value.system_prompt = (base ? base + '\n\n' : '') + block.stub.replace(/\s+$/, '') + '\n'
-  toastSuccess('Блок добавлен', `Блок «${block.label}» вставлен в конец промпта`)
-  const textarea = findPromptTextarea()
-  if (textarea) {
-    nextTick(() => {
-      textarea.focus({ preventScroll: true })
-      textarea.scrollTop = textarea.scrollHeight
-    })
-  }
+  const snippet = block.stub.replace(/\s+$/, '')
+  const hasText = !!(form.value.system_prompt || '').trim()
+  // Вставляем на место курсора, отделяя блок пустой строкой сверху.
+  insertTextAtCursor((hasText ? '\n\n' : '') + snippet + '\n')
+  toastSuccess('Блок добавлен', `Блок «${block.label}» вставлен на место курсора`)
 }
 
 const addToolToPrompt = (name: string, description?: string) => {
