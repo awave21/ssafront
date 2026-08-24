@@ -50,7 +50,6 @@ import {
   BookOpen,
   Table2,
   Database,
-  GraduationCap,
   Quote,
 } from 'lucide-vue-next'
 
@@ -83,7 +82,6 @@ const route = useRoute()
 const items = computed<SubNavItem[]>(() => {
   const id = props.agentId
   const knowledgePath = `/agents/${id}/knowledge`
-  const skillsPath = `/agents/${id}/skills`
   const expertPath = `/agents/${id}/expert`
 
   const list: SubNavItem[] = [
@@ -150,16 +148,9 @@ const items = computed<SubNavItem[]>(() => {
     })
   }
 
-  list.push({
-    id: 'skills',
-    label: 'Навыки эксперта',
-    hint: 'Расширения поведения агента',
-    icon: GraduationCap,
-    to: skillsPath,
-    matchPath: skillsPath,
-  })
-
-  // «Эксперт» — последний пункт источников знаний (стиль, фразы, опыт агента)
+  // «Эксперт» — единая точка входа в навыки/стиль эксперта (список навыков живёт
+  // внутри на вкладке «Навыки»; отдельный пункт «Навыки эксперта» убран, чтобы не
+  // дублировать одно и то же в меню). Страницы /skills остаются как детальные роуты.
   list.push({
     id: 'expert',
     label: 'Эксперт',
