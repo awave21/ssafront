@@ -5,7 +5,21 @@
       ? 'fixed inset-0 z-[100] bg-slate-50 p-4 lg:p-6'
       : 'flex-1 min-h-0'"
   >
-    <div class="flex-1 flex flex-col bg-background rounded-md border border-border overflow-hidden min-w-0 min-h-0 order-2 lg:order-1">
+    <!-- Левая панель: оглавление блоков промпта -->
+    <div
+      v-if="!isPromptFullscreen"
+      class="w-full shrink-0 order-1 lg:order-1 lg:w-56 lg:overflow-y-auto custom-scrollbar"
+    >
+      <AgentPromptOutline
+        :text="form.system_prompt"
+        :can-edit="canEditAgents"
+        :active-char="outlineActiveChar"
+        @navigate="handleOutlineNavigate"
+        @add="handleOutlineAdd"
+      />
+    </div>
+
+    <div class="flex-1 flex flex-col bg-background rounded-md border border-border overflow-hidden min-w-0 min-h-0 order-2 lg:order-2">
       <div class="flex items-center justify-between px-3 lg:px-4 py-3 border-b border-border bg-background gap-2">
         <div class="flex items-center gap-2 overflow-x-auto">
           <!-- «Улучшить с AI» (обучение промпта) отключено: пересборка промпта по
@@ -302,7 +316,7 @@
     <!-- Right Sidebar for History -->
     <div
       v-if="isHistoryOpen"
-      class="w-full lg:w-80 shrink-0 flex flex-col bg-card rounded-md border border-border overflow-hidden order-1 lg:order-2"
+      class="w-full lg:w-80 shrink-0 flex flex-col bg-card rounded-md border border-border overflow-hidden order-3 lg:order-3"
     >
       <div class="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
         <h3 class="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">История промптов</h3>
@@ -370,6 +384,8 @@ import {
 } from '~/components/ui/menubar'
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '~/components/ui/command'
+import AgentPromptOutline from '~/components/agents/AgentPromptOutline.vue'
+import type { OutlineBlock, RecommendedBlock } from '~/components/agents/AgentPromptOutline.vue'
 
 const store = useAgentEditorStore()
 const { form, agent, isPromptFullscreen, promptSidebarToolGroups, promptHistory } = storeToRefs(store)
@@ -582,6 +598,41 @@ const insertTextAtCursor = (textToInsert: string, cursorOffset?: number) => {
     })
   } else {
     form.value.system_prompt += (form.value.system_prompt ? '\n' : '') + textToInsert
+  }
+}
+
+// --- Оглавление промпта (левая панель «Блоки промпта») ---
+const outlineActiveChar = ref<number | null>(null)
+
+const findPromptTextarea = () =>
+  document.querySelector(
+    'textarea[placeholder="Ты — дружелюбный и профессиональный ассистент клиники..."]'
+  ) as HTMLTextAreaElement | null
+
+const handleOutlineNavigate = (block: OutlineBlock) => {
+  outlineActiveChar.value = block.char
+  const textarea = findPromptTextarea()
+  if (!textarea) return
+  const text = form.value.system_prompt || ''
+  nextTick(() => {
+    textarea.focus({ preventScroll: true })
+    textarea.setSelectionRange(block.char, block.char + block.length)
+    // Приблизительная прокрутка к заголовку по доле символа в тексте.
+    const ratio = block.char / Math.max(text.length, 1)
+    textarea.scrollTop = Math.max(0, ratio * textarea.scrollHeight - textarea.clientHeight / 2)
+  })
+}
+
+const handleOutlineAdd = (block: RecommendedBlock) => {
+  const base = (form.value.system_prompt || '').replace(/\s+$/, '')
+  form.value.system_prompt = (base ? base + '\n\n' : '') + block.stub.replace(/\s+$/, '') + '\n'
+  toastSuccess('Блок добавлен', `Блок «${block.label}» вставлен в конец промпта`)
+  const textarea = findPromptTextarea()
+  if (textarea) {
+    nextTick(() => {
+      textarea.focus({ preventScroll: true })
+      textarea.scrollTop = textarea.scrollHeight
+    })
   }
 }
 
